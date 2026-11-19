@@ -36,7 +36,7 @@ These features of the editor work:
 
 - The model and thinking selectors.
 - The **Fast mode** selector (pi-rust extension, choices **Fast off** and **Fast on**). It shows only for models that have a fast mode. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
-- Tool call diffs and terminals.
+- Tool call diffs and terminals. See [Bash calls](#bash-calls).
 - Context usage.
 - Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
 - The pi-rust commands `/usage`, `/context`, `/extensions`, `/fast`, and `/reload`. They run in pi without a model call and answer with an agent message. [RPC mode](rpc.md#built-in-commands) describes each one. After `/reload` or an extension change, pi sends `available_commands_update` again.
@@ -45,6 +45,13 @@ These features of the editor work:
 When the model, the thinking level, or fast mode changes inside the session, for example through `/fast` or an extension, pi sends `config_option_update` with the new options.
 
 Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon.
+
+## Bash calls
+
+- A bash call is an `execute` tool call with terminal content and the `_meta` fields `terminal_info`, `terminal_output`, and `terminal_exit`. Zed shows them as a terminal. pi-acp sends the same fields.
+- Each bash call also has `rawInput` with the arguments, such as `{"command": "ls"}`, and `rawOutput` with `output` and, when the command ended, `exitCode`. The exit code is the one of the command, also in `terminal_exit`.
+- A client that does not send `clientCapabilities._meta.terminal_output: true`, such as Paseo, also gets the output as text content next to the terminal. Zed sends this capability, so it gets no copy of the output.
+- `session/load` replays bash calls in the same form, with the command from the stored tool call.
 
 ## Tool approval
 

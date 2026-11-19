@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -19,6 +20,7 @@ use tokio::task::JoinHandle;
 
 use super::auth::{TerminalLaunch, auth_methods, client_supports_terminal_auth};
 use super::backend::{AcpClient, BackendFactory, PiBackend};
+use super::bash::client_shows_terminal_output;
 use super::commands::{builtin_available_commands, commands_from_pi, load_slash_commands, mcp_command, merge_commands};
 use super::config::{
     FAST_MODE_CONFIG_ID, FAST_MODE_FAST, FAST_MODE_STANDARD, MODE_CONFIG_ID, MODEL_CONFIG_ID, THOUGHT_LEVEL_CONFIG_ID,
@@ -78,6 +80,8 @@ pub struct AcpAgent {
     last_session_cwd: Mutex<Option<String>>,
     restore_lock: tokio::sync::Mutex<()>,
     version_check: tokio::sync::Mutex<VersionCheck>,
+    /// The client renders bash output from terminal metadata, as `initialize` said.
+    terminal_output: AtomicBool,
     weak: Weak<AcpAgent>,
 }
 
@@ -99,6 +103,7 @@ impl AcpAgent {
             last_session_cwd: Mutex::new(None),
             restore_lock: tokio::sync::Mutex::new(()),
             version_check: tokio::sync::Mutex::new(check),
+            terminal_output: AtomicBool::new(false),
             weak: weak.clone(),
         })
     }
@@ -169,6 +174,7 @@ impl AcpAgent {
             backend,
             client: self.client.clone(),
             auto_title,
+            terminal_output: self.terminal_output.load(Ordering::SeqCst),
         });
         session.start_event_pump();
         lock(&self.sessions).insert(session_id.to_string(), session.clone());
@@ -193,7 +199,9 @@ impl AcpAgent {
     }
 
     pub fn initialize(&self, params: InitializeRequest) -> InitializeResponse {
-        let supports_meta = client_supports_terminal_auth(params.client_capabilities.meta.as_ref());
+        let client_meta = params.client_capabilities.meta.as_ref();
+        self.terminal_output.store(client_shows_terminal_output(client_meta), Ordering::SeqCst);
+        let supports_meta = client_supports_terminal_auth(client_meta);
         let prompt = PromptCapabilities::new().image(true).audio(false).embedded_context(self.options.embedded_context);
         let sessions =
             SessionCapabilities::new().list(SessionListCapabilities::new()).delete(SessionDeleteCapabilities::new());

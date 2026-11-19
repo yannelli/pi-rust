@@ -35,6 +35,7 @@ fn titled(session: &Arc<FakeBackend>, client: &Arc<FakeClient>, auto_title: bool
         backend: session.clone(),
         client: client.clone(),
         auto_title,
+        terminal_output: true,
     })
 }
 

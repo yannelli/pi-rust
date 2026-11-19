@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 
 use super::backend::PROMPT_ACCEPTED;
 use super::bash::{
-    bash_command, bash_exit_code, bash_output_delta, bash_result_text, bash_terminal_content, bash_terminal_exit_meta,
-    bash_terminal_info_meta, bash_terminal_output_meta, is_bash_tool,
+    bash_command, bash_exit_code, bash_output_delta, bash_raw_output, bash_result_text, bash_terminal_content,
+    bash_terminal_exit_meta, bash_terminal_info_meta, bash_terminal_output_meta, bash_text_content, is_bash_tool,
 };
 use super::session::{AcpSession, Snapshot, ToolPhase, text_chunk};
 use super::translate::{tool_kind, tool_result_to_text};
@@ -215,11 +215,13 @@ impl AcpSession {
         lock(&self.inner).bash_calls.insert(call.id.to_string());
         let title = bash_command(call.args).unwrap_or_else(|| call.tool_name.to_string());
         let cwd = self.cwd.display().to_string();
+        let raw_input = (!call.args.is_null()).then(|| call.args.clone());
         if call.create {
             let mut tool = ToolCall::new(call.id.to_string(), title)
                 .kind(ToolKind::Execute)
                 .status(call.status)
                 .content(bash_terminal_content(call.id))
+                .raw_input(raw_input)
                 .meta(bash_terminal_info_meta(call.id, &cwd));
             if let Some(locations) = call.locations {
                 tool = tool.locations(locations);
@@ -230,7 +232,8 @@ impl AcpSession {
             .title(title)
             .kind(ToolKind::Execute)
             .status(call.status)
-            .locations(call.locations);
+            .locations(call.locations)
+            .raw_input(raw_input);
         self.emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(call.id.to_string(), fields)));
     }
 
@@ -285,10 +288,16 @@ impl AcpSession {
         let sent = lock(&self.inner).bash_output.insert(id.to_string(), text.clone()).unwrap_or_default();
         let delta = bash_output_delta(&sent, &text);
         let mut meta = if delta.is_empty() { Default::default() } else { bash_terminal_output_meta(id, delta) };
-        if matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed) {
-            meta.extend(bash_terminal_exit_meta(id, bash_exit_code(result, is_error)));
+        let ended = matches!(status, ToolCallStatus::Completed | ToolCallStatus::Failed);
+        let exit_code = ended.then(|| bash_exit_code(result, is_error));
+        if let Some(code) = exit_code {
+            meta.extend(bash_terminal_exit_meta(id, code));
         }
-        let update = ToolCallUpdate::new(id.to_string(), ToolCallUpdateFields::new().status(status)).meta(meta);
+        let mut fields = ToolCallUpdateFields::new().status(status).raw_output(bash_raw_output(&text, exit_code));
+        if !self.terminal_output {
+            fields = fields.content(bash_text_content(id, &text));
+        }
+        let update = ToolCallUpdate::new(id.to_string(), fields).meta(meta);
         self.emit(SessionUpdate::ToolCallUpdate(update));
     }
 

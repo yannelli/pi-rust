@@ -1,9 +1,16 @@
 //! Bash tool calls as display-only terminals (upstream `translate/bash.ts`): Zed renders an
 //! `execute` tool with terminal content plus `terminal_info`, `terminal_output`, and
-//! `terminal_exit` metadata.
+//! `terminal_exit` metadata. Every client also gets `rawInput` and `rawOutput`, and clients that
+//! show no such terminals get the output as text content.
 
-use agent_client_protocol_schema::{Meta, Terminal, ToolCallContent};
-use serde_json::{Value, json};
+use agent_client_protocol_schema::{ContentBlock, Meta, Terminal, TextContent, ToolCallContent};
+use serde_json::{Map, Value, json};
+
+/// Whether the client renders the terminal metadata. Zed says so with
+/// `clientCapabilities._meta.terminal_output: true`; pi-acp sends the metadata to every client.
+pub fn client_shows_terminal_output(client_meta: Option<&Map<String, Value>>) -> bool {
+    client_meta.and_then(|meta| meta.get("terminal_output")).and_then(Value::as_bool) == Some(true)
+}
 
 pub fn is_bash_tool(tool_name: &str) -> bool {
     tool_name.eq_ignore_ascii_case("bash")
@@ -47,7 +54,9 @@ pub fn bash_result_text(result: &Value) -> String {
 /// The exit code a bash result reports; 1 for errors without one, else 0.
 pub fn bash_exit_code(result: &Value, is_error: bool) -> i64 {
     let details = result.get("details").cloned().unwrap_or(Value::Null);
-    let code = [details.get("exitCode"), result.get("exitCode"), details.get("code"), result.get("code")]
+    // pi's own bash tool reports the code in its structured content.
+    let structured = result.get("structuredContent").and_then(|structured| structured.get("exit_code"));
+    let code = [details.get("exitCode"), result.get("exitCode"), details.get("code"), result.get("code"), structured]
         .into_iter()
         .flatten()
         .find(|value| !value.is_null());
@@ -64,6 +73,24 @@ pub fn bash_output_delta<'a>(sent: &str, next: &'a str) -> &'a str {
 
 pub fn bash_terminal_content(tool_call_id: &str) -> Vec<ToolCallContent> {
     vec![ToolCallContent::Terminal(Terminal::new(tool_call_id.to_string()))]
+}
+
+/// The terminal and the output so far as text, for clients that show no display-only terminals.
+pub fn bash_text_content(tool_call_id: &str, output: &str) -> Vec<ToolCallContent> {
+    let mut content = bash_terminal_content(tool_call_id);
+    if !output.is_empty() {
+        content.push(ToolCallContent::from(ContentBlock::Text(TextContent::new(output))));
+    }
+    content
+}
+
+/// `rawOutput` of a bash call: the output so far, and the exit code once the command ended.
+pub fn bash_raw_output(output: &str, exit_code: Option<i64>) -> Value {
+    let mut value = json!({"output": output});
+    if let Some(code) = exit_code {
+        value["exitCode"] = json!(code);
+    }
+    value
 }
 
 fn meta(key: &str, value: Value) -> Meta {

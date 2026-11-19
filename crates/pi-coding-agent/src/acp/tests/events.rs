@@ -8,7 +8,7 @@ use agent_client_protocol_schema::{
 use serde_json::{Value, json};
 
 use super::{FakeBackend, FakeClient, session_with, settle};
-use crate::acp::session::AcpSession;
+use crate::acp::session::{AcpSession, AcpSessionParams};
 use std::sync::Arc;
 
 struct Fixture {
@@ -48,37 +48,90 @@ async fn text_and_thinking_deltas_become_chunks() {
     );
 }
 
+/// A bash call through `session` that prints "running", then "running done", with `result` at the end.
+async fn run_bash(session: &AcpSession, is_error: bool, result: Value) {
+    session
+        .handle_pi_event(
+            json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}}),
+        )
+        .await;
+    session
+        .handle_pi_event(json!({"type": "tool_execution_update", "toolCallId": "t1",
+            "partialResult": {"content": [{"type": "text", "text": "running"}]}}))
+        .await;
+    session
+        .handle_pi_event(
+            json!({"type": "tool_execution_end", "toolCallId": "t1", "isError": is_error, "result": result}),
+        )
+        .await;
+}
+
 #[tokio::test]
 async fn bash_tool_calls_render_as_terminals() {
     let f = fixture(&here());
     let cwd = here().display().to_string();
-    f.emit(json!({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}}))
-        .await;
-    f.emit(json!({"type": "tool_execution_update", "toolCallId": "t1",
-        "partialResult": {"content": [{"type": "text", "text": "running"}]}}))
-        .await;
-    f.emit(json!({"type": "tool_execution_end", "toolCallId": "t1", "isError": false,
-        "result": {"content": [{"type": "text", "text": "running done"}]}}))
-        .await;
+    run_bash(&f.session, false, json!({"content": [{"type": "text", "text": "running done"}]})).await;
     let updates = f.client.update_bodies();
     assert_eq!(
         updates[0],
         json!({"sessionUpdate": "tool_call", "toolCallId": "t1", "title": "ls", "kind": "execute",
             "status": "in_progress", "content": [{"type": "terminal", "terminalId": "t1"}],
-            "_meta": {"terminal_info": {"terminal_id": "t1", "cwd": cwd}}})
+            "rawInput": {"command": "ls"}, "_meta": {"terminal_info": {"terminal_id": "t1", "cwd": cwd}}})
     );
     assert_eq!(
         updates[1],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "in_progress",
-            "_meta": {"terminal_output": {"terminal_id": "t1", "data": "running"}}})
+            "rawOutput": {"output": "running"}, "_meta": {"terminal_output": {"terminal_id": "t1", "data": "running"}}})
     );
     assert_eq!(
         updates[2],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "rawOutput": {"output": "running done", "exitCode": 0},
             "_meta": {"terminal_output": {"terminal_id": "t1", "data": " done"},
                 "terminal_exit": {"terminal_id": "t1", "exit_code": 0, "signal": null}}})
     );
     assert_eq!(updates.len(), 3);
+}
+
+#[tokio::test]
+async fn clients_without_terminal_output_get_bash_output_as_text() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = AcpSession::new(AcpSessionParams {
+        session_id: "s1".into(),
+        cwd: here(),
+        backend,
+        client: client.clone(),
+        auto_title: false,
+        terminal_output: false,
+    });
+    // pi's own bash tool reports the exit code in its structured content.
+    let failed = json!({"content": [{"type": "text", "text": "running done\n\nCommand exited with code 2"}],
+        "structuredContent": {"output": "running done", "exit_code": 2}, "isError": true});
+    run_bash(&session, true, failed).await;
+    let updates = client.update_bodies();
+    let text = |text: &str| json!({"type": "content", "content": {"type": "text", "text": text}});
+    let terminal = json!({"type": "terminal", "terminalId": "t1"});
+    assert_eq!(updates[0]["rawInput"], json!({"command": "ls"}));
+    assert_eq!(updates[1]["content"], json!([terminal, text("running")]));
+    assert_eq!(updates[1]["rawOutput"], json!({"output": "running"}));
+    let output = "running done\n\nCommand exited with code 2";
+    assert_eq!(
+        (updates[2]["status"].clone(), updates[2]["content"].clone()),
+        (json!("failed"), json!([terminal, text(output)]))
+    );
+    assert_eq!(updates[2]["rawOutput"], json!({"output": output, "exitCode": 2}));
+    assert_eq!(updates[2]["_meta"]["terminal_exit"]["exit_code"], 2);
+}
+
+#[test]
+fn only_clients_that_say_so_render_terminal_metadata() {
+    use crate::acp::bash::client_shows_terminal_output;
+    let meta = |value: Value| value.as_object().cloned();
+    assert!(client_shows_terminal_output(meta(json!({"terminal_output": true, "terminal-auth": true})).as_ref()));
+    for value in [json!({}), json!({"terminal_output": "true"}), json!({"terminal-auth": true})] {
+        assert!(!client_shows_terminal_output(meta(value).as_ref()));
+    }
+    assert!(!client_shows_terminal_output(None));
 }
 
 #[tokio::test]

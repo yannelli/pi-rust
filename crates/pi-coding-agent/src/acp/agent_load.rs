@@ -1,6 +1,8 @@
 //! `session/load` (upstream `PiAcpAgent.loadSession`): reopen the stored pi session and replay
 //! its conversation as session updates.
 
+use std::collections::HashMap;
+
 use agent_client_protocol_schema::{
     ContentBlock, ContentChunk, LoadSessionRequest, SessionNotification, SessionUpdate, TextContent, ToolCall,
     ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
@@ -9,8 +11,8 @@ use serde_json::{Value, json};
 
 use super::agent::{AcpAgent, Handled};
 use super::bash::{
-    bash_command, bash_exit_code, bash_result_text, bash_terminal_content, bash_terminal_exit_meta,
-    bash_terminal_info_meta, bash_terminal_output_meta, is_bash_tool,
+    bash_command, bash_exit_code, bash_raw_output, bash_result_text, bash_terminal_content, bash_terminal_exit_meta,
+    bash_terminal_info_meta, bash_terminal_output_meta, bash_text_content, is_bash_tool,
 };
 use super::config::session_configuration;
 use super::errors::{AcpResult, internal_failure, invalid_params};
@@ -22,37 +24,60 @@ fn text(text: String) -> ContentChunk {
     ContentChunk::new(ContentBlock::Text(TextContent::new(text)))
 }
 
-/// The session updates that replay one stored message.
-pub fn replay_message(message: &Value, cwd: &str) -> Vec<SessionUpdate> {
-    match message["role"].as_str().unwrap_or_default() {
-        "user" => {
-            let content = normalize_pi_message_text(&message["content"]);
-            (!content.is_empty()).then(|| SessionUpdate::UserMessageChunk(text(content))).into_iter().collect()
+/// The session updates that replay a stored conversation. `terminal_output` says whether the
+/// client renders bash output from terminal metadata (see `client_shows_terminal_output`).
+pub fn replay_messages(messages: &[Value], cwd: &str, terminal_output: bool) -> Vec<SessionUpdate> {
+    // Tool results carry no arguments; the assistant message that called the tool does.
+    let mut arguments: HashMap<&str, &Value> = HashMap::new();
+    let mut updates = Vec::new();
+    for message in messages {
+        match message["role"].as_str().unwrap_or_default() {
+            "user" => {
+                let content = normalize_pi_message_text(&message["content"]);
+                updates.extend((!content.is_empty()).then(|| SessionUpdate::UserMessageChunk(text(content))));
+            }
+            "assistant" => {
+                for block in message["content"].as_array().into_iter().flatten() {
+                    if let (true, Some(id)) = (block["type"] == "toolCall", block["id"].as_str()) {
+                        arguments.insert(id, &block["arguments"]);
+                    }
+                }
+                let content = normalize_pi_assistant_text(&message["content"]);
+                updates.extend((!content.is_empty()).then(|| SessionUpdate::AgentMessageChunk(text(content))));
+            }
+            "toolResult" => {
+                let call = message["toolCallId"].as_str().and_then(|id| arguments.get(id)).copied();
+                updates.extend(replay_tool_result(message, call, cwd, terminal_output));
+            }
+            _ => {}
         }
-        "assistant" => {
-            let content = normalize_pi_assistant_text(&message["content"]);
-            (!content.is_empty()).then(|| SessionUpdate::AgentMessageChunk(text(content))).into_iter().collect()
-        }
-        "toolResult" => replay_tool_result(message, cwd),
-        _ => Vec::new(),
     }
+    updates
 }
 
-fn replay_tool_result(message: &Value, cwd: &str) -> Vec<SessionUpdate> {
+fn replay_tool_result(message: &Value, args: Option<&Value>, cwd: &str, terminal_output: bool) -> Vec<SessionUpdate> {
     let name = message["toolName"].as_str().unwrap_or("tool").to_string();
     let id = message["toolCallId"].as_str().map(String::from).unwrap_or_else(uuid_v4);
     let is_error = message["isError"].as_bool().unwrap_or(false);
     let status = if is_error { ToolCallStatus::Failed } else { ToolCallStatus::Completed };
     if is_bash_tool(&name) {
         let output = bash_result_text(message);
-        let call = ToolCall::new(id.clone(), bash_command(message).unwrap_or_else(|| name.clone()))
+        let exit_code = bash_exit_code(message, is_error);
+        let title = args.and_then(bash_command).or_else(|| bash_command(message)).unwrap_or_else(|| name.clone());
+        let call = ToolCall::new(id.clone(), title)
             .kind(ToolKind::Execute)
             .status(ToolCallStatus::Completed)
             .content(bash_terminal_content(&id))
+            .raw_input(args.cloned())
             .meta(bash_terminal_info_meta(&id, cwd));
         let mut meta = if output.is_empty() { Default::default() } else { bash_terminal_output_meta(&id, &output) };
-        meta.extend(bash_terminal_exit_meta(&id, bash_exit_code(message, is_error)));
-        let update = ToolCallUpdate::new(id, ToolCallUpdateFields::new().status(status)).meta(meta);
+        meta.extend(bash_terminal_exit_meta(&id, exit_code));
+        let mut fields =
+            ToolCallUpdateFields::new().status(status).raw_output(bash_raw_output(&output, Some(exit_code)));
+        if !terminal_output {
+            fields = fields.content(bash_text_content(&id, &output));
+        }
+        let update = ToolCallUpdate::new(id, fields).meta(meta);
         return vec![SessionUpdate::ToolCall(call), SessionUpdate::ToolCallUpdate(update)];
     }
     let call = ToolCall::new(id.clone(), name.clone())
@@ -97,10 +122,9 @@ impl AcpAgent {
                 return Err(internal_failure(&error));
             }
         };
-        for message in data["messages"].as_array().into_iter().flatten() {
-            for update in replay_message(message, &cwd) {
-                self.client().session_update(SessionNotification::new(session_id.clone(), update));
-            }
+        let messages = data["messages"].as_array().map(Vec::as_slice).unwrap_or_default();
+        for update in replay_messages(messages, &cwd, session.terminal_output) {
+            self.client().session_update(SessionNotification::new(session_id.clone(), update));
         }
         let response = json!({
             "configOptions": configuration.config_options,

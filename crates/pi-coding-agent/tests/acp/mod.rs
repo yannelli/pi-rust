@@ -4,6 +4,7 @@
 use crate::agent_session::{http_mock, mcp_fake};
 use crate::offline_guard;
 
+mod bash;
 mod binary;
 mod client;
 mod mcp_servers;

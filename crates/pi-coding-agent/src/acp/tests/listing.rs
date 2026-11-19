@@ -82,12 +82,14 @@ async fn lists_sessions_and_load_replays_history() {
     assert_eq!(crate::acp::errors::code(&error), -32602);
 }
 
-#[tokio::test]
-async fn load_replays_tool_results_as_tool_calls() {
+/// Load a conversation with one bash call and one failed read, after `initialize` with `client_meta`.
+async fn replayed(client_meta: Value) -> Vec<Value> {
     let env = Env::new();
     let config = FakeConfig {
         messages: json!({"messages": [
-            {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash", "args": {"command": "echo hello"},
+            {"role": "assistant", "content": [{"type": "toolCall", "id": "call_1", "name": "bash",
+                "arguments": {"command": "echo hello"}}], "stopReason": "toolUse"},
+            {"role": "toolResult", "toolCallId": "call_1", "toolName": "bash",
                 "content": [{"type": "text", "text": "hello from bash"}], "isError": false},
             {"role": "toolResult", "toolCallId": "call_2", "toolName": "read", "content": [{"type": "text", "text": "file"}],
                 "isError": true},
@@ -96,21 +98,30 @@ async fn load_replays_tool_results_as_tool_calls() {
     };
     let (client, backend) = (FakeClient::new(), FakeBackend::with(config));
     let agent = env.agent(client.clone(), FakeFactory::returning(backend));
+    let initialize = json!({"protocolVersion": 1, "clientCapabilities": {"terminal": true, "_meta": client_meta}});
+    agent.initialize(serde_json::from_value(initialize).unwrap());
     agent.store.upsert("s1", "/tmp/project", "/tmp/s.jsonl");
     let request = serde_json::from_value(json!({"sessionId": "s1", "cwd": "/tmp/project", "mcpServers": []})).unwrap();
     agent.load_session(request).await.unwrap();
-    let bodies = client.update_bodies();
+    client.update_bodies()
+}
+
+#[tokio::test]
+async fn load_replays_tool_results_as_tool_calls() {
+    let terminal = json!([{"type": "terminal", "terminalId": "call_1"}]);
+    let meta = json!({"terminal_output": {"terminal_id": "call_1", "data": "hello from bash"},
+        "terminal_exit": {"terminal_id": "call_1", "exit_code": 0, "signal": null}});
+    let bodies = replayed(json!({"terminal_output": true, "terminal-auth": true})).await;
     assert_eq!(
         bodies[0],
         json!({"sessionUpdate": "tool_call", "toolCallId": "call_1", "title": "echo hello", "kind": "execute",
-            "status": "completed", "content": [{"type": "terminal", "terminalId": "call_1"}],
+            "status": "completed", "content": terminal, "rawInput": {"command": "echo hello"},
             "_meta": {"terminal_info": {"terminal_id": "call_1", "cwd": "/tmp/project"}}})
     );
     assert_eq!(
         bodies[1],
         json!({"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "completed",
-            "_meta": {"terminal_output": {"terminal_id": "call_1", "data": "hello from bash"},
-                "terminal_exit": {"terminal_id": "call_1", "exit_code": 0, "signal": null}}})
+            "rawOutput": {"output": "hello from bash", "exitCode": 0}, "_meta": meta})
     );
     assert_eq!(
         (bodies[2]["kind"].clone(), bodies[2]["rawOutput"]["toolCallId"].clone()),
@@ -118,6 +129,16 @@ async fn load_replays_tool_results_as_tool_calls() {
     );
     assert_eq!(bodies[3]["status"], "failed");
     assert_eq!(bodies[3]["content"], json!([{"type": "content", "content": {"type": "text", "text": "file"}}]));
+
+    // A client that shows no terminals from metadata, such as Paseo, also gets the output as text.
+    let bodies = replayed(json!({})).await;
+    assert_eq!(bodies[0]["rawInput"], json!({"command": "echo hello"}));
+    assert_eq!(
+        bodies[1]["content"],
+        json!([{"type": "terminal", "terminalId": "call_1"},
+            {"type": "content", "content": {"type": "text", "text": "hello from bash"}}])
+    );
+    assert_eq!(bodies[1]["rawOutput"], json!({"output": "hello from bash", "exitCode": 0}));
 }
 
 #[test]

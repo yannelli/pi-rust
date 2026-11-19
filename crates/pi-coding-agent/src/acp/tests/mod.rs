@@ -457,6 +457,7 @@ pub fn session_with(backend: &Arc<FakeBackend>, client: &Arc<FakeClient>, cwd: &
         backend: backend.clone(),
         client: client.clone(),
         auto_title: false,
+        terminal_output: true,
     })
 }
 

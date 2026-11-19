@@ -100,6 +100,8 @@ pub struct AcpSessionParams {
     pub client: Arc<dyn AcpClient>,
     /// Name the session after its first prompt (new sessions, not loaded ones).
     pub auto_title: bool,
+    /// The client renders bash output from terminal metadata (see `client_shows_terminal_output`).
+    pub terminal_output: bool,
 }
 
 pub struct AcpSession {
@@ -107,6 +109,7 @@ pub struct AcpSession {
     pub cwd: PathBuf,
     pub backend: Arc<dyn PiBackend>,
     client: Arc<dyn AcpClient>,
+    pub(super) terminal_output: bool,
     pub(super) inner: Mutex<Inner>,
     titles: tokio::sync::Mutex<()>,
     weak: Weak<AcpSession>,
@@ -168,6 +171,7 @@ impl AcpSession {
             cwd: params.cwd,
             backend: params.backend,
             client: params.client,
+            terminal_output: params.terminal_output,
             inner: Mutex::new(inner),
             titles: tokio::sync::Mutex::new(()),
             weak: weak.clone(),
