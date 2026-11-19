@@ -273,10 +273,13 @@ async fn extension_select_and_confirm_become_permission_requests() {
         .await;
     settle().await;
     let confirm = serde_json::to_value(&f.client.permission_requests.lock().unwrap()[1]).unwrap();
+    assert_eq!(confirm["toolCall"]["title"], "Clear session? All messages will be lost.");
+    assert_eq!(confirm["toolCall"]["rawInput"]["message"], "All messages will be lost.");
     assert_eq!(
         confirm["options"],
-        json!([{"optionId": "yes", "name": "Yes", "kind": "allow_once"}, {"optionId": "no", "name": "No", "kind": "reject_once"}])
+        json!([{"optionId": "yes", "name": "Yes", "kind": "allow_once"}, {"optionId": "no", "name": "No", "kind": "allow_once"}])
     );
+    assert!(!auto_accepted_by_paseo(&request) && !auto_accepted_by_paseo(&confirm));
     f.client.answer(Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)));
     f.emit(json!({"type": "extension_ui_request", "id": "ui-5", "method": "confirm", "title": "Continue?"})).await;
     settle().await;
@@ -292,6 +295,32 @@ async fn extension_select_and_confirm_become_permission_requests() {
             json!({"id": "ui-6", "cancelled": true}),
         ]
     );
+}
+
+/// Paseo's Auto Accept answers with the first allow option, unless two options share an allow
+/// kind; then the request is a choice for the user (`isACPChooserRequest` in its ACP adapter).
+fn auto_accepted_by_paseo(request: &Value) -> bool {
+    let kinds: Vec<&str> = request["options"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|option| option["kind"].as_str())
+        .filter(|kind| kind.starts_with("allow"))
+        .collect();
+    let choice = kinds.iter().enumerate().any(|(index, kind)| kinds[..index].contains(kind));
+    !choice && !kinds.is_empty()
+}
+
+#[test]
+fn dialog_titles_carry_the_message() {
+    use crate::acp::extension_ui_tool_call;
+    let title = |event: Value| serde_json::to_value(extension_ui_tool_call("1", &event)).unwrap()["title"].clone();
+    let event = |title: &str, message: &str| json!({"method": "confirm", "title": title, "message": message});
+    assert_eq!(title(event("Delete file", "src/main.rs")), "Delete file: src/main.rs");
+    assert_eq!(title(event("Continue?", "The tests fail.")), "Continue? The tests fail.");
+    assert_eq!(title(event("", "Only a message")), "Only a message");
+    assert_eq!(title(json!({"method": "select", "title": "Pick one", "options": ["a"]})), "Pick one");
+    assert_eq!(title(json!({"method": "confirm"})), "Pi confirm");
 }
 
 #[tokio::test]

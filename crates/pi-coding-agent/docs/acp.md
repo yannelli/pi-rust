@@ -72,6 +72,13 @@ The Mode selector controls tool approval. It is independent of the Thinking sele
 - New connections start in Auto. pi does not save Bypass.
 - A permission request for an MCP server tool has `toolCall._meta.piAcp.mcp` with the server name and the server's own tool name, as `{"server": "...", "tool": "..."}`. The tool title is the pi tool name, which can differ. A call that another tool made, for example from `codemode`, has `_meta.piAcp.parentToolCallId`. Other tools, resource tools, and tools of other sources with the same name have no `mcp` field. The request contains no argument values in `_meta`. The `initialize` response has `_meta.piAcp.exactMcpPreapproval: true` when pi sends these fields and accepts `clientMcpExposure`.
 
+## Extension dialogs
+
+- An extension `select` or `confirm` becomes a `session/request_permission` request. The tool call title is the dialog title, followed by the message of a `confirm`. `rawInput` has the fields of the dialog.
+- The options of a `select` are its choices. A `confirm` has the options **Yes** and **No**.
+- All options of a dialog have the kind `allow_once`. Clients that approve tool calls on their own, such as Paseo with **Auto Accept**, take a request whose options share an allow kind for a choice and leave it to the user. Before, **Yes** had `allow_once` and **No** `reject_once`, so Auto Accept answered **Yes**. A `select` with one option is still answered by such clients.
+- `input` and `editor` dialogs are cancelled with a note. `notify` becomes an agent message with `_meta.piAcp.notify.level`.
+
 ## MCP servers from the client
 
 - pi connects the stdio and `http` `mcpServers` of `session/new` and `session/load` for that session, next to the servers of the pi `mcp.json` files. Project trust still applies to `.pi/mcp.json` only. The `initialize` response has `mcpCapabilities.http: true`.
