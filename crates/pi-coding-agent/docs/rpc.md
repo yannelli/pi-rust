@@ -33,6 +33,8 @@ A `/reload` or an extension change binds the extensions again. Extensions from `
 
 `get_commands` lists these commands after `/mcp` and before the extension commands, in the shape of the `/mcp` entry: `source` is `extension`, and `sourceInfo.path` is `builtin:<name>` with `sourceInfo.source` `builtin`.
 
+An extension command with the same name as a built-in command replaces it: the prompt runs the extension command, and `get_commands` lists only the extension command. Upstream pi has no built-in RPC commands, so its extension commands always run.
+
 ## agentInvoked
 
 The `prompt` response data has `agentInvoked` when pi knows whether the prompt reached the model:

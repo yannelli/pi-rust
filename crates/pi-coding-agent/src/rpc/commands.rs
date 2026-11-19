@@ -263,7 +263,9 @@ impl RpcServer {
                 ok(id, "set_session_name", None)
             }
             RpcCommand::GetCommands => {
+                // A built-in command that an extension command replaces is not listed.
                 let mut commands = super::builtins::builtin_commands(session);
+                commands.retain(|command| !session.is_extension_command(&format!("/{}", command.name)));
                 if let Some(host) = &self.host {
                     commands.extend(host.commands(session));
                 }
@@ -275,8 +277,12 @@ impl RpcServer {
     }
 
     /// Run `text` when it is a built-in command of [`HEADLESS_COMMANDS`] or [`SESSION_COMMANDS`];
-    /// returns its output.
+    /// returns its output. An extension command of the same name runs instead, as upstream has
+    /// no built-in RPC commands.
     async fn run_builtin_command(&self, session: &Arc<AgentSession>, text: &str) -> Option<String> {
+        if session.is_extension_command(text) {
+            return None;
+        }
         let (name, args) = split_slash_command(text)?;
         if SESSION_COMMANDS.iter().any(|command| command.name == name) {
             return run_session_command(session, name, args);

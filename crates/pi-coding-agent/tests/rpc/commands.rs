@@ -97,3 +97,36 @@ async fn extension_commands_still_run_after_a_reload() {
     assert!(rpc.records_of("extension_error").is_empty(), "{:?}", rpc.records_of("extension_error"));
     rpc.finish().await;
 }
+
+const NAME: &str = r#"export default function (pi) {
+	pi.registerCommand("name", {
+		description: "Name from the extension",
+		handler: async (args, ctx) => { ctx.ui.notify(`extension name ${args}`, "info"); },
+	});
+}
+"#;
+
+/// Upstream has no built-in RPC commands, so an extension command of the same name runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_extension_command_replaces_the_builtin_command_of_its_name() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, app| {
+        let path = h.cwd.join("name.ts");
+        std::fs::write(&path, NAME).unwrap();
+        app.resources.extension_sources = vec![path.display().to_string()];
+    })
+    .await;
+    let data = rpc.data(json!({"id": "n", "type": "prompt", "message": "/name Release notes"})).await;
+    assert_eq!(data, json!({"disposition": "handled", "agentInvoked": false}));
+    rpc.wait_for(|record| record["method"] == "notify" && record["message"] == "extension name Release notes").await;
+    assert!(rpc.records_of("command_output").is_empty(), "the built-in /name did not run");
+    assert_eq!(rpc.data(json!({"id": "s", "type": "get_state"})).await.get("sessionName"), None);
+
+    let commands = rpc.data(json!({"id": "c", "type": "get_commands"})).await["commands"].clone();
+    let named: Vec<_> = commands.as_array().unwrap().iter().filter(|command| command["name"] == "name").collect();
+    assert_eq!(named.len(), 1, "{commands}");
+    assert_eq!(named[0]["description"], "Name from the extension");
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "session"), "{commands}");
+    assert_eq!(run_command(&mut rpc, "x", "/fast on").await, "Fast mode on (the current model has no fast mode)");
+    rpc.finish().await;
+}

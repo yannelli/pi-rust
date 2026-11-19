@@ -442,6 +442,14 @@ impl AgentSession {
         prompt_options_to_json(&self.effective_prompt_options())
     }
 
+    /// Whether `text` is `/name args` for a command an extension registered, which a prompt of
+    /// `text` runs (see [`Self::try_extension_command`]).
+    pub(crate) fn is_extension_command(&self, text: &str) -> bool {
+        let Some(body) = text.strip_prefix('/') else { return false };
+        let name = body.split_once(' ').map_or(body, |(name, _)| name);
+        self.extension_runner().is_some_and(|runner| runner.registry().command(name).is_some())
+    }
+
     /// Run `/name args` when an extension registered `name`; true when it did.
     pub(crate) async fn try_extension_command(&self, text: &str) -> bool {
         let Some(runner) = self.extension_runner() else { return false };
