@@ -15,6 +15,7 @@ pub mod usage;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
@@ -63,6 +64,8 @@ pub struct SessionManager {
     /// Target id to `(label, timestamp of the label change)`.
     labels: HashMap<String, (String, String)>,
     leaf: Option<String>,
+    /// See [`Self::generation`].
+    generation: u64,
 }
 
 /// `<agent>/sessions/--<cwd with separators replaced>--`, as in the TypeScript pi.
@@ -70,6 +73,11 @@ pub fn session_dir(agent_dir: &Path, cwd: &Path) -> PathBuf {
     let cwd = resolve_path(cwd).display().to_string();
     let trimmed = cwd.strip_prefix(['/', '\\']).unwrap_or(&cwd);
     resolve_path(agent_dir).join("sessions").join(format!("--{}--", trimmed.replace(['/', '\\', ':'], "-")))
+}
+
+fn next_generation() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl SessionManager {
@@ -93,6 +101,7 @@ impl SessionManager {
             by_id: HashMap::new(),
             labels: HashMap::new(),
             leaf: None,
+            generation: next_generation(),
         };
         if persist && !manager.session_dir.as_os_str().is_empty() {
             // Best effort: writes create missing directories again.
@@ -230,6 +239,7 @@ impl SessionManager {
             _ => FileEntry::new(),
         };
         self.entries.clear();
+        self.generation = next_generation();
         self.by_id.clear();
         self.labels.clear();
         self.leaf = None;
@@ -259,6 +269,7 @@ impl SessionManager {
             .filter(|entry| entry.get("type").and_then(Value::as_str) != Some("session"))
             .map(Entry::from_raw)
             .collect();
+        self.generation = next_generation();
         self.build_index();
         if migrated {
             self.rewrite_file()?;
@@ -392,6 +403,12 @@ impl SessionManager {
 
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Changes when the entries are replaced instead of appended to, so a reader holding the
+    /// first entries of a generation only needs the ones after them.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn leaf_id(&self) -> Option<&str> {

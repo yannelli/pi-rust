@@ -29,7 +29,17 @@ impl SessionManager {
     }
 
     fn append_typed(&mut self, kind: &str, fields: Vec<(&str, Option<Value>)>) -> anyhow::Result<String> {
-        let id = self.new_entry_id();
+        self.append_typed_as(None, kind, fields)
+    }
+
+    /// `id` when no entry has it yet, else a new id.
+    fn append_typed_as(
+        &mut self,
+        id: Option<String>,
+        kind: &str,
+        fields: Vec<(&str, Option<Value>)>,
+    ) -> anyhow::Result<String> {
+        let id = id.filter(|id| self.get_entry(id).is_none()).unwrap_or_else(|| self.new_entry_id());
         let mut all = vec![
             ("type", Some(Value::String(kind.into()))),
             ("id", Some(Value::String(id))),
@@ -43,6 +53,12 @@ impl SessionManager {
     /// Append a message. Summary roles belong in compaction and branch summary entries instead.
     pub fn append_message(&mut self, message: &Message) -> anyhow::Result<String> {
         self.append_typed("message", vec![("message", to_json(message))])
+    }
+
+    /// [`Self::append_message`] under `id`, an id from [`Self::new_entry_id`] that no entry
+    /// took since; otherwise under a new id.
+    pub(crate) fn append_message_as(&mut self, id: Option<String>, message: &Message) -> anyhow::Result<String> {
+        self.append_typed_as(id, "message", vec![("message", to_json(message))])
     }
 
     pub fn append_thinking_level_change(&mut self, level: ThinkingLevel) -> anyhow::Result<String> {

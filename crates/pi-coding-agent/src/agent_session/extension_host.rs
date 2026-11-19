@@ -40,6 +40,9 @@ pub(crate) struct ExtensionState {
     after_start: Mutex<Vec<Value>>,
     /// `Some` while `session_start` handlers run; holds the session a handler switches to.
     start_switch: Mutex<Option<Option<PathBuf>>>,
+    /// The entry id for the message of the last `message_end`. The extension runtime puts the
+    /// message object its handlers saw in that entry, as upstream entries hold that object.
+    pub(crate) message_entry_id: Mutex<Option<String>>,
 }
 
 impl Default for ExtensionState {
@@ -55,6 +58,7 @@ impl Default for ExtensionState {
             bindings: Mutex::default(),
             after_start: Mutex::default(),
             start_switch: Mutex::default(),
+            message_entry_id: Mutex::default(),
         }
     }
 }

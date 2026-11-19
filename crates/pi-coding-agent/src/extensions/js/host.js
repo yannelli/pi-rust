@@ -245,7 +245,7 @@ export function createHost(config) {
 		emit: (event) => runner.emit(typeof event.signal === "number" ? { ...event, signal: signalFor(event.signal) } : event),
 		emitToolCall: (event) => runner.emitToolCall(event),
 		emitToolResult: (event) => runner.emitToolResult(event),
-		emitMessageEnd: (event) => runner.emitMessageEnd(event),
+		emitMessageEnd: (event, entryId) => runner.emitMessageEnd(event, optional(entryId)),
 		emitMessageDisplay: (event) => runner.emitMessageDisplay(event),
 		emitContext: (messages) => runner.emitContext(messages),
 		emitBeforeProviderRequest: (payload) => runner.emitBeforeProviderRequest(payload),

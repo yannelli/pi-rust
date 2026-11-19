@@ -86,6 +86,7 @@ impl AgentSession {
     }
 
     fn persist_message_end(&self, message: &Message) {
+        let reserved = lock(&self.extensions.message_entry_id).take();
         let entry_id = match message {
             Message::Custom(custom) if custom.role == CustomMessage::ROLE => {
                 let parsed = CustomMessage::from_message(message);
@@ -101,7 +102,7 @@ impl AgentSession {
                 })
             }
             Message::Custom(_) => None,
-            _ => report_save_error(self.session_manager().append_message(message)),
+            _ => report_save_error(self.session_manager().append_message_as(reserved, message)),
         };
         match message {
             Message::Assistant(assistant) => {

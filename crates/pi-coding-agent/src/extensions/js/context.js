@@ -4,6 +4,45 @@
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor, signalId } from "./bridge.js";
 import { createUiContext } from "./ui.js";
 
+// pi-rust: the entries of this runtime's own session (target 0). `getEntries()` copies only the
+// ones appended since its last call, and all of them again when Rust reports a new generation.
+let ownEntries = { generation: null, entries: [] };
+// Message objects that `message_end` handlers saw, by the id of their entry: as upstream's entry,
+// the copied entry holds the object. Weak, since only code that keeps the object can compare it.
+const endedMessages = new Map();
+let pruneAbove = 64;
+
+/** The entry `entryId` of this runtime's session holds `message` once it is copied. */
+export function linkEndedMessage(entryId, message) {
+	endedMessages.set(entryId, new WeakRef(message));
+	if (endedMessages.size <= pruneAbove) return;
+	for (const [id, ref] of endedMessages) if (!ref.deref()) endedMessages.delete(id);
+	pruneAbove = Math.max(64, endedMessages.size * 2);
+}
+
+function withEndedMessage(entry) {
+	const ref = endedMessages.get(entry.id);
+	if (!ref) return entry;
+	// Entries arrive in message order, so earlier messages without an entry never get one.
+	for (const id of endedMessages.keys()) {
+		endedMessages.delete(id);
+		if (id === entry.id) break;
+	}
+	const message = ref.deref();
+	if (message && entry.type === "message" && entry.message?.role === message.role) entry.message = message;
+	return entry;
+}
+
+function ownSessionEntries() {
+	const { generation, entries } = ownEntries;
+	const added = call("session.read", 0, "entriesSince", generation, entries.length);
+	if (added.generation !== generation || added.start !== entries.length) {
+		ownEntries = { generation: added.generation, entries: [] };
+	}
+	for (const entry of added.entries) ownEntries.entries.push(withEndedMessage(entry));
+	return ownEntries.entries;
+}
+
 /** `ctx.sessionManager`: read-only views of the session tree. */
 export function createSessionManagerView(target) {
 	const read = (method, ...args) => optional(call("session.read", target, method, ...args));
@@ -21,7 +60,7 @@ export function createSessionManagerView(target) {
 		buildSessionProjection: () => read("buildSessionProjection"),
 		buildSessionContext: () => read("buildSessionContext"),
 		getHeader: () => read("getHeader") ?? null,
-		getEntries: () => read("getEntries") ?? [],
+		getEntries: () => (target === 0 ? ownSessionEntries().slice() : (read("getEntries") ?? [])),
 		getTree: () => read("getTree") ?? [],
 		getSessionName: () => read("getSessionName"),
 	};
