@@ -58,6 +58,48 @@ async fn extensions_run_with_the_client_as_their_ui() {
     rpc.finish().await;
 }
 
+const NOTES: &str = r#"export default function (pi) {
+	pi.registerCommand("notes", { handler: async () => {
+		pi.sendMessage({ customType: "unset", content: "no display" });
+		pi.sendMessage({ customType: "hidden", content: "hidden", display: false });
+		pi.sendMessage({ customType: "shown", content: "shown", display: true });
+	} });
+}
+"#;
+
+/// `display` of each custom message in `messages` (`Null` when left out), by `customType`.
+fn displays<'a>(messages: impl Iterator<Item = &'a Value>) -> Vec<(String, Option<Value>)> {
+    let custom = messages.filter(|message| message.get("customType").is_some());
+    custom.map(|message| (message["customType"].as_str().unwrap().into(), message.get("display").cloned())).collect()
+}
+
+/// As upstream, a custom message sent without `display` leaves it out of its events, entry, and
+/// messages; Paseo hides only `display: false`.
+#[tokio::test(flavor = "multi_thread")]
+async fn custom_messages_without_display_leave_it_out() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, _| {
+        std::fs::create_dir_all(h.agent_dir.join("extensions")).unwrap();
+        std::fs::write(h.agent_dir.join("extensions/notes.ts"), NOTES).unwrap();
+    })
+    .await;
+    rpc.data(json!({"id": "n", "type": "prompt", "message": "/notes"})).await;
+    rpc.wait_for(|_| rpc.records_of("message_end").len() == 3).await;
+    let expected = vec![
+        ("unset".to_string(), None),
+        ("hidden".to_string(), Some(json!(false))),
+        ("shown".to_string(), Some(json!(true))),
+    ];
+    let ended = rpc.records_of("message_end");
+    assert_eq!(displays(ended.iter().map(|record| &record["message"])), expected);
+
+    let entries = rpc.data(json!({"id": "e", "type": "get_entries"})).await["entries"].clone();
+    assert_eq!(displays(entries.as_array().unwrap().iter()), expected);
+    let messages = rpc.data(json!({"id": "m", "type": "get_messages"})).await["messages"].clone();
+    assert_eq!(displays(messages.as_array().unwrap().iter()), expected);
+    rpc.finish().await;
+}
+
 const KICK: &str = r#"export default function (pi) {
 	// Extension prompts wait here, so the command answers before their run starts.
 	pi.on("input", async (event) => {

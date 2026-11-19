@@ -196,7 +196,7 @@ fn write_manager(manager: &mut SessionManager, method: &str, args: &Args) -> Res
         "appendSessionInfo" => id(manager.append_session_info(&args.str(2)?)),
         "appendCustomMessageEntry" => {
             let content: UserContent = json_arg(args, 3)?;
-            id(manager.append_custom_message_entry(&args.str(2)?, content, args.bool(4), some_json(args, 5)))
+            id(manager.append_custom_message_entry(&args.str(2)?, content, Some(args.bool(4)), some_json(args, 5)))
         }
         "appendContextEdit" => id(manager.append_context_edit(&args.str(2)?, some_json(args, 3))),
         "appendLabelChange" => id(manager.append_label_change(&args.str(2)?, args.opt_str(3).as_deref())),

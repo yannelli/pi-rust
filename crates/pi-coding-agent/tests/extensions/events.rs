@@ -373,7 +373,7 @@ fn custom_message(custom_type: &str, text: &str) -> CustomMessage {
     CustomMessage {
         custom_type: custom_type.into(),
         content: UserContent::Text(text.into()),
-        display: true,
+        display: Some(true),
         details: None,
         timestamp: 0,
     }

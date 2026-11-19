@@ -177,7 +177,7 @@ impl InteractiveMode {
             self.setup_autocomplete_provider();
         }
         match entry.data() {
-            crate::session::entry::EntryData::CustomMessage(custom) if custom.display => {
+            crate::session::entry::EntryData::CustomMessage(custom) if custom.display.unwrap_or(false) => {
                 let message = crate::messages::create_custom_message(
                     &custom.custom_type,
                     custom.content.clone(),

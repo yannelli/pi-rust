@@ -523,7 +523,7 @@ impl AgentSession {
                 CustomMessage {
                     custom_type: message["customType"].as_str().unwrap_or_default().to_string(),
                     content,
-                    display: message["display"].as_bool().unwrap_or(false),
+                    display: message["display"].as_bool(),
                     details: Some(message["details"].clone()).filter(|details| !details.is_null()),
                     timestamp: pi_ai::now_ms(),
                 }

@@ -174,19 +174,20 @@ impl SessionManager {
         self.append_typed("session_info", vec![("name", Some(json!(sanitized.trim())))])
     }
 
-    /// An extension message that enters the LLM context as a `custom` role message.
+    /// An extension message that enters the LLM context as a `custom` role message. With
+    /// `display` `None` the entry has no `display` field, as upstream writes an unset one.
     pub fn append_custom_message_entry(
         &mut self,
         custom_type: &str,
         content: UserContent,
-        display: bool,
+        display: Option<bool>,
         details: Option<Value>,
     ) -> anyhow::Result<String> {
         let entry = Entry::build(vec![
             ("type", Some(json!("custom_message"))),
             ("customType", Some(json!(custom_type))),
             ("content", to_json(&content)),
-            ("display", Some(json!(display))),
+            ("display", display.map(Value::Bool)),
             ("details", details),
             ("id", Some(json!(self.new_entry_id()))),
             ("parentId", Some(self.parent_value())),
