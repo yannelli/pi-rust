@@ -41,7 +41,7 @@ When the child exits early, pi shows one error notification, fails the pending r
 
 Params: `protocolVersion` (integer), `piVersion`, `cwd`, `agentDir`, `extensionPath`, `platform` (`process.platform`), `mode` (`tui`, `rpc`, `json`, `print`), `hasUI`, `flags`, `features`.
 
-`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, `ui.chatStyle`, `contextEntries` (a `resources_discover` result can have `contextEntries`, see [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries)), `toolResultExpander`, and `providerAuth` (the `before_provider_auth` event, see [pi-rust events](#pi-rust-events)). Older hosts send no `features`; treat a missing list as empty.
+`features` lists the optional parts of this document that the host speaks: `toolRenderers`, `render.spinner`, `render.refresh`, `ui.getTheme`, `theme_changed`, `ui.working`, `ui.chatStyle`, `contextEntries` (a `resources_discover` result can have `contextEntries`, see [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries)), `toolResultExpander`, `providerAuth` (the `before_provider_auth` event, see [pi-rust events](#pi-rust-events)), and `contextEvents` (see [Events](#events)). Older hosts send no `features`; treat a missing list as empty.
 
 pi loads extensions before it binds the session. `mode` and `hasUI` are the mode the session binds the extensions in (`tui` in interactive mode, and `rpc`, `json`, or `print` for the CLI modes). Hosts that do not know the mode at load time, for example SDK sessions, send `print` and `false`. The ctx snapshot of each event has the current values. `flags` holds the values pi has at load time and is empty for flags this extension declares in its answer. Read flag values from `ctx.flags` or with `flags.get`.
 
@@ -55,6 +55,7 @@ Result:
 | `shortcuts` | `[{ shortcut, description? }]` (for example `ctrl+shift+t`) |
 | `flags` | `[{ name, description?, type: "boolean" \| "string", default? }]` |
 | `events` | event names to receive, for example `["session_start", "tool_call"]` |
+| `contextEvents` | the names among `turn_end` and `agent_before_settle` whose `context` the extension reads, for example `["agent_before_settle"]`; `[]` for none, see [Events](#events) |
 | `providers` | `[{ name, config }]`, see `provider.register` |
 | `virtualModels` | `[definition]`, see `virtualModel.register` |
 | `autocomplete` | `[{ triggerCharacters: ["@"] }]` |
@@ -76,7 +77,7 @@ All fields except `protocolVersion` are optional.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `event` | `{ name, event, ctx }` | `{ result?, patch? }` |
+| `event` | `{ name, event, ctx, eventId? }` (`eventId` for `turn_end` and `agent_before_settle`) | `{ result?, patch? }` |
 | `tool.execute` | `{ toolCallId, name, params, ctx }` | `{ content, details?, isError? }` |
 | `command.run` | `{ name, args, ctx }` | `null` |
 | `command.complete` | `{ name, prefix }` | `[{ value, label?, description? }]` or `null` |
@@ -100,6 +101,8 @@ Notifications: `initialized`, `exit`, `events.message` `{ channel, data }`, `ui.
 ### Events
 
 pi sends `event` only for the names the extension subscribed to. `footer_changed` and `theme_changed` are no events: they subscribe to the `footer.changed` and `theme.changed` notifications. `event` is the event object of the JavaScript API without functions and without `signal`. When the event signal aborts, pi sends `$/cancelRequest`.
+
+The `context` of `turn_end` and `agent_before_settle` is a preview of the whole model context (`contextEntries`, `contextMessages`, `llmMessages`, `pendingMessages`, `canContinue`), so it is as large as the context. pi sends it only for the events in `contextEvents`. An extension that sends no `contextEvents` gets it with every `turn_end` and `agent_before_settle` (feature `contextEvents`; older hosts always send it). Without it, a handler can ask for it with `event.context` and the `eventId` of the request, so pi builds the context only for handlers that need it.
 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
 - `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
@@ -249,6 +252,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 | `session.sendMessage` | `{ customType, content, display?, details?, deliverAs?: "steer" \| "followUp" \| "nextTurn", triggerTurn? }` | `null` |
 | `session.sendUserMessage` | `{ content, deliverAs? }` | `null` |
 | `session.appendEntry` | `{ customType, data? }` | `null` |
+| `event.context` | `{ eventId }` | the `context` of the `turn_end` or `agent_before_settle` event whose request is in progress (feature `contextEvents`) |
 | `session.getEntries` | `{}` | entries |
 | `session.getBranch` | `{ fromId? }` | entries from the root to the leaf |
 | `session.setName` / `session.getName` | `{ name }` / `{}` | `null` / string or `null` |
@@ -340,7 +344,7 @@ Line-based surfaces: a widget (surface `widget:<key>`), the footer (surface `foo
 
 ### Later registrations
 
-`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, `register.toolRenderer` takes one `toolRenderers` entry, and `register.toolResultExpander` takes a `toolResultExpander` object. They answer `null`.
+`register.tool` (one tool definition), `register.command`, `register.shortcut`, `register.flag`, `register.events` (`{ events, contextEvents? }`, adds subscriptions), and `register.autocomplete` take the same shapes as the `initialize` result fields. `register.messageRenderer` and `register.entryRenderer` take `{ customType }`, `register.toolRenderer` takes one `toolRenderers` entry, and `register.toolResultExpander` takes a `toolResultExpander` object. They answer `null`.
 
 ## Example transcript
 

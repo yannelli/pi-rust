@@ -15,7 +15,7 @@ const KILL_MS = 2000;
 const CTX_WAIT_MS = 30000;
 const POLL_MS = 250;
 /** Optional protocol parts this host speaks, sent in `initialize` as `features`. */
-const FEATURES = ["toolRenderers", "render.spinner", "render.refresh", "ui.getTheme", "theme_changed", "ui.working", "ui.chatStyle", "contextEntries", "toolResultExpander", "providerAuth"];
+const FEATURES = ["toolRenderers", "render.spinner", "render.refresh", "ui.getTheme", "theme_changed", "ui.working", "ui.chatStyle", "contextEntries", "toolResultExpander", "providerAuth", "contextEvents"];
 /** What `footer_changed` and `theme_changed` subscribers watch: the reader and the notification. */
 const WATCHED = {
 	footer: { read: () => footerJson(), notify: (value) => ["footer.changed", { footer: value }] },
@@ -68,6 +68,12 @@ function createState(pi, spec) {
 		tools: new Set(),
 		oauthProviders: new Set(),
 		events: new Set(),
+		// Boundary events whose `context` the extension reads; `null` until it says, then it gets
+		// `context` for these only.
+		contextEvents: null,
+		// Boundary events the child handles now, by `eventId`, for `event.context`.
+		boundaryEvents: new Map(),
+		nextEventId: 1,
 		flags: [],
 		triggers: [],
 		updates: new Map(),

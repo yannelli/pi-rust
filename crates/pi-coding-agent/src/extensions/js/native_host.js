@@ -270,6 +270,11 @@ export function hostMethods(state) {
 		"session.sendUserMessage": (p) => (pi.sendUserMessage(p.content, { deliverAs: p.deliverAs }), done()),
 		"session.appendEntry": (p) => (pi.appendEntry(p.customType, p.data), done()),
 		"session.getEntries": () => toJson(ctx().sessionManager.getEntries()),
+		"event.context": (p) => {
+			const event = state.boundaryEvents.get(p.eventId);
+			if (!event) throw rpcError(-32602, `No turn_end or agent_before_settle event ${p.eventId} is in progress`);
+			return toJson(event.context);
+		},
 		"session.getBranch": (p) => toJson(ctx().sessionManager.getBranch(p.fromId)),
 		"session.setName": (p) => (pi.setSessionName(p.name), done()),
 		"session.getName": () => toJson(pi.getSessionName()),

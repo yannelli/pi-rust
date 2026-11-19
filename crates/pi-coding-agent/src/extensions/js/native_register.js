@@ -20,6 +20,20 @@ function textResult(text) {
 	return { content: [{ type: "text", text }], isError: true };
 }
 
+/** Events whose `context` is a preview of the whole model context. */
+const BOUNDARY_EVENTS = new Set(["turn_end", "agent_before_settle"]);
+
+/**
+ * `event` as JSON for the child. pi-rust: a boundary event leaves out `context`, unless the child
+ * lists the event in `contextEvents` or never sent that list (older SDKs read it unasked).
+ */
+function eventJson(state, name, event) {
+	if (!BOUNDARY_EVENTS.has(name) || state.contextEvents === null || state.contextEvents.has(name)) return toJson(event);
+	const rest = {};
+	for (const key of Object.keys(event)) if (key !== "context") rest[key] = event[key];
+	return toJson(rest);
+}
+
 /** The register functions over `state`, for `initialize` and the `register.*` requests. */
 export function createRegistrar(state) {
 	const { pi } = state;
@@ -31,7 +45,19 @@ export function createRegistrar(state) {
 
 	const forward = async (name, event, ctx) => {
 		if (state.dead) return undefined;
-		const reply = await request("event", { name, event: toJson(event), ctx: withCtx(ctx) }, { signal: event?.signal });
+		const params = { name, event: eventJson(state, name, event), ctx: withCtx(ctx) };
+		// pi-rust: while it handles a boundary event, the child can ask for its context (`event.context`).
+		const eventId = BOUNDARY_EVENTS.has(name) ? state.nextEventId++ : undefined;
+		if (eventId !== undefined) {
+			params.eventId = eventId;
+			state.boundaryEvents.set(eventId, event);
+		}
+		let reply;
+		try {
+			reply = await request("event", params, { signal: event?.signal });
+		} finally {
+			if (eventId !== undefined) state.boundaryEvents.delete(eventId);
+		}
 		const result = reply?.result ?? undefined;
 		const patch = reply?.patch;
 		if (patch === undefined || patch === null) return result;
@@ -104,6 +130,12 @@ export function createRegistrar(state) {
 		pi.registerFlag(name, { description, type: type ?? "boolean", default: value });
 	};
 
+	const contextEvents = (names) => {
+		if (!Array.isArray(names)) return;
+		state.contextEvents ??= new Set();
+		for (const name of names) if (typeof name === "string") state.contextEvents.add(name);
+	};
+
 	const events = (names) => {
 		for (const name of names ?? []) {
 			if (state.events.has(name)) continue;
@@ -153,6 +185,7 @@ export function createRegistrar(state) {
 			if (!toolRenderer(definition)) state.log("toolRenderers: skipped an entry without a toolName");
 		}
 		if (init.toolResultExpander && !expander(init.toolResultExpander)) state.log("toolResultExpander: skipped, detailsKey is not a non-empty string");
+		contextEvents(init.contextEvents);
 		events(init.events);
 	};
 
@@ -161,7 +194,7 @@ export function createRegistrar(state) {
 		"register.command": (p) => (command(p), null),
 		"register.shortcut": (p) => (shortcut(p), null),
 		"register.flag": (p) => (flag(p), null),
-		"register.events": (p) => (events(p.events), null),
+		"register.events": (p) => (contextEvents(p.contextEvents), events(p.events), null),
 		"register.autocomplete": (p) => (autocomplete(p), null),
 		"register.messageRenderer": (p) => (content.message(p.customType), null),
 		"register.entryRenderer": (p) => (content.entry(p.customType), null),

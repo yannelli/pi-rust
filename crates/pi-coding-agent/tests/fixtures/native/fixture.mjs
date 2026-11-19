@@ -60,6 +60,8 @@ const registrations = {
 		"agent_before_settle", "after_provider_response", "message_display", ...(process.env.NATIVE_FOOTER === "off" ? [] : ["footer_changed"]),
 	],
 	autocomplete: [{ triggerCharacters: ["@"] }],
+	// Unset: an SDK without `contextEvents`, which gets `context` with every boundary event.
+	...(process.env.NATIVE_CONTEXT_EVENTS ? { contextEvents: JSON.parse(process.env.NATIVE_CONTEXT_EVENTS) } : {}),
 };
 
 async function executeTool(id, { toolCallId, name, params }) {
@@ -92,7 +94,7 @@ async function initialize(params) {
 const order = [];
 let orderArmed = false;
 
-async function onEvent({ name, event, ctx }) {
+async function onEvent({ name, event, ctx, eventId }) {
 	if (name === "after_provider_response") {
 		if (!orderArmed) return {};
 		await new Promise((resolve) => setTimeout(resolve, 300));
@@ -107,7 +109,10 @@ async function onEvent({ name, event, ctx }) {
 	if (name === "agent_before_settle") {
 		if (!settleArmed) return {};
 		settleArmed = false;
-		const entry = { type: "custom", customType: "native-settle", data: { outcome: event.outcome, before: event.entries.length } };
+		const context = event.context === undefined ? null : event.context.contextMessages.length;
+		// Without the pushed context, ask pi for it while the event is in progress.
+		const asked = event.context === undefined ? (await request("event.context", { eventId })).contextMessages.length : null;
+		const entry = { type: "custom", customType: "native-settle", data: { outcome: event.outcome, before: event.entries.length, context, asked } };
 		return { result: { entries: [...event.entries, entry], continue: false } };
 	}
 	if (name === "message_display") {
