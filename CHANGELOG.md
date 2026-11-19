@@ -2,6 +2,16 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.17] - 2026-11-19
+
+### Added
+
+- **tui:** Ctrl+Enter interrupts the agent and sends the queued and typed messages now ([683fbe9](https://github.com/yannelli/pi-rust/commit/683fbe9b79f462fdcc7a17358e7916e8036ba3c5))
+
+### Fixed
+
+- **coding-agent:** answer abort within two seconds and keep run events in order ([0bb835f](https://github.com/yannelli/pi-rust/commit/0bb835fc9995922cc26c23efb57402b1514497d7))
+
 ## [0.12.16] - 2026-11-18
 
 ### Added
