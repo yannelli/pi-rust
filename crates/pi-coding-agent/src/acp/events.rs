@@ -3,8 +3,8 @@
 use std::path::Path;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Diff, SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ContentBlock, ContentChunk, Diff, MessageId, SessionUpdate, TextContent, ToolCall, ToolCallContent,
+    ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
 use serde_json::{Value, json};
 
@@ -13,7 +13,7 @@ use super::bash::{
     bash_command, bash_exit_code, bash_output_delta, bash_raw_output, bash_result_text, bash_terminal_content,
     bash_terminal_exit_meta, bash_terminal_info_meta, bash_terminal_output_meta, bash_text_content, is_bash_tool,
 };
-use super::session::{AcpSession, Snapshot, ToolPhase, text_chunk};
+use super::session::{AcpSession, Snapshot, ToolPhase, notice};
 use super::translate::{tool_kind, tool_result_to_text};
 use crate::agent_session::lock;
 use crate::session::ids::{iso_timestamp, uuid_v4};
@@ -111,8 +111,12 @@ impl AcpSession {
                 None => self.publish_title(None, Some(iso_timestamp())),
                 Some(_) => {}
             },
+            "message_start" if event["message"]["role"] == "assistant" => {
+                lock(&self.inner).assistant_message = Some(uuid_v4());
+            }
             "message_update" => self.on_message_update(&event["assistantMessageEvent"]),
             "message_end" if event["message"]["role"] == "assistant" => {
+                lock(&self.inner).assistant_message = None;
                 self.record_assistant_message(&event["message"]);
                 self.publish_context_usage().await;
             }
@@ -125,15 +129,15 @@ impl AcpSession {
                 let session = self.this();
                 tokio::spawn(async move { session.handle_extension_ui_request(event).await });
             }
-            "auto_retry_start" => self.emit(text_chunk(format_auto_retry_message(&event))),
-            "auto_retry_end" => self.emit(text_chunk("Retry finished, resuming.")),
-            "auto_compaction_start" => self.emit(text_chunk(COMPACTION_START)),
-            "auto_compaction_end" => self.emit(text_chunk(COMPACTION_END)),
-            "compaction_start" if event["reason"] != "manual" => self.emit(text_chunk(COMPACTION_START)),
+            "auto_retry_start" => self.emit(notice(format_auto_retry_message(&event))),
+            "auto_retry_end" => self.emit(notice("Retry finished, resuming.")),
+            "auto_compaction_start" => self.emit(notice(COMPACTION_START)),
+            "auto_compaction_end" => self.emit(notice(COMPACTION_END)),
+            "compaction_start" if event["reason"] != "manual" => self.emit(notice(COMPACTION_START)),
             "compaction_end"
                 if event["reason"] != "manual" && event["aborted"] != true && event.get("errorMessage").is_none() =>
             {
-                self.emit(text_chunk(COMPACTION_END))
+                self.emit(notice(COMPACTION_END))
             }
             "fast_mode_changed" | "thinking_level_changed" => {
                 let _ = self.publish_config_options(false).await;
@@ -150,15 +154,22 @@ impl AcpSession {
         }
     }
 
+    /// The message id of the assistant message pi streams, so its chunks stay apart from notices.
+    fn assistant_message_id(&self) -> MessageId {
+        MessageId::new(lock(&self.inner).assistant_message.get_or_insert_with(uuid_v4).clone())
+    }
+
     fn on_message_update(&self, event: &Value) {
         let kind = event["type"].as_str().unwrap_or_default();
         match (kind, event.get("delta").and_then(Value::as_str)) {
             ("text_delta", Some(delta)) => {
                 let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(delta)));
+                let chunk = chunk.message_id(self.assistant_message_id());
                 return self.emit(SessionUpdate::AgentMessageChunk(chunk));
             }
             ("thinking_delta", Some(delta)) => {
                 let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(delta)));
+                let chunk = chunk.message_id(self.assistant_message_id());
                 return self.emit(SessionUpdate::AgentThoughtChunk(chunk));
             }
             _ => {}

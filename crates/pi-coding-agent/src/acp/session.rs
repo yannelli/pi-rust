@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use agent_client_protocol_schema::{
-    ContentBlock, ContentChunk, Cost, Error, Meta, SessionConfigOption, SessionInfoUpdate, SessionNotification,
-    SessionUpdate, TextContent, Usage, UsageUpdate,
+    ContentBlock, ContentChunk, Cost, Error, MessageId, Meta, SessionConfigOption, SessionInfoUpdate,
+    SessionNotification, SessionUpdate, TextContent, Usage, UsageUpdate,
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -19,7 +19,7 @@ use super::backend::{AcpClient, PiBackend};
 use super::config::{send_config_options_update, session_configuration};
 use super::errors::{maybe_auth_required, prompt_failed};
 use crate::agent_session::lock;
-use crate::session::ids::iso_timestamp;
+use crate::session::ids::{iso_timestamp, uuid_v4};
 
 /// How long a context usage query may take before the turn completes without it.
 pub const SESSION_STATS_TIMEOUT: Duration = Duration::from_secs(1);
@@ -83,6 +83,8 @@ pub(super) struct Inner {
     run_error: Option<String>,
     /// The error the run numbered `last_settled` ended with.
     last_settled_error: Option<String>,
+    /// The message id of the assistant message pi streams.
+    pub assistant_message: Option<String>,
     pub tool_calls: HashMap<String, ToolPhase>,
     pub in_agent_loop: bool,
     pub snapshots: HashMap<String, Snapshot>,
@@ -118,8 +120,11 @@ pub struct AcpSession {
     weak: Weak<AcpSession>,
 }
 
-pub(super) fn text_chunk(text: impl Into<String>) -> SessionUpdate {
-    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(text))))
+/// A notice of pi, such as a retry or a queued prompt. It has a message id of its own, so
+/// clients do not merge it into the model's reply.
+pub(super) fn notice(text: impl Into<String>) -> SessionUpdate {
+    let chunk = ContentChunk::new(ContentBlock::Text(TextContent::new(text))).message_id(MessageId::new(uuid_v4()));
+    SessionUpdate::AgentMessageChunk(chunk)
 }
 
 pub(super) fn meta_of(value: Value) -> Meta {
@@ -222,7 +227,7 @@ impl AcpSession {
             inner.startup_info_sent = true;
             inner.startup_info.clone().unwrap_or_default()
         };
-        self.emit(text_chunk(text));
+        self.emit(notice(text));
     }
 
     /// Run a prompt, or queue it behind the running turn; resolves when its turn ends.
@@ -250,7 +255,7 @@ impl AcpSession {
             }
         };
         if let Some(position) = queued_at {
-            self.emit(text_chunk(format!("Queued message (position {position}).")));
+            self.emit(notice(format!("Queued message (position {position}).")));
             self.emit(queue_info(position, true));
         }
         receiver.await.unwrap_or((Ok(TurnEnd::Cancelled), None))
@@ -370,7 +375,7 @@ impl AcpSession {
     fn start_next(&self, next: Option<(QueuedTurn, usize)>) {
         match next {
             Some((turn, remaining)) => {
-                self.emit(text_chunk(format!("Starting queued message. ({remaining} remaining)")));
+                self.emit(notice(format!("Starting queued message. ({remaining} remaining)")));
                 let mut inner = lock(&self.inner);
                 self.start_turn(&mut inner, turn);
             }
@@ -393,7 +398,7 @@ impl AcpSession {
             for turn in queued {
                 let _ = turn.sender.send((Ok(TurnEnd::Cancelled), None));
             }
-            self.emit(text_chunk("Cleared queued prompts."));
+            self.emit(notice("Cleared queued prompts."));
             self.emit(queue_info(0, running));
         }
         if let Err(error) = self.backend.abort().await {

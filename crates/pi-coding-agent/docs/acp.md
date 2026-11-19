@@ -48,6 +48,8 @@ These features of the editor work:
 - The pi-rust commands `/usage`, `/context`, `/extensions`, `/fast`, and `/reload`. They run in pi without a model call and answer with an agent message. [RPC mode](rpc.md#built-in-commands) describes each one. After `/reload` or an extension change, pi sends `available_commands_update` again.
 - `/mcp` while MCP runs for the session. Its notices are agent messages with `_meta.piAcp.notify`.
 
+The text and thought chunks of each assistant message share one `messageId`. The notices of pi, such as `Retrying (attempt n/max, waiting s)...`, the compaction notices, the queue notices, and the startup information, are agent messages with a `messageId` of their own, so clients show them apart from the model's reply.
+
 When the model, the thinking level, or fast mode changes inside the session, for example through `/fast` or an extension, pi sends `config_option_update` with the new options.
 
 Model labels use the display names of the providers. Catalog variants with a `fast` segment in their ID have a ⚡ label. ACP has no standard field for a model icon.

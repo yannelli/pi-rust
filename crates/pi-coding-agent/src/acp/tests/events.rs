@@ -39,13 +39,46 @@ async fn text_and_thinking_deltas_become_chunks() {
     f.emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}})).await;
     f.emit(json!({"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "hmm"}}))
         .await;
+    let updates = f.client.updates();
+    let id = updates[0]["update"]["messageId"].clone();
+    assert!(id.is_string());
     assert_eq!(
-        f.client.updates(),
+        updates,
         [
-            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}}}),
-            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hmm"}}}),
+            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "hi"}, "messageId": id}}),
+            json!({"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "hmm"}, "messageId": id}}),
         ]
     );
+}
+
+#[tokio::test]
+async fn notices_and_each_assistant_message_have_message_ids_of_their_own() {
+    let f = fixture(&here());
+    let text = |delta: &str| json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": delta}});
+    let assistant = |kind: &str| json!({"type": kind, "message": {"role": "assistant"}});
+    for event in [
+        assistant("message_start"),
+        text("first "),
+        text("reply"),
+        assistant("message_end"),
+        json!({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 1000}),
+        json!({"type": "auto_retry_end"}),
+        assistant("message_start"),
+        text("second reply"),
+    ] {
+        f.emit(event).await;
+    }
+    let ids: Vec<(String, String)> = f
+        .client
+        .of_kind("agent_message_chunk")
+        .iter()
+        .map(|update| {
+            (update["content"]["text"].as_str().unwrap().into(), update["messageId"].as_str().unwrap().into())
+        })
+        .collect();
+    assert_eq!(ids[0].1, ids[1].1, "chunks of one message share its id");
+    let distinct: std::collections::HashSet<&str> = ids.iter().skip(1).map(|(_, id)| id.as_str()).collect();
+    assert_eq!(distinct.len(), 4, "the reply, each notice, and the next reply: {ids:?}");
 }
 
 /// A bash call through `session` that prints "running", then "running done", with `result` at the end.
