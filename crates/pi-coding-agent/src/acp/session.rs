@@ -436,10 +436,6 @@ impl AcpSession {
         !waiting && self.backend.is_idle()
     }
 
-    pub fn was_cancel_requested(&self) -> bool {
-        lock(&self.inner).cancel_requested
-    }
-
     /// `/name`: set pi's session name and publish it as the title.
     pub async fn set_session_name(&self, name: &str) -> anyhow::Result<()> {
         let _order = self.titles.lock().await;
