@@ -21,6 +21,10 @@ use crate::headless_commands::{
     HEADLESS_COMMANDS, SESSION_COMMANDS, run_headless_command, run_session_command, split_slash_command,
 };
 
+/// The longest `abort` waits for the run to settle before it answers (pi-rust; upstream waits
+/// until the session is idle).
+pub(crate) const ABORT_REPLY_LIMIT: std::time::Duration = std::time::Duration::from_millis(1500);
+
 fn ok(id: Option<&Value>, command: &str, data: Option<Value>) -> anyhow::Result<Option<Reply>> {
     Ok(Some(Reply::Json(success(id, command, data))))
 }
@@ -104,7 +108,9 @@ impl RpcServer {
                 ok(id, "follow_up", Some(json!({"disposition": disposition.as_str()})))
             }
             RpcCommand::Abort => {
-                session.abort().await;
+                // An aborted run settles within about three ABORT_GRACE periods. The reply does not
+                // wait longer, as clients such as Paseo give `clear_queue` plus `abort` two seconds.
+                let _ = tokio::time::timeout(ABORT_REPLY_LIMIT, session.abort()).await;
                 ok(id, "abort", None)
             }
             RpcCommand::ClearQueue => {

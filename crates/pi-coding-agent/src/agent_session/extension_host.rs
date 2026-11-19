@@ -293,6 +293,17 @@ impl AgentSession {
         message: Value,
         options: &Value,
     ) -> Result<Option<BoxFuture<'static, anyhow::Result<()>>>, String> {
+        self.send_extension_message_at(message, options, self.abort_epoch())
+    }
+
+    /// [`Self::send_extension_message`] requested at abort count `epoch`: after a later abort the
+    /// message joins the conversation without starting a turn.
+    fn send_extension_message_at(
+        self: &Arc<Self>,
+        message: Value,
+        options: &Value,
+        epoch: u64,
+    ) -> Result<Option<BoxFuture<'static, anyhow::Result<()>>>, String> {
         let raw = message.clone();
         let mut custom: CustomMessage =
             serde_json::from_value(message).map_err(|error| format!("Invalid message: {error}"))?;
@@ -313,14 +324,16 @@ impl AgentSession {
         }
         if trigger == Some(true) {
             let session = self.clone();
-            if self.is_compacting() {
+            if self.is_compacting() || lock(&self.state).emitting_agent_settled {
                 // A run now would overlap the compaction and miss its result, so the message is sent again
-                // once compaction ends, as after a run (upstream issue 10982).
+                // once compaction ends, as after a run (upstream issue 10982). Upstream also defers it
+                // while `agent_settled` handlers run.
                 let options = options.clone();
                 return Ok(Some(
                     async move {
                         session.wait_while_compacting().await;
-                        match session.send_extension_message(raw, &options).map_err(anyhow::Error::msg)? {
+                        session.wait_while_settling().await;
+                        match session.send_extension_message_at(raw, &options, epoch).map_err(anyhow::Error::msg)? {
                             Some(run) => run.await,
                             None => Ok(()),
                         }
@@ -328,7 +341,13 @@ impl AgentSession {
                     .boxed(),
                 ));
             }
-            return Ok(Some(async move { session.start_run(RunTrigger::Custom(custom), || {}).await }.boxed()));
+            let run = async move {
+                if !session.start_run(RunTrigger::Custom(custom.clone()), Some(epoch), || {}).await? {
+                    session.append_custom_message(custom.into_message());
+                }
+                Ok(())
+            };
+            return Ok(Some(run.boxed()));
         }
         if !self.queue_if_running(&message, None) {
             self.append_custom_message(message);
@@ -340,12 +359,22 @@ impl AgentSession {
     /// Count a `pi.sendUserMessage` prompt as busy until the guard drops. The action returns before
     /// the prompt starts, so print mode and `ctx.waitForIdle()` wait for it (upstream issue 11238).
     pub(crate) fn begin_extension_prompt(self: &Arc<Self>) -> ExtensionPromptGuard {
-        lock(&self.state).pending_extension_prompts += 1;
+        let epoch = {
+            let mut state = lock(&self.state);
+            state.pending_extension_prompts += 1;
+            state.abort_epoch
+        };
         self.notify_idle();
-        ExtensionPromptGuard(self.clone())
+        ExtensionPromptGuard(self.clone(), epoch)
     }
 
-    pub(crate) async fn send_extension_user_message(&self, content: Value, options: &Value) -> anyhow::Result<()> {
+    /// `epoch`: the abort count when the extension asked; a later abort cancels the prompt.
+    pub(crate) async fn send_extension_user_message(
+        &self,
+        content: Value,
+        options: &Value,
+        epoch: u64,
+    ) -> anyhow::Result<()> {
         let (text, images) = user_content(&content);
         let streaming_behavior = match options["deliverAs"].as_str() {
             Some("followUp") => Some(StreamingBehavior::FollowUp),
@@ -357,6 +386,7 @@ impl AgentSession {
             images,
             streaming_behavior,
             source: Some("extension".into()),
+            abort_epoch: Some(epoch),
             ..PromptOptions::default()
         };
         self.prompt_with(&text, options).await.map(|_| ())
@@ -624,8 +654,15 @@ impl AgentSession {
     }
 }
 
-/// Keeps an extension prompt counted by [`AgentSession::begin_extension_prompt`].
-pub(crate) struct ExtensionPromptGuard(Arc<AgentSession>);
+/// Keeps an extension prompt counted by [`AgentSession::begin_extension_prompt`], with the abort
+/// count when it was requested.
+pub(crate) struct ExtensionPromptGuard(Arc<AgentSession>, u64);
+
+impl ExtensionPromptGuard {
+    pub(crate) fn epoch(&self) -> u64 {
+        self.1
+    }
+}
 
 impl Drop for ExtensionPromptGuard {
     fn drop(&mut self) {

@@ -1,5 +1,6 @@
 //! Agent loop with tool calling and state management for the pi agent harness.
 
+mod abort_grace;
 pub mod agent;
 pub mod agent_loop;
 pub mod described;
@@ -13,6 +14,7 @@ pub mod transcript;
 pub mod types;
 pub mod validate;
 
+pub use abort_grace::{ABORT_GRACE, AbortClock};
 pub use agent::{Agent, AgentHooks, AgentInitialState, AgentState, AsyncListener, Listener, QueueMode};
 pub use agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,

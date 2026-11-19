@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
+use crate::abort_grace::{AbortClock, finish_or_detach, grace_elapsed};
+
 use crate::agent_loop::{
     AfterToolCallFn, AgentContext, AgentLoopConfig, ApiKeyFn, BeforeToolCallFn, CallableToolsFn, ConvertToLlmFn,
     EventSink, MessageSource, StreamFn, TransformContextFn, run_agent_loop, run_agent_loop_continue,
@@ -134,6 +136,8 @@ struct Inner {
     listeners: Mutex<Vec<(u64, AnyListener)>>,
     next_listener: AtomicU64,
     run: Mutex<Option<CancellationToken>>,
+    /// When the active run was aborted; its waits end `ABORT_GRACE` after it.
+    abort_clock: AbortClock,
     running: watch::Sender<bool>,
 }
 
@@ -170,6 +174,7 @@ impl Agent {
                 listeners: Mutex::new(Vec::new()),
                 next_listener: AtomicU64::new(0),
                 run: Mutex::new(None),
+                abort_clock: AbortClock::default(),
                 running: watch::channel(false).0,
             }),
         }
@@ -349,9 +354,15 @@ impl Agent {
         *self.inner.running.borrow()
     }
 
+    /// When the current or last run was aborted, for waits that end `ABORT_GRACE` after it.
+    pub fn abort_clock(&self) -> AbortClock {
+        self.inner.abort_clock.clone()
+    }
+
     /// Cancel the active run, if any.
     pub fn abort(&self) {
         if let Some(cancel) = lock(&self.inner.run).as_ref() {
+            self.inner.abort_clock.mark();
             cancel.cancel();
         }
     }
@@ -425,6 +436,7 @@ impl Agent {
         }
         let cancel = CancellationToken::new();
         *run = Some(cancel.clone());
+        self.inner.abort_clock.reset();
         let mut state = lock(&self.inner.state);
         state.is_streaming = true;
         state.streaming_message = None;
@@ -482,11 +494,13 @@ impl Agent {
             prepare_next_turn: hooks.prepare_next_turn,
             callable_tools: hooks.callable_tools,
             stream_options: hooks.stream_options,
+            abort_clock: self.inner.abort_clock.clone(),
         };
         (context, config)
     }
 
     /// The run's event sink: reduce state, await the `on_event` hook, then await each listener.
+    /// After an abort they get `ABORT_GRACE` in total, then keep running detached.
     fn sink(&self, cancel: CancellationToken) -> EventSink {
         let inner = self.inner.clone();
         let hook = lock(&self.inner.hooks).on_event.clone();
@@ -494,8 +508,11 @@ impl Agent {
             let (inner, hook, cancel) = (inner.clone(), hook.clone(), cancel.clone());
             async move {
                 reduce(&inner, &event);
+                let clock = &inner.abort_clock;
                 let replacement = match &hook {
-                    Some(hook) => hook(event.clone(), cancel.clone()).await,
+                    Some(hook) => finish_or_detach(hook(event.clone(), cancel.clone()), grace_elapsed(&cancel, clock))
+                        .await
+                        .flatten(),
                     None => None,
                 };
                 let event = match (event, replacement) {
@@ -512,7 +529,10 @@ impl Agent {
                 for listener in listeners {
                     match listener {
                         AnyListener::Sync(listener) => listener(&event),
-                        AnyListener::Async(listener) => listener(event.clone(), cancel.clone()).await,
+                        AnyListener::Async(listener) => {
+                            let listening = listener(event.clone(), cancel.clone());
+                            finish_or_detach(listening, grace_elapsed(&cancel, clock)).await;
+                        }
                     }
                 }
                 match event {

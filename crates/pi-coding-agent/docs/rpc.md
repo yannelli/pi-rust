@@ -46,6 +46,17 @@ The `prompt` response data has `agentInvoked` when pi knows whether the prompt r
 
 A client can finish the turn at once when `agentInvoked` is `false`.
 
+## Abort
+
+`abort` answers after the last event of the aborted run, `agent_settled` with `aborted: true`. Upstream pi answers when the session is idle, which can take seconds when an extension handler or a tool is slow. pi-rust limits this wait:
+
+- After an abort, the running tools and the extension handlers of the run's remaining events (`tool_call`, `tool_result`, `turn_end`, `agent_end`, `agent_settled`, and the others) have 400 ms together. A tool that takes longer stops with the result `Operation aborted`. A handler that takes longer keeps running, and pi does not use its result. An abort that arrives while `agent_settled` handlers run gives them the same 400 ms.
+- `abort` answers at most 1.5 s after the command arrives, also when the run has not settled yet. Clients such as Paseo give `clear_queue` and `abort` 2 seconds together.
+- As in upstream pi, a run aborted during tool calls ends with an assistant message whose `stopReason` is `aborted`. pi-rust creates this message without the provider request that upstream sends.
+- An extension prompt (`pi.sendUserMessage`) or a turn-starting extension message (`pi.sendMessage` with `triggerTurn`) that was waiting to start when the abort arrived does not start a run. The message of a turn-starting extension message joins the conversation without a turn. Upstream pi starts these runs after the abort.
+
+A `prompt` that arrives while an aborted run ends waits for the run to end and then starts a new run. Upstream pi rejects it with `Agent is already processing`, or with `streamingBehavior` adds it to the run that stops. A prompt, or an extension message with `triggerTurn`, that arrives while `agent_settled` handlers run starts after them, as in upstream pi.
+
 ## Other additions
 
 - `set_fast_mode` and the `fastMode` and `fastModeAvailable` fields of `get_state`. See [Fast mode](providers.md#fast-mode-pi-rust-extension).

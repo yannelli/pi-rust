@@ -236,3 +236,85 @@ async fn sync_and_async_listeners_run_in_subscription_order() {
         assert_eq!(chunk, [format!("a:{event}"), format!("b:{event}"), format!("c:{event}")]);
     }
 }
+
+#[tokio::test]
+async fn an_aborted_run_stops_waiting_for_a_slow_listener_and_lets_it_finish() {
+    let agent = agent(abortable());
+    let barrier = Arc::new(Notify::new());
+    let finished = Arc::new(AtomicBool::new(false));
+    block_on(&agent, &barrier, |event| matches!(event, AgentEvent::AgentEnd { .. }));
+    let done = finished.clone();
+    agent.subscribe_async(move |event, _signal| {
+        let done = done.clone();
+        async move {
+            if matches!(event, AgentEvent::AgentEnd { .. }) {
+                done.store(true, Ordering::SeqCst);
+            }
+        }
+    });
+
+    let running = agent.clone();
+    let prompt = tokio::spawn(async move { running.prompt("hello", Vec::new()).await });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    agent.abort();
+    let ended = tokio::time::timeout(Duration::from_secs(3), prompt).await;
+    ended.expect("the aborted run does not wait for the blocked listener").unwrap().unwrap();
+    assert!(!agent.state().is_streaming);
+    // The blocked listener keeps running detached; listeners after it saw the event.
+    assert!(finished.load(Ordering::SeqCst));
+    barrier.notify_one();
+}
+
+/// A tool that ignores the abort signal and never returns.
+struct Hang;
+
+#[async_trait::async_trait]
+impl pi_agent::AgentTool for Hang {
+    fn name(&self) -> &str {
+        "hang"
+    }
+
+    fn description(&self) -> &str {
+        "never returns"
+    }
+
+    fn parameters(&self) -> serde_json::Value {
+        json!({"type": "object", "properties": {}})
+    }
+
+    async fn execute(
+        &self,
+        _id: &str,
+        _args: serde_json::Value,
+        _cancel: CancellationToken,
+        _on_update: pi_agent::ToolUpdateCallback,
+    ) -> anyhow::Result<pi_agent::AgentToolResult> {
+        std::future::pending().await
+    }
+}
+
+#[tokio::test]
+async fn an_aborted_run_drops_a_tool_that_ignores_the_signal() {
+    let (_, stream_fn) = sequence(vec![tool_use(vec![call("call-1", "hang", json!({}))])]);
+    let agent = tool_agent(Arc::new(Hang), stream_fn);
+    let running = agent.clone();
+    let prompt = tokio::spawn(async move { running.prompt("run tool", Vec::new()).await });
+    while !agent.state().pending_tool_calls.contains("call-1") {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    agent.abort();
+    let ended = tokio::time::timeout(Duration::from_secs(3), prompt).await;
+    ended.expect("the aborted run does not wait for the tool").unwrap().unwrap();
+    let messages = agent.state().messages;
+    let Some(Message::ToolResult(result)) =
+        messages.iter().rev().find(|message| matches!(message, Message::ToolResult(_)))
+    else {
+        panic!("a tool result");
+    };
+    assert!(result.is_error);
+    assert_eq!(result.content[0].as_text(), Some("Operation aborted"));
+    // As upstream, the run then ends with an aborted assistant message.
+    let Some(Message::Assistant(last)) = messages.last() else { panic!("an assistant message last") };
+    assert_eq!(last.stop_reason, StopReason::Aborted);
+    assert_eq!(last.error_message.as_deref(), Some("Request was aborted"));
+}

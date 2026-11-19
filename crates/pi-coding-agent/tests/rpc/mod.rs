@@ -3,6 +3,7 @@
 
 use crate::agent_session::{harness, mcp_fake};
 
+mod abort;
 mod binary;
 mod builtins;
 mod client;
