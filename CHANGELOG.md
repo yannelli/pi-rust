@@ -2,6 +2,14 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.19] - 2026-11-19
+
+### Changed
+
+- keep the context usage that native extensions read with every event ([3e65525](https://github.com/yannelli/pi-rust/commit/3e655251adf214d716ffa5eab4bce142b2660933))
+- **extensions:** native extensions get the boundary context when they ask for it ([29c1d28](https://github.com/yannelli/pi-rust/commit/29c1d281fcf4be3d685af4ba1c4516607f9d6826))
+- **extensions:** build the turn_end context only for handlers that read it ([0713613](https://github.com/yannelli/pi-rust/commit/0713613c915d2688c9c8d1dc3510ed761d96693d))
+
 ## [0.12.18] - 2026-11-19
 
 ### Added
