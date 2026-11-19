@@ -21,6 +21,9 @@ Add this to the Zed `settings.json`:
 
 Each editor session runs a pi session in its project directory. pi saves it in `~/.pi/agent/sessions/`, as it does all sessions. Thus the editor can list, resume, and delete these sessions. `pi -r` can resume them too.
 
+- One connection can run several sessions, as Zed does for the threads of a project. A new or loaded session leaves the others open and running. pi-acp and earlier versions of pi closed them, which aborted their runs.
+- When more than 8 sessions of a connection are open, pi closes the idle ones the client used least recently. A session with a prompt or a run stays open.
+- `session/close` (`sessionCapabilities.close`) cancels the session's prompt and frees the session. Zed sends it when it closes a thread. A later request reopens a closed session from its file, without client MCP servers until `session/load`.
 - `~/.pi/pi-acp/session-map.json` maps ACP session ids to session files. All pi processes in ACP mode share it. pi replaces it through a temporary file, so no process reads a half-written map.
 - pi writes a session file when the session gets its first message. `session/load` of a session that never got a prompt starts the file with the session id and the `cwd` of the request, so the session keeps its id.
 

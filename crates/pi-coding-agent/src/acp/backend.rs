@@ -40,6 +40,8 @@ pub trait PiBackend: Send + Sync {
         cancel: CancellationToken,
     ) -> anyhow::Result<()>;
     async fn abort(&self) -> anyhow::Result<()>;
+    /// No run, compaction, or extension work is active.
+    fn is_idle(&self) -> bool;
     async fn get_state(&self) -> anyhow::Result<Value>;
     async fn get_available_models(&self) -> anyhow::Result<Value>;
     async fn set_model(&self, provider: &str, model_id: &str) -> anyhow::Result<()>;

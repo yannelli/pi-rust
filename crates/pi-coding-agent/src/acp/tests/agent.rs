@@ -38,7 +38,7 @@ fn initialize_advertises_capabilities_and_terminal_auth() {
         (capabilities["mcpCapabilities"]["http"].clone(), capabilities["mcpCapabilities"]["sse"].clone()),
         (json!(true), json!(false))
     );
-    assert_eq!(capabilities["sessionCapabilities"], json!({"list": {}, "delete": {}}));
+    assert_eq!(capabilities["sessionCapabilities"], json!({"list": {}, "delete": {}, "close": {}}));
     assert!(response["authMethods"][0].get("_meta").is_none());
     assert_eq!(response["_meta"], json!({"piAcp": {"exactMcpPreapproval": true}}));
     let zed: InitializeRequest =
@@ -133,22 +133,81 @@ async fn configuration_failures_clean_up_only_the_new_session() {
     }
 }
 
+type Spawned = Arc<std::sync::Mutex<Vec<Arc<FakeBackend>>>>;
+
+/// A factory that hands out a new backend with session id `s<n>` on each spawn.
+fn numbered_backends() -> (Arc<FakeFactory>, Spawned) {
+    let spawned: Spawned = Arc::default();
+    let backends = spawned.clone();
+    let factory = FakeFactory::with(Box::new(move |_, _| {
+        let backend = FakeBackend::new();
+        let mut backends = backends.lock().unwrap();
+        backend.config().state["sessionId"] = json!(format!("s{}", backends.len()));
+        backends.push(backend.clone());
+        Ok(backend)
+    }));
+    (factory, spawned)
+}
+
 #[tokio::test]
-async fn new_sessions_need_an_absolute_cwd_and_keep_one_live_session() {
+async fn new_sessions_need_an_absolute_cwd_and_leave_the_other_sessions_open() {
     let env = Env::new();
-    let (first, second) = (FakeBackend::new(), FakeBackend::new());
-    second.config().state["sessionId"] = json!("second");
-    let queue = std::sync::Mutex::new(vec![second.clone(), first.clone()]);
-    let factory = FakeFactory::with(Box::new(move |_, _| Ok(queue.lock().unwrap().pop().unwrap())));
-    first.config().state["sessionId"] = json!("first");
+    let (factory, backends) = numbered_backends();
     let agent = env.agent(FakeClient::new(), factory);
     let error = agent.new_session(new_request(std::path::Path::new("relative/dir"))).await.err().unwrap();
     assert_eq!(code(&error), -32602);
     agent.new_session(new_request(&env.work())).await.unwrap();
     let response = agent.new_session(new_request(&env.work())).await.unwrap().response;
-    assert_eq!(response["sessionId"], "second");
-    assert_eq!(first.disposed.load(Ordering::SeqCst), 1);
-    assert!(agent.session("first").is_none() && agent.session("second").is_some());
+    assert_eq!(response["sessionId"], "s1");
+    assert_eq!(backends.lock().unwrap()[0].disposed.load(Ordering::SeqCst), 0);
+    assert!(agent.session("s0").is_some() && agent.session("s1").is_some());
+}
+
+#[tokio::test]
+async fn idle_sessions_beyond_the_limit_close_least_recently_used_first() {
+    use crate::acp::agent::MAX_OPEN_SESSIONS;
+    let env = Env::new();
+    let (factory, backends) = numbered_backends();
+    let agent = env.agent(FakeClient::new(), factory);
+    for _ in 0..MAX_OPEN_SESSIONS {
+        agent.new_session(new_request(&env.work())).await.unwrap();
+    }
+    // s0 is busy, and the client used s1 last.
+    backends.lock().unwrap()[0].config().busy = true;
+    agent.session("s1").unwrap();
+    agent.new_session(new_request(&env.work())).await.unwrap();
+    let disposed: Vec<usize> = backends
+        .lock()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .filter(|(_, backend)| backend.disposed.load(Ordering::SeqCst) > 0)
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(disposed, [2], "the least recently used idle session");
+    assert!(agent.session("s0").is_some() && agent.session("s1").is_some() && agent.session("s2").is_none());
+}
+
+#[tokio::test]
+async fn session_close_cancels_the_turn_and_frees_the_session() {
+    let env = Env::new();
+    let (client, backend, agent) = live(&env, FakeConfig::default());
+    let task = {
+        let agent = agent.clone();
+        tokio::spawn(async move { agent.prompt(prompt_request("s1", "hello")).await })
+    };
+    settle().await;
+    let session = agent.session("s1").unwrap();
+    session.handle_pi_event(backend.accepted()).await;
+    let close = |id: &str| serde_json::from_value(json!({"sessionId": id})).unwrap();
+    assert_eq!(serde_json::to_value(agent.close_session(close("s1")).await).unwrap(), json!({}));
+    assert_eq!((backend.aborts.load(Ordering::SeqCst), backend.disposed.load(Ordering::SeqCst)), (1, 1));
+    assert!(agent.session("s1").is_none());
+    // The aborted run settles.
+    session.handle_pi_event(backend.settled()).await;
+    assert_eq!(task.await.unwrap().unwrap().stop_reason, StopReason::Cancelled);
+    assert_eq!(serde_json::to_value(agent.close_session(close("unknown")).await).unwrap(), json!({}));
+    assert!(client.updates().iter().all(|update| update["sessionId"] == "s1"));
 }
 
 fn live(env: &Env, config: FakeConfig) -> (Arc<FakeClient>, Arc<FakeBackend>, Arc<AcpAgent>) {

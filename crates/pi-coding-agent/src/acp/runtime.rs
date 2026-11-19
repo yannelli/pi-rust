@@ -300,6 +300,10 @@ impl PiBackend for RuntimeBackend {
         Ok(())
     }
 
+    fn is_idle(&self) -> bool {
+        self.session.is_idle()
+    }
+
     async fn get_state(&self) -> anyhow::Result<Value> {
         Ok(serde_json::to_value(session_state(&self.session))?)
     }

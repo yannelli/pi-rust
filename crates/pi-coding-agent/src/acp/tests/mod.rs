@@ -102,6 +102,8 @@ pub struct FakeConfig {
     pub messages_error: Option<String>,
     pub commands: Result<Value, String>,
     pub prompt_error: Option<String>,
+    /// pi runs on its own.
+    pub busy: bool,
     pub set_thinking: Hook<String>,
     pub set_model: Hook<(String, String)>,
     pub set_name: Hook<String>,
@@ -120,6 +122,7 @@ impl Default for FakeConfig {
             messages_error: None,
             commands: Ok(json!({"commands": []})),
             prompt_error: None,
+            busy: false,
             set_thinking: Box::new(|state, level| {
                 state["thinkingLevel"] = json!(level);
                 Ok(())
@@ -259,6 +262,10 @@ impl PiBackend for FakeBackend {
     async fn abort(&self) -> anyhow::Result<()> {
         self.aborts.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    fn is_idle(&self) -> bool {
+        !self.config().busy
     }
 
     async fn get_state(&self) -> anyhow::Result<Value> {

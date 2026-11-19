@@ -105,7 +105,10 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
 
     let init = client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
     assert_eq!(init["result"]["protocolVersion"], 1);
-    assert_eq!(init["result"]["agentCapabilities"]["sessionCapabilities"], json!({"list": {}, "delete": {}}));
+    assert_eq!(
+        init["result"]["agentCapabilities"]["sessionCapabilities"],
+        json!({"list": {}, "delete": {}, "close": {}})
+    );
 
     let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
     let session_id = created["result"]["sessionId"].as_str().expect("session id").to_string();

@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -110,6 +111,8 @@ pub struct AcpSession {
     pub backend: Arc<dyn PiBackend>,
     client: Arc<dyn AcpClient>,
     pub(super) terminal_output: bool,
+    /// When the client last used the session, as a count of uses on the connection.
+    last_use: AtomicU64,
     pub(super) inner: Mutex<Inner>,
     titles: tokio::sync::Mutex<()>,
     weak: Weak<AcpSession>,
@@ -172,6 +175,7 @@ impl AcpSession {
             backend: params.backend,
             client: params.client,
             terminal_output: params.terminal_output,
+            last_use: AtomicU64::new(0),
             inner: Mutex::new(inner),
             titles: tokio::sync::Mutex::new(()),
             weak: weak.clone(),
@@ -408,6 +412,23 @@ impl AcpSession {
         if let Some(pending) = inner.pending.as_mut() {
             add_turn_usage(&mut pending.usage, &message["usage"]);
         }
+    }
+
+    pub(super) fn touch(&self, use_number: u64) {
+        self.last_use.store(use_number, Ordering::SeqCst);
+    }
+
+    pub(super) fn last_use(&self) -> u64 {
+        self.last_use.load(Ordering::SeqCst)
+    }
+
+    /// No prompt runs or waits, and pi is idle.
+    pub fn is_idle(&self) -> bool {
+        let waiting = {
+            let inner = lock(&self.inner);
+            inner.pending.is_some() || !inner.queue.is_empty()
+        };
+        !waiting && self.backend.is_idle()
     }
 
     pub fn was_cancel_requested(&self) -> bool {

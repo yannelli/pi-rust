@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol_schema::{
-    CancelNotification, DeleteSessionRequest, Error, InitializeRequest, ListSessionsRequest, LoadSessionRequest,
-    NewSessionRequest, PromptRequest, RequestPermissionRequest, RequestPermissionResponse, SessionNotification,
-    SetSessionConfigOptionRequest, SetSessionModeRequest,
+    CancelNotification, CloseSessionRequest, DeleteSessionRequest, Error, InitializeRequest, ListSessionsRequest,
+    LoadSessionRequest, NewSessionRequest, PromptRequest, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,
 };
 use async_trait::async_trait;
 use futures::future::BoxFuture;
@@ -130,6 +130,7 @@ pub async fn dispatch(agent: &AcpAgent, method: &str, params: Value) -> Reply {
         "session/load" => handled(agent.load_session(parse::<LoadSessionRequest>(params)?).await),
         "session/list" => plain(to_value(agent.list_sessions(parse::<ListSessionsRequest>(params)?))),
         "session/delete" => plain(to_value(agent.delete_session(parse::<DeleteSessionRequest>(params)?))),
+        "session/close" => plain(to_value(agent.close_session(parse::<CloseSessionRequest>(params)?).await)),
         "session/prompt" => plain(to_value(agent.prompt(parse::<PromptRequest>(params)?).await?)),
         "session/set_mode" => plain(to_value(agent.set_session_mode(parse::<SetSessionModeRequest>(params)?).await?)),
         "session/set_config_option" => {

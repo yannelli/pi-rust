@@ -68,6 +68,34 @@ async fn a_prompt_sent_while_pi_runs_on_its_own_joins_that_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sessions_of_one_connection_run_side_by_side_until_closed() {
+    let setup = setup(vec![FauxResponse::Hang, FauxResponse::text("Second answer.")]);
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    let init = client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    assert_eq!(init["result"]["agentCapabilities"]["sessionCapabilities"]["close"], json!({}));
+    let new = json!({"cwd": work, "mcpServers": []});
+    let first = client.request("session/new", new.clone()).await["result"]["sessionId"].as_str().unwrap().to_string();
+    let prompt = |id: &str, text: &str| json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]});
+    let waiting = client.send_request("session/prompt", prompt(&first, "wait")).await;
+    client
+        .until(|m| {
+            m["params"]["sessionId"] == first.as_str() && m["params"]["update"]["_meta"]["piAcp"]["running"] == true
+        })
+        .await;
+
+    // Like a second Zed thread of the project.
+    let second = client.request("session/new", new).await["result"]["sessionId"].as_str().unwrap().to_string();
+    let answer = client.request("session/prompt", prompt(&second, "hello")).await;
+    assert_eq!(answer["result"]["stopReason"], "end_turn", "{answer}");
+    assert!(!client.seen.iter().any(|m| m["id"] == waiting && m.get("method").is_none()), "the first turn runs on");
+
+    let closed = client.request("session/close", json!({"sessionId": first})).await;
+    assert_eq!(closed["result"], json!({}), "{closed}");
+    assert_eq!(client.response(waiting).await["result"]["stopReason"], "cancelled");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_model_error_fails_the_prompt_once_the_retries_are_used_up() {
     let setup = setup(vec![
         FauxResponse::Error("529 overloaded_error: Overloaded".into()),

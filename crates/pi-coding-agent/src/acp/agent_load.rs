@@ -113,7 +113,6 @@ impl AcpAgent {
                 return Err(internal_failure(&error));
             }
         };
-        self.close_all_except(&session_id).await;
         self.store.upsert(&session_id, &cwd, &file);
         let data = match session.backend.get_messages().await {
             Ok(data) => data,
