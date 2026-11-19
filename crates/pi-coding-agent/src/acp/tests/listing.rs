@@ -244,6 +244,67 @@ fn session_map_round_trips_and_tolerates_bad_files() {
 }
 
 #[test]
+fn other_processes_never_read_a_half_written_session_map() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("pi-acp/session-map.json");
+    // Each store stands for another pi process with its own lock.
+    let writers: Vec<_> = (0..4)
+        .map(|writer| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let store = SessionStore::new(path);
+                for n in 0..40 {
+                    store.upsert(&format!("s{writer}-{n}"), "/cwd", &"x".repeat(4096));
+                }
+            })
+        })
+        .collect();
+    let mut reads = 0;
+    while writers.iter().any(|writer| !writer.is_finished()) {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            assert!(serde_json::from_str::<Value>(&text).is_ok(), "a partial map of {} bytes", text.len());
+            reads += 1;
+        }
+    }
+    writers.into_iter().for_each(|writer| writer.join().unwrap());
+    assert!(reads > 0);
+    let names: Vec<String> = std::fs::read_dir(path.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["session-map.json"], "no temporary file is left");
+}
+
+#[tokio::test]
+async fn loading_a_session_that_never_got_a_prompt_keeps_its_id_and_cwd() {
+    let env = Env::new();
+    let factory = FakeFactory::returning(FakeBackend::new());
+    let agent = env.agent(FakeClient::new(), factory.clone());
+    let dir = env.agent_dir().join("sessions/--work--");
+    let file = dir.join("2026-11-19T00-00-00-000Z_never-prompted.jsonl");
+    agent.store.upsert("never-prompted", "/stored/cwd", &file.display().to_string());
+    let work = env.work().display().to_string();
+    let request = json!({"sessionId": "never-prompted", "cwd": work, "mcpServers": []});
+    agent.load_session(serde_json::from_value(request).unwrap()).await.unwrap();
+    assert_eq!(factory.spawns.lock().unwrap()[0].1.as_deref(), Some(file.as_path()));
+    let text = std::fs::read_to_string(&file).unwrap();
+    let started: Value = serde_json::from_str(text.trim_end()).unwrap();
+    assert_eq!(
+        (started["type"].clone(), started["id"].clone(), started["cwd"].clone(), started["version"].clone()),
+        (json!("session"), json!("never-prompted"), json!(work), json!(3))
+    );
+    assert!(started["timestamp"].as_str().unwrap().ends_with('Z'));
+
+    // A file with entries stays as it is.
+    agent.close("never-prompted").await;
+    write_session(&file, &[header("never-prompted", "/elsewhere")]);
+    let request = json!({"sessionId": "never-prompted", "cwd": work, "mcpServers": []});
+    agent.load_session(serde_json::from_value(request).unwrap()).await.unwrap();
+    assert!(std::fs::read_to_string(&file).unwrap().contains("/elsewhere"));
+}
+
+#[test]
 fn delete_removes_stored_or_discovered_sessions_idempotently() {
     let env = Env::new();
     let agent = env.agent(FakeClient::new(), FakeFactory::returning(FakeBackend::new()));

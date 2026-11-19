@@ -32,7 +32,7 @@ use super::mcp_servers::ClientMcpServers;
 use super::session::{AcpSession, AcpSessionParams};
 use super::settings::{enable_skill_commands, quiet_startup};
 use super::startup::{StartupInfoInput, build_startup_info, update_notice};
-use super::store::SessionStore;
+use super::store::{SessionStore, start_missing_session_file};
 use crate::agent_session::lock;
 use crate::platform::version_check::LatestPiRelease;
 use crate::session::ids::uuid_v4;
@@ -359,6 +359,7 @@ impl AcpAgent {
             return Err(invalid_params(format!("Unknown sessionId: {session_id}")));
         };
         let cwd = cwd.map(String::from).unwrap_or(stored_cwd);
+        start_missing_session_file(Path::new(&file), session_id, &cwd);
         let backend = self.factory.create(Path::new(&cwd), Some(Path::new(&file)), mcp_servers).await?;
         let session = self.register(session_id, &cwd, backend, false);
         self.set_last_cwd(&cwd);

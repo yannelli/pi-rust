@@ -21,6 +21,9 @@ Add this to the Zed `settings.json`:
 
 Each editor session runs a pi session in its project directory. pi saves it in `~/.pi/agent/sessions/`, as it does all sessions. Thus the editor can list, resume, and delete these sessions. `pi -r` can resume them too.
 
+- `~/.pi/pi-acp/session-map.json` maps ACP session ids to session files. All pi processes in ACP mode share it. pi replaces it through a temporary file, so no process reads a half-written map.
+- pi writes a session file when the session gets its first message. `session/load` of a session that never got a prompt starts the file with the session id and the `cwd` of the request, so the session keeps its id.
+
 ## Prompts
 
 - A prompt that arrives while another prompt of the session runs waits in a queue. pi sends `Queued message (position n).` and starts it when the running turn ends.

@@ -177,6 +177,32 @@ async fn drives_sessions_over_acp_with_the_faux_provider() {
     assert_eq!(setup.provider.requests().len(), 3);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_that_never_got_a_prompt_loads_with_its_id_and_cwd() {
+    let setup = setup(vec![FauxResponse::text("Hello again.")]);
+    let work = setup.root.path().join("work");
+    let mut first = start(&setup);
+    first.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let created = first.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].as_str().expect("session id").to_string();
+    drop(first);
+
+    let mut client = start(&setup);
+    client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let loaded = client.request("session/load", json!({"sessionId": id, "cwd": work, "mcpServers": []})).await;
+    assert!(loaded["result"].is_object(), "{loaded}");
+    let prompt = json!({"sessionId": id, "prompt": [{"type": "text", "text": "Are you there?"}]});
+    assert_eq!(client.request("session/prompt", prompt).await["result"]["stopReason"], "end_turn");
+    let listed = client.request("session/list", json!({"cwd": work})).await;
+    let ids: Vec<&str> = listed["result"]["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|session| session["sessionId"].as_str())
+        .collect();
+    assert_eq!(ids, [id.as_str()], "{listed}");
+}
+
 fn config_option<'a>(options: &'a Value, id: &str) -> Option<&'a Value> {
     options.as_array().unwrap().iter().find(|option| option["id"] == id)
 }
