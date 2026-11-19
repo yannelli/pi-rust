@@ -365,6 +365,16 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             let options = prompt_options_from_json(&args.json(0), runner.cwd());
             json!(crate::system_prompt::render_system_prompt(&options).map_err(error)?)
         }
+        // `turn_end` and `agent_before_settle` of this runtime's session: kind, then drafts.
+        ("boundary", "plan") => {
+            let session = runner.session().ok_or_else(|| error("No session"))?;
+            session.boundary_plan(&args.str(0)?, &args.json(1)).map_err(error)?
+        }
+        ("boundary", "check") => {
+            let session = runner.session().ok_or_else(|| error("No session"))?;
+            session.boundary_check(&args.json(1)).map_err(error)?;
+            Value::Null
+        }
         _ => {
             let target = args.u64(0);
             let session = runner.target_session(target)?;

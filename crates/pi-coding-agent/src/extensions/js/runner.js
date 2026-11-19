@@ -1,8 +1,8 @@
 // Event dispatch (upstream `core/extensions/runner.ts`): handlers run in load order, failures are
 // reported as extension errors, and each event combines handler results as upstream does.
 import { getCurrentSystemMessage } from "../pi-ai/src/utils/transcript.ts";
-import { call, callAsync, errorMessage, errorStack } from "./bridge.js";
-import { createCommandContext, createContext, createToolContext, linkEndedMessage } from "./context.js";
+import { call, errorMessage, errorStack } from "./bridge.js";
+import { boundaryContext, createCommandContext, createContext, createToolContext, linkEndedMessage } from "./context.js";
 
 export const STALE_MESSAGE =
 	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
@@ -523,33 +523,42 @@ export class Runner {
 			: { action: "continue" };
 	}
 
-	/** `turn_end` and `agent_before_settle`: Rust previews the context for each set of drafts. */
+	/**
+	 * `turn_end` and `agent_before_settle` (upstream `emitBoundary`). pi-rust: a handler's
+	 * `event.context` is built when the handler first reads it, and drafts are checked again only
+	 * after they change, so handlers that do not read the context cost no pass over the session.
+	 */
 	async emitBoundary(baseEvent) {
 		const ctx = this.createContext();
-		const buildContext = (drafts) => callAsync("boundary.context", baseEvent.type, drafts);
+		const kind = baseEvent.type;
 		let entries = [];
 		let shouldContinue = false;
-		let context = await buildContext(entries);
 		let valid = true;
-		for (const { ext, handlers } of snapshot(this.extensions, baseEvent.type)) {
+		// As upstream, the context shows the last drafts that applied.
+		let contextDrafts = "[]";
+		let checked = { drafts: "[]", error: undefined };
+		for (const { ext, handlers } of snapshot(this.extensions, kind)) {
 			for (const handler of handlers) {
 				try {
-					const result = await handler({ ...baseEvent, entries, continue: shouldContinue, context }, ctx);
+					const event = { ...baseEvent, entries, continue: shouldContinue };
+					defineBoundaryContext(event, kind, contextDrafts);
+					const result = await handler(event, ctx);
 					if (result?.entries !== undefined) entries = result.entries;
 					if (result?.continue !== undefined) shouldContinue = result.continue;
 				} catch (error) {
-					this.reportFailure(ext, baseEvent.type, error);
+					this.reportFailure(ext, kind, error);
 				}
-				try {
-					context = await buildContext(entries);
-					valid = true;
-				} catch (error) {
-					valid = false;
+				const drafts = draftsText(entries);
+				if (drafts === undefined || drafts !== checked.drafts) checked = { drafts, error: checkDrafts(kind, entries) };
+				valid = checked.error === undefined;
+				if (valid) {
+					contextDrafts = checked.drafts ?? contextDrafts;
+				} else {
 					this.emitError({
 						extensionPath: ext.path,
-						event: baseEvent.type,
-						error: `Invalid boundary entries: ${errorMessage(error)}`,
-						stack: errorStack(error),
+						event: kind,
+						error: `Invalid boundary entries: ${errorMessage(checked.error)}`,
+						stack: errorStack(checked.error),
 					});
 				}
 			}
@@ -572,5 +581,45 @@ export class Runner {
 			}
 		}
 		return { errors };
+	}
+}
+
+/** `event.context` of a boundary handler, built on its first read from `drafts` (JSON text). */
+function defineBoundaryContext(event, kind, drafts) {
+	let context;
+	let built = false;
+	Object.defineProperty(event, "context", {
+		configurable: true,
+		enumerable: true,
+		get() {
+			if (!built) {
+				context = boundaryContext(call("boundary.plan", kind, JSON.parse(drafts)));
+				built = true;
+			}
+			return context;
+		},
+		set(value) {
+			context = value;
+			built = true;
+		},
+	});
+}
+
+/** The drafts as JSON text, which also keeps them from later changes; `undefined` when they are not JSON. */
+function draftsText(entries) {
+	try {
+		return JSON.stringify(entries);
+	} catch {
+		return undefined;
+	}
+}
+
+/** The error of drafts that do not apply to the session, else `undefined`. */
+function checkDrafts(kind, entries) {
+	try {
+		call("boundary.check", kind, entries);
+		return undefined;
+	} catch (error) {
+		return error ?? new Error("Invalid boundary entries");
 	}
 }

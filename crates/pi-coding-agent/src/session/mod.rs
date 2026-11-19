@@ -68,6 +68,40 @@ pub struct SessionManager {
     generation: u64,
 }
 
+/// A [`SessionManager`] whose entries appended since [`SessionManager::trial`] are not written
+/// and go away on drop, with the leaf they replaced.
+pub(crate) struct TrialEntries<'a> {
+    manager: &'a mut SessionManager,
+    len: usize,
+    leaf: Option<String>,
+    persist: bool,
+}
+
+impl std::ops::Deref for TrialEntries<'_> {
+    type Target = SessionManager;
+
+    fn deref(&self) -> &SessionManager {
+        self.manager
+    }
+}
+
+impl std::ops::DerefMut for TrialEntries<'_> {
+    fn deref_mut(&mut self) -> &mut SessionManager {
+        self.manager
+    }
+}
+
+impl Drop for TrialEntries<'_> {
+    fn drop(&mut self) {
+        let manager = &mut *self.manager;
+        for entry in manager.entries.drain(self.len..) {
+            manager.by_id.remove(entry.id());
+        }
+        manager.leaf = self.leaf.take();
+        manager.persist = self.persist;
+    }
+}
+
 /// `<agent>/sessions/--<cwd with separators replaced>--`, as in the TypeScript pi.
 pub fn session_dir(agent_dir: &Path, cwd: &Path) -> PathBuf {
     let cwd = resolve_path(cwd).display().to_string();
@@ -353,6 +387,14 @@ impl SessionManager {
         ids::generate_entry_id(|id| self.by_id.contains_key(id))
     }
 
+    /// This session with entries appended through the result kept in memory, and removed when
+    /// it drops (pi-rust: boundary previews without a copy of the session).
+    pub(crate) fn trial(&mut self) -> TrialEntries<'_> {
+        let (len, leaf, persist) = (self.entries.len(), self.leaf.clone(), self.persist);
+        self.persist = false;
+        TrialEntries { manager: self, len, leaf, persist }
+    }
+
     pub fn is_persisted(&self) -> bool {
         self.persist
     }
@@ -464,6 +506,12 @@ impl SessionManager {
         context::project_path(self.get_branch(None))
     }
 
+    /// The projected entries of the current branch without copies of unedited messages: `None`
+    /// stands for the entry's own message.
+    pub(crate) fn build_shared_projection(&self) -> Vec<(&Entry, Option<Vec<pi_ai::Message>>)> {
+        context::project_path_shared(self.get_branch(None))
+    }
+
     /// The finalized model context for the current leaf.
     pub fn build_session_context(&self) -> SessionContext {
         self.build_session_projection().into_context()
@@ -472,5 +520,43 @@ impl SessionManager {
     /// Alias of [`Self::build_session_context`].
     pub fn context(&self) -> SessionContext {
         self.build_session_context()
+    }
+}
+
+#[cfg(test)]
+mod trial_tests {
+    use pi_ai::{Message, UserContent, UserMessage};
+
+    use super::*;
+
+    fn user(text: &str) -> Message {
+        Message::User(UserMessage { content: UserContent::Text(text.into()), timestamp: 1 })
+    }
+
+    #[test]
+    fn trial_entries_are_not_written_and_go_away_with_their_leaf() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut manager = SessionManager::create(dir.path(), Some(dir.path()));
+        manager.append_message(&user("hello")).unwrap();
+        manager.append_message(&Message::Assistant(pi_ai::AssistantMessage::default())).unwrap();
+        let file = manager.file().unwrap().to_path_buf();
+        let written = std::fs::read_to_string(&file).unwrap();
+        let (leaf, count, generation) =
+            (manager.leaf_id().map(str::to_string), manager.entries().len(), manager.generation());
+        let drafted = {
+            let mut trial = manager.trial();
+            let id = trial.append_custom_entry("draft", None).unwrap();
+            assert_eq!(trial.leaf_id(), Some(id.as_str()));
+            assert_eq!(trial.get_branch(None).last().map(|entry| entry.id()), Some(id.as_str()));
+            id
+        };
+        assert_eq!(manager.entries().len(), count);
+        assert!(manager.get_entry(&drafted).is_none());
+        assert_eq!(manager.leaf_id().map(str::to_string), leaf);
+        assert_eq!(manager.generation(), generation);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), written, "trial entries are not written");
+        let kept = manager.append_custom_entry("kept", None).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains(&kept) && !text.contains(&drafted), "later entries are written as before");
     }
 }

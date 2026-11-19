@@ -269,10 +269,6 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
                 other => return Err(error(format!("Unknown action: {other}"))),
             }
         }
-        "boundary" => {
-            let session = runner.session().ok_or_else(|| error("No session"))?;
-            session.boundary_preview(&args.str(0)?, &args.json(1)).map_err(error)?
-        }
         "clipboard" => {
             let text = args.str(0)?;
             tokio::task::spawn_blocking(move || crate::clipboard::copy_to_clipboard(&text))

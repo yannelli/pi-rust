@@ -187,7 +187,8 @@ pub fn convert_to_llm(messages: &[Message]) -> Vec<Message> {
     messages.iter().filter_map(convert_message).collect()
 }
 
-fn convert_message(message: &Message) -> Option<Message> {
+/// One message of [`convert_to_llm`]; only custom roles change.
+pub(crate) fn convert_message(message: &Message) -> Option<Message> {
     let Message::Custom(custom) = message else { return Some(message.clone()) };
     match custom.role.as_str() {
         BashExecutionMessage::ROLE => {

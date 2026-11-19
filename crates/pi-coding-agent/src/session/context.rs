@@ -206,6 +206,20 @@ pub fn build_session_projection<'a>(entries: &'a [Entry], leaf: Leaf<'_>) -> Ses
 
 pub(crate) fn project_path(path: Vec<&Entry>) -> SessionProjection<'_> {
     let (model, thinking_level) = context_settings(&path);
+    let entries: Vec<ProjectedEntry> = project_path_shared(path)
+        .into_iter()
+        .map(|(source, messages)| ProjectedEntry {
+            source,
+            messages: messages.unwrap_or_else(|| session_entry_to_context_messages(source)),
+        })
+        .collect();
+    let messages = entries.iter().flat_map(|entry| entry.messages.iter().cloned()).collect();
+    SessionProjection { entries, messages, model, thinking_level }
+}
+
+/// The projected entries of `path` without copies of unedited messages: `None` stands for the
+/// entry's own message, all that an unedited `message` entry contributes.
+pub(crate) fn project_path_shared(path: Vec<&Entry>) -> Vec<(&Entry, Option<Vec<Message>>)> {
     let selected = context_entries_of_path(path);
     let mut edits: HashMap<&str, &Entry> = HashMap::new();
     for entry in &selected {
@@ -213,21 +227,22 @@ pub(crate) fn project_path(path: Vec<&Entry>) -> SessionProjection<'_> {
             edits.insert(target_id.as_str(), entry);
         }
     }
-    let entries: Vec<ProjectedEntry> = selected
+    selected
         .iter()
         .enumerate()
-        .map(|(index, entry)| ProjectedEntry {
-            source: entry,
+        .map(|(index, entry)| {
+            let edit = edits.get(entry.id()).copied();
             // Only the newest compaction, projected first, contributes a checkpoint and summary.
-            messages: if entry.compaction().is_some() && index > 0 {
-                Vec::new()
+            let messages = if entry.compaction().is_some() && index > 0 {
+                Some(Vec::new())
+            } else if edit.is_none() && matches!(entry.data(), EntryData::Message(_)) {
+                None
             } else {
-                project_entry(entry, edits.get(entry.id()).copied())
-            },
+                Some(project_entry(entry, edit))
+            };
+            (*entry, messages)
         })
-        .collect();
-    let messages = entries.iter().flat_map(|entry| entry.messages.iter().cloned()).collect();
-    SessionProjection { entries, messages, model, thinking_level }
+        .collect()
 }
 
 /// The finalized model context for `leaf`.
