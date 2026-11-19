@@ -292,8 +292,10 @@ impl RpcServer {
     }
 
     /// Start a prompt; its response goes out once the session accepts or rejects it, and the
-    /// run continues in the background. `agentInvoked` is false when the prompt was handled
-    /// while no run is active, true when it started a run, and absent for a queued prompt.
+    /// run continues in the background. `agentInvoked` is true when the prompt started a run or
+    /// was handled by sending a prompt to the agent (an extension command that calls
+    /// `pi.sendUserMessage`), false when it was handled otherwise while no run is active, and
+    /// absent for a queued prompt.
     async fn start_prompt(
         &self,
         session: Arc<AgentSession>,
@@ -313,9 +315,13 @@ impl RpcServer {
                 let mut data = json!({"disposition": disposition.as_str()});
                 let agent_invoked = match disposition {
                     PromptDisposition::Started => Some(true),
-                    PromptDisposition::Handled => {
-                        weak.upgrade().filter(|session| !session.is_streaming()).map(|_| false)
-                    }
+                    PromptDisposition::Handled => weak.upgrade().and_then(|session| {
+                        // A run that an extension prompt starts counts as pending until it ends.
+                        match session.has_pending_extension_prompts() {
+                            true => Some(true),
+                            false => (!session.is_streaming()).then_some(false),
+                        }
+                    }),
                     PromptDisposition::Queued => None,
                 };
                 if let Some(agent_invoked) = agent_invoked {

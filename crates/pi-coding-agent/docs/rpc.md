@@ -41,10 +41,11 @@ The `prompt` response data has `agentInvoked` when pi knows whether the prompt r
 | --- | --- | --- |
 | A built-in command | `handled` | `false` |
 | An extension command, `/mcp`, or an input handler that consumed the prompt, while no run is active | `handled` | `false` |
+| An extension command or input handler that sent the agent a prompt (`pi.sendUserMessage`) or a message with `triggerTurn` that has not finished | `handled` | `true` |
 | A prompt that started a run | `started` | `true` |
 | A prompt queued as steering or a follow-up | `queued` | absent |
 
-A client can finish the turn at once when `agentInvoked` is `false`.
+A client can finish the turn at once when `agentInvoked` is `false`. When an extension command sends a prompt, the response can come before the run starts.
 
 ## Abort
 

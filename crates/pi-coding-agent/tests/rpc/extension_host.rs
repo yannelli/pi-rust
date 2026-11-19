@@ -6,7 +6,7 @@ use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::rpc::RpcModeOptions;
 use serde_json::{Value, json};
 
-use crate::rpc::harness::Options;
+use crate::rpc::harness::{Options, text};
 use crate::rpc::support::{Rpc, start_with};
 
 const EXTENSION: &str = r#"export default function (pi) {
@@ -55,5 +55,40 @@ async fn extensions_run_with_the_client_as_their_ui() {
     rpc.send(json!({"id": "p", "type": "prompt", "message": "hello"})).await;
     notified(&rpc, "source rpc").await;
     rpc.settled(1).await;
+    rpc.finish().await;
+}
+
+const KICK: &str = r#"export default function (pi) {
+	// Extension prompts wait here, so the command answers before their run starts.
+	pi.on("input", async (event) => {
+		if (event.source === "extension") await new Promise((resolve) => setTimeout(resolve, 300));
+		return { action: "continue" };
+	});
+	pi.registerCommand("kick", { handler: async () => { pi.sendUserMessage("from the command"); } });
+	pi.registerCommand("noop", { handler: async () => {} });
+}
+"#;
+
+/// Paseo ends the turn of a prompt with `agentInvoked: false`, so the run an extension command
+/// starts with `pi.sendUserMessage` must report true.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_that_sends_a_prompt_reports_that_it_invoked_the_agent() {
+    let options = Options { responses: vec![FauxResponse::text("answer")], ..Options::default() };
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(options, rpc_options, |h, _| {
+        std::fs::create_dir_all(h.agent_dir.join("extensions")).unwrap();
+        std::fs::write(h.agent_dir.join("extensions/kick.ts"), KICK).unwrap();
+    })
+    .await;
+    let noop = rpc.data(json!({"id": "n", "type": "prompt", "message": "/noop"})).await;
+    assert_eq!(noop, json!({"disposition": "handled", "agentInvoked": false}));
+
+    let kick = rpc.data(json!({"id": "k", "type": "prompt", "message": "/kick"})).await;
+    assert_eq!(kick, json!({"disposition": "handled", "agentInvoked": true}));
+    assert!(rpc.records_of("agent_start").is_empty(), "the run starts after the response");
+    rpc.settled(1).await;
+    let requests = rpc.h.requests();
+    let prompt = requests.last().and_then(|request| request.messages.iter().rev().find(|m| m.role() == "user"));
+    assert_eq!(prompt.map(text).as_deref(), Some("from the command"));
     rpc.finish().await;
 }

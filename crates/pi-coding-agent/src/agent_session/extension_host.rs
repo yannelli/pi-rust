@@ -372,6 +372,12 @@ impl AgentSession {
         ExtensionPromptGuard(self.clone(), epoch)
     }
 
+    /// Whether a `pi.sendUserMessage` prompt or a `triggerTurn` message has not finished; the
+    /// run it starts counts until it ends.
+    pub(crate) fn has_pending_extension_prompts(&self) -> bool {
+        lock(&self.state).pending_extension_prompts > 0
+    }
+
     /// `epoch`: the abort count when the extension asked; a later abort cancels the prompt.
     pub(crate) async fn send_extension_user_message(
         &self,
