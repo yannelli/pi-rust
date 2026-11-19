@@ -30,6 +30,8 @@ pub mod runner;
 #[cfg(test)]
 mod sdk_settings_tests;
 mod session;
+#[cfg(test)]
+mod session_entries_tests;
 pub(crate) mod shell;
 pub mod tool;
 mod tui_hooks;
