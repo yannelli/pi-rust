@@ -256,6 +256,7 @@ pub async fn create_agent_session(options: CreateAgentSessionOptions) -> anyhow:
             run_limits: super::run_limits::RunLimitState::new(options.run_limits),
             request_hooks,
             file_checkpoints: Default::default(),
+            context_usage_cache: Default::default(),
             weak: weak.clone(),
         }
     });

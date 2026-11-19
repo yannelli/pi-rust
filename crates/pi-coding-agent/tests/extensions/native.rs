@@ -545,7 +545,26 @@ async fn agent_before_settle_results_append_entries() {
     let data = entry_data(&h, "native-settle").unwrap();
     assert_eq!(data["before"], json!(0), "{data}");
     assert!(data["outcome"].is_string(), "{data}");
+    // Without `contextEvents`, as older SDKs, the child gets the context.
+    assert!(data["context"].as_u64().is_some_and(|count| count >= 2), "{data}");
     assert!(h.errors().is_empty(), "{:?}", h.errors());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn boundary_events_carry_the_context_only_when_the_child_lists_them() {
+    for (listed, context) in [("[]", false), (r#"["agent_before_settle"]"#, true)] {
+        let setup = Setup { responses: vec![FauxResponse::text("settled")], ..Setup::default() };
+        let ui = Arc::new(NativeUi::default());
+        let h = native_in(setup, &[("NATIVE_CONTEXT_EVENTS", listed)], ExtensionMode::Tui, ui, false).await;
+        h.session.prompt("/native-settle", Vec::new()).await.unwrap();
+        h.session.prompt("settle now", Vec::new()).await.unwrap();
+        let data = entry_data(&h, "native-settle").unwrap();
+        assert_eq!(data["context"].is_u64(), context, "contextEvents {listed}: {data}");
+        // A child that did not get the context asks for it with `event.context`, and gets the same.
+        assert_eq!(data["asked"].is_u64(), !context, "contextEvents {listed}: {data}");
+        assert!(data["context"].as_u64().or(data["asked"].as_u64()).is_some_and(|count| count >= 2), "{data}");
+        assert!(h.errors().is_empty(), "{:?}", h.errors());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

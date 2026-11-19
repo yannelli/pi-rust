@@ -4,9 +4,10 @@
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor, signalId } from "./bridge.js";
 import { createUiContext } from "./ui.js";
 
-// pi-rust: the entries of this runtime's own session (target 0). `getEntries()` copies only the
-// ones appended since its last call, and all of them again when Rust reports a new generation.
-let ownEntries = { generation: null, entries: [] };
+// pi-rust: the entries of this runtime's own session (target 0), and the same objects by id.
+// `getEntries()` copies only the ones appended since its last call, and all of them again when
+// Rust reports a new generation.
+let ownEntries = { generation: null, entries: [], byId: new Map() };
 // Message objects that `message_end` handlers saw, by the id of their entry: as upstream's entry,
 // the copied entry holds the object. Weak, since only code that keeps the object can compare it.
 const endedMessages = new Map();
@@ -37,10 +38,37 @@ function ownSessionEntries() {
 	const { generation, entries } = ownEntries;
 	const added = call("session.read", 0, "entriesSince", generation, entries.length);
 	if (added.generation !== generation || added.start !== entries.length) {
-		ownEntries = { generation: added.generation, entries: [] };
+		ownEntries = { generation: added.generation, entries: [], byId: new Map() };
 	}
-	for (const entry of added.entries) ownEntries.entries.push(withEndedMessage(entry));
+	for (const entry of added.entries) {
+		const own = withEndedMessage(entry);
+		ownEntries.entries.push(own);
+		ownEntries.byId.set(own.id, own);
+	}
 	return ownEntries.entries;
+}
+
+/**
+ * pi-rust: `event.context` of `turn_end` and `agent_before_settle` from a `boundary.plan` of this
+ * runtime's session. As upstream, each `sourceEntry` is the object `getEntries()` returns, and an
+ * entry's own message is the same object in `contextMessages` and `llmMessages`.
+ */
+export function boundaryContext(plan) {
+	ownSessionEntries();
+	const drafted = new Map(plan.sources.map((entry) => [entry.id, entry]));
+	const source = (id) => drafted.get(id) ?? ownEntries.byId.get(id) ?? optional(call("session.read", 0, "getEntry", id));
+	const contextEntries = plan.entries.map(({ id, messages }) => {
+		const sourceEntry = source(id);
+		return { sourceEntry, messages: messages ?? (sourceEntry?.message ? [sourceEntry.message] : []) };
+	});
+	const contextMessages = contextEntries.flatMap((entry) => entry.messages);
+	const converted = new Map(plan.llm);
+	const llmMessages = [];
+	contextMessages.forEach((message, index) => {
+		const llm = converted.has(index) ? converted.get(index) : message;
+		if (llm) llmMessages.push(llm);
+	});
+	return { contextEntries, contextMessages, llmMessages, pendingMessages: plan.pendingMessages, canContinue: plan.canContinue };
 }
 
 /** `ctx.sessionManager`: read-only views of the session tree. */

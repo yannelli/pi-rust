@@ -86,6 +86,16 @@ enum BeforeTree {
     Summary(Box<PendingSummary>),
 }
 
+/// What [`AgentSession::context_usage`] depends on: entries only grow, and every other change of
+/// them starts a new generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct UsageKey {
+    generation: u64,
+    entries: usize,
+    leaf: Option<String>,
+    context_window: u64,
+}
+
 impl AgentSession {
     /// Move to another entry of the session tree in the same file, summarizing the abandoned
     /// branch when asked. A user or custom message target moves to its parent.
@@ -347,7 +357,22 @@ impl AgentSession {
     /// Current context use of the active branch. `tokens` is unknown right after compaction.
     pub fn context_usage(&self) -> Option<ContextUsage> {
         let model = self.limits_model()?;
-        context_usage(&self.session_manager(), model.context_window)
+        let manager = self.session_manager();
+        let key = UsageKey {
+            generation: manager.generation(),
+            entries: manager.entries().len(),
+            leaf: manager.leaf_id().map(str::to_string),
+            context_window: model.context_window,
+        };
+        let mut cache = lock(&self.context_usage_cache);
+        if let Some((cached, usage)) = cache.as_ref()
+            && *cached == key
+        {
+            return *usage;
+        }
+        let usage = context_usage(&manager, model.context_window);
+        *cache = Some((key, usage));
+        usage
     }
 
     /// Export the session to HTML; returns the written path.
