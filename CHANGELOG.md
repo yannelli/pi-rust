@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.20] - 2026-11-19
+
+### Fixed
+
+- **rpc,acp:** list the skills extensions discover in slash commands ([cf4c474](https://github.com/yannelli/pi-rust/commit/cf4c474415bd3e6cf94374fa6d1d187033c9d565))
+
 ## [0.12.19] - 2026-11-19
 
 ### Changed
