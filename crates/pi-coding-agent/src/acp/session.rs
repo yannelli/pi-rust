@@ -12,6 +12,7 @@ use agent_client_protocol_schema::{
 };
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
 
 use super::backend::{AcpClient, PiBackend};
 use super::config::{send_config_options_update, session_configuration};
@@ -38,6 +39,10 @@ struct PendingTurn {
     generation: u64,
     sender: oneshot::Sender<TurnReport>,
     usage: Option<Usage>,
+    /// Set when pi accepted the prompt: the runs that had settled before the run it started or joined.
+    armed: Option<u64>,
+    /// Fired by `session/cancel`, also before pi accepted the prompt.
+    cancel: CancellationToken,
 }
 
 pub(super) struct QueuedTurn {
@@ -71,6 +76,8 @@ pub(super) struct Inner {
     pending: Option<PendingTurn>,
     queue: VecDeque<QueuedTurn>,
     generation: u64,
+    /// The highest `settled` number of the `agent_settled` events so far.
+    last_settled: u64,
     pub tool_calls: HashMap<String, ToolPhase>,
     pub in_agent_loop: bool,
     pub snapshots: HashMap<String, Snapshot>,
@@ -242,7 +249,9 @@ impl AcpSession {
         inner.in_agent_loop = false;
         inner.generation += 1;
         let generation = inner.generation;
-        inner.pending = Some(PendingTurn { generation, sender: turn.sender, usage: None });
+        let cancel = CancellationToken::new();
+        let pending = PendingTurn { generation, sender: turn.sender, usage: None, armed: None, cancel: cancel.clone() };
+        inner.pending = Some(pending);
         let depth = inner.queue.len();
         let session = self.this();
         let title = turn.title;
@@ -251,10 +260,27 @@ impl AcpSession {
         let session = self.this();
         let (message, images) = (turn.message, turn.images);
         tokio::spawn(async move {
-            if let Err(error) = session.backend.prompt(message, images).await {
+            if let Err(error) = session.backend.prompt(generation, message, images, cancel).await {
                 session.fail_turn(generation, &error);
             }
         });
+    }
+
+    /// [`super::backend::PROMPT_ACCEPTED`]: from now on the `agent_settled` of the run the turn started
+    /// or joined ends it.
+    pub(super) fn arm_turn(&self, event: &Value) {
+        let (Some(turn), Some(before)) = (event["turn"].as_u64(), event["settled"].as_u64()) else { return };
+        let settled = {
+            let mut inner = lock(&self.inner);
+            let last_settled = inner.last_settled;
+            let Some(pending) = inner.pending.as_mut().filter(|pending| pending.generation == turn) else { return };
+            pending.armed = Some(before);
+            last_settled > before
+        };
+        // The run settled before this event reached the session.
+        if settled {
+            self.end_turn();
+        }
     }
 
     /// pi rejected the prompt: AUTH_REQUIRED for credential errors, else an error with pi's message.
@@ -278,9 +304,35 @@ impl AcpSession {
         self.start_next(next);
     }
 
-    /// `agent_settled`: publish usage, end the turn, and start the next queued prompt.
-    pub(super) async fn settle_turn(&self) {
+    /// `agent_settled`: publish usage. The settled run ends the turn that started or joined it; an
+    /// earlier run, still in the event stream when the turn began, does not.
+    pub(super) async fn settle_turn(&self, event: &Value) {
         self.publish_context_usage().await;
+        let settled = event["settled"].as_u64();
+        let ends = {
+            let mut inner = lock(&self.inner);
+            if let Some(settled) = settled {
+                inner.last_settled = inner.last_settled.max(settled);
+            }
+            inner.pending.as_ref().map(|pending| match (pending.armed, settled, event["turn"].as_u64()) {
+                (Some(before), Some(settled), _) => settled > before,
+                (Some(_), None, Some(turn)) => turn == pending.generation,
+                _ => false,
+            })
+        };
+        match ends {
+            Some(true) => self.end_turn(),
+            Some(false) => {}
+            // A run pi started on its own.
+            None => {
+                lock(&self.inner).in_agent_loop = false;
+                self.emit(queue_info(0, false));
+            }
+        }
+    }
+
+    /// End the pending turn and start the next queued prompt.
+    fn end_turn(&self) {
         let next = {
             let mut inner = lock(&self.inner);
             let reason = if inner.cancel_requested { TurnEnd::Cancelled } else { TurnEnd::EndTurn };
@@ -309,6 +361,9 @@ impl AcpSession {
         let cleared = {
             let mut inner = lock(&self.inner);
             inner.cancel_requested = true;
+            if let Some(pending) = &inner.pending {
+                pending.cancel.cancel();
+            }
             let queued: Vec<QueuedTurn> = inner.queue.drain(..).collect();
             (!queued.is_empty()).then(|| (queued, inner.pending.is_some()))
         };

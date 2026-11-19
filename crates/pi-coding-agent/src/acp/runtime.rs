@@ -14,8 +14,9 @@ use pi_agent::{AgentEvent, QueueMode};
 use pi_ai::{AssistantMessageEvent, ContentBlock, ThinkingLevel};
 use serde_json::{Value, json};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio_util::sync::CancellationToken;
 
-use super::backend::{AcpClient, BackendFactory, PiBackend};
+use super::backend::{AcpClient, BackendFactory, PROMPT_ACCEPTED, PiBackend};
 use super::errors::internal_error;
 use super::mcp_servers::ClientMcpServers;
 use super::permissions::{CallOrigin, McpToolIdentity, PermissionMode, ToolPermissions};
@@ -138,6 +139,8 @@ pub struct RuntimeBackend {
     /// `agent_settled` events so far.
     settled: Arc<AtomicU64>,
     permissions: Arc<ToolPermissions>,
+    /// The event stream, for records sent in the order of the session's own events.
+    sender: UnboundedSender<Value>,
     events: Mutex<Option<UnboundedReceiver<Value>>>,
 }
 
@@ -177,14 +180,16 @@ impl RuntimeBackend {
         let settled = Arc::new(AtomicU64::new(0));
         let settled_count = settled.clone();
         let subscription = session.subscribe(move |event| {
-            if matches!(event, AgentSessionEvent::AgentSettled { .. }) {
-                settled_count.fetch_add(1, Ordering::SeqCst);
-            }
-            if let Some(value) = lock(&encoder).encode(event) {
+            let number = matches!(event, AgentSessionEvent::AgentSettled { .. })
+                .then(|| settled_count.fetch_add(1, Ordering::SeqCst) + 1);
+            if let Some(mut value) = lock(&encoder).encode(event) {
+                if let Some(number) = number {
+                    value["settled"] = json!(number);
+                }
                 let _ = events.send(value);
             }
         });
-        let output = RpcOutput::spawn(Box::new(EventWriter { sender, buffer: Vec::new() }));
+        let output = RpcOutput::spawn(Box::new(EventWriter { sender: sender.clone(), buffer: Vec::new() }));
         let ui = RpcExtensionUi::new(output.clone());
         crate::rpc::bind_builtins(&session, &ui);
         let shutdown = RpcShutdownHandle::default();
@@ -194,7 +199,19 @@ impl RuntimeBackend {
         }
         session.model_runtime().refresh_in_background();
         let events = Mutex::new(Some(receiver));
-        Arc::new(Self { runtime, session, ui, output, host, binding, subscription, settled, permissions, events })
+        Arc::new(Self {
+            runtime,
+            session,
+            ui,
+            output,
+            host,
+            binding,
+            subscription,
+            settled,
+            permissions,
+            sender,
+            events,
+        })
     }
 
     pub fn session(&self) -> &Arc<AgentSession> {
@@ -224,30 +241,49 @@ impl PiBackend for RuntimeBackend {
         lock(&self.events).take()
     }
 
-    async fn prompt(&self, message: String, images: Vec<ContentBlock>) -> anyhow::Result<()> {
+    async fn prompt(
+        &self,
+        turn: u64,
+        message: String,
+        images: Vec<ContentBlock>,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<()> {
         let (accepted_sender, accepted) = tokio::sync::oneshot::channel();
         let accepted_sender = Arc::new(Mutex::new(Some(accepted_sender)));
         let flag = accepted_sender.clone();
+        let (session, events, settled) = (self.session.clone(), self.sender.clone(), self.settled.clone());
         let options = PromptOptions {
             images,
             // A prompt sent while pi runs on its own (a background result) joins that run.
             streaming_behavior: Some(StreamingBehavior::Steer),
-            preflight_result: Some(Arc::new(move |_| {
+            preflight_result: Some(Arc::new(move |disposition| {
+                // Cancelled on its way to pi: a new run stops at `agent_start`, before its first
+                // request, and a queued prompt leaves the run it joined.
+                match disposition {
+                    PromptDisposition::Started if cancel.is_cancelled() => session.request_abort(),
+                    PromptDisposition::Queued if cancel.is_cancelled() => {
+                        session.clear_queue();
+                    }
+                    _ => {}
+                }
+                let before = settled.load(Ordering::SeqCst);
+                // A prompt queued for a run that has settled since belongs to that run.
+                let ended = disposition == PromptDisposition::Queued && !session.is_streaming();
+                let before = if ended { before.saturating_sub(1) } else { before };
+                let _ = events.send(json!({"type": PROMPT_ACCEPTED, "turn": turn, "settled": before}));
                 if let Some(sender) = lock(&flag).take() {
                     let _ = sender.send(Ok(()));
                 }
             })),
             ..PromptOptions::default()
         };
-        let (session, output, settled) = (self.session.clone(), self.output.clone(), self.settled.clone());
-        let settled_before = settled.load(Ordering::SeqCst);
+        let (session, output) = (self.session.clone(), self.output.clone());
         tokio::spawn(async move {
             let result = session.prompt_with(&message, options).await;
-            // An extension command or `/mcp` handled the prompt without a run, so no `agent_settled`
-            // would end the turn.
-            let no_run = !session.is_streaming() && settled.load(Ordering::SeqCst) == settled_before;
-            if matches!(result, Ok(PromptDisposition::Handled)) && no_run {
-                output.send(&json!({"type": "agent_settled", "aborted": false}));
+            // An extension command or `/mcp` handled the prompt without a run. This ends its turn
+            // after the command's notices, which take the same way.
+            if matches!(result, Ok(PromptDisposition::Handled)) && !session.is_streaming() {
+                output.send(&json!({"type": "agent_settled", "aborted": false, "turn": turn}));
             }
             if let Some(sender) = lock(&accepted_sender).take() {
                 let _ = sender.send(result.map(|_| ()));

@@ -295,7 +295,8 @@ async fn restored_sessions_publish_their_title_without_renaming() {
                 .unwrap();
                 let task = tokio::spawn(async move { agent.prompt(request).await });
                 settle().await;
-                backend.emit(json!({"type": "agent_settled"}));
+                backend.emit(backend.accepted());
+                backend.emit(backend.settled());
                 task.await.unwrap().unwrap();
             }
             let titles: Vec<Value> =

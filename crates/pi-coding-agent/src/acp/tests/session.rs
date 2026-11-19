@@ -19,10 +19,13 @@ fn start(session: &Arc<AcpSession>, text: &str, title: Option<&str>) -> JoinHand
     tokio::spawn(async move { session.prompt(text, Vec::new(), title).await })
 }
 
-async fn finish_run(session: &AcpSession) {
-    for kind in ["agent_start", "turn_end", "agent_end", "agent_settled"] {
+/// pi accepts the latest prompt, runs, and settles.
+async fn finish_run(session: &AcpSession, backend: &FakeBackend) {
+    session.handle_pi_event(backend.accepted()).await;
+    for kind in ["agent_start", "turn_end", "agent_end"] {
         session.handle_pi_event(json!({"type": kind})).await;
     }
+    session.handle_pi_event(backend.settled()).await;
 }
 
 fn titled(session: &Arc<FakeBackend>, client: &Arc<FakeClient>, auto_title: bool) -> Arc<AcpSession> {
@@ -53,7 +56,8 @@ async fn prompts_stay_open_through_retries_until_agent_settled() {
     session.handle_pi_event(json!({"type": "agent_end", "willRetry": false})).await;
     settle().await;
     assert!(!turn.is_finished());
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
 }
 
@@ -69,7 +73,7 @@ async fn startup_info_is_sent_once() {
     settle().await;
     let count = client.update_bodies().iter().filter(|update| update["content"]["text"] == notice).count();
     assert_eq!(count, 1);
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
 }
 
@@ -80,8 +84,9 @@ async fn cancel_turns_the_stop_reason_into_cancelled() {
     let session = session_with(&backend, &client, &here());
     let turn = start(&session, "hello", None);
     settle().await;
+    session.handle_pi_event(backend.accepted()).await;
     session.cancel().await;
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.settled()).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::Cancelled);
     assert_eq!(backend.aborts.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(client.of_kind("usage_update"), [json!({"sessionUpdate": "usage_update", "used": 42, "size": 100})]);
@@ -103,7 +108,7 @@ async fn concurrent_prompts_queue_until_the_turn_settles() {
             .iter()
             .any(|update| update["_meta"]["piAcp"] == json!({"queueDepth": 1, "running": true}))
     );
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(first.await.unwrap().unwrap(), TurnEnd::EndTurn);
     settle().await;
     assert_eq!(backend.prompt_texts(), ["one", "two"]);
@@ -113,10 +118,94 @@ async fn concurrent_prompts_queue_until_the_turn_settles() {
             .iter()
             .any(|update| update["content"]["text"] == "Starting queued message. (0 remaining)")
     );
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(second.await.unwrap().unwrap(), TurnEnd::EndTurn);
     let last = client.update_bodies().pop().unwrap();
     assert_eq!(last["_meta"]["piAcp"], json!({"queueDepth": 0, "running": false}));
+}
+
+#[tokio::test]
+async fn a_run_that_settled_before_pi_accepted_the_prompt_does_not_end_its_turn() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    // A run pi started on its own settles while the prompt is on its way.
+    let earlier = backend.settled();
+    let turn = start(&session, "hello", None);
+    settle().await;
+    session.handle_pi_event(earlier.clone()).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(earlier).await;
+    settle().await;
+    assert!(!turn.is_finished());
+    session.handle_pi_event(backend.settled()).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
+}
+
+#[tokio::test]
+async fn a_run_that_settled_before_its_acceptance_reached_the_session_ends_the_turn() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    let turn = start(&session, "hello", None);
+    settle().await;
+    let accepted = backend.accepted();
+    session.handle_pi_event(backend.settled()).await;
+    settle().await;
+    assert!(!turn.is_finished());
+    session.handle_pi_event(accepted).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
+}
+
+#[tokio::test]
+async fn a_prompt_handled_without_a_run_ends_on_its_own_record() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    let turn = start(&session, "/extension-command", None);
+    settle().await;
+    let handled = |turn: u64| json!({"type": "agent_settled", "aborted": false, "turn": turn});
+    let current = backend.turns.lock().unwrap().last().unwrap().0;
+    session.handle_pi_event(handled(current)).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(handled(current + 7)).await;
+    settle().await;
+    assert!(!turn.is_finished(), "only after acceptance, and only the record of this turn");
+    session.handle_pi_event(handled(current)).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
+}
+
+#[tokio::test]
+async fn a_queued_prompt_ends_with_its_own_run() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    let first = start(&session, "one", None);
+    settle().await;
+    let second = start(&session, "two", None);
+    settle().await;
+    session.handle_pi_event(backend.accepted()).await;
+    let first_settled = backend.settled();
+    session.handle_pi_event(first_settled.clone()).await;
+    assert_eq!(first.await.unwrap().unwrap(), TurnEnd::EndTurn);
+    settle().await;
+    assert_eq!(backend.prompt_texts(), ["one", "two"]);
+    // A second copy of the first run's event changes nothing.
+    session.handle_pi_event(first_settled).await;
+    settle().await;
+    assert!(!second.is_finished());
+    finish_run(&session, &backend).await;
+    assert_eq!(second.await.unwrap().unwrap(), TurnEnd::EndTurn);
+}
+
+#[tokio::test]
+async fn a_cancel_before_pi_accepted_the_prompt_reaches_pi_with_it() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    let turn = start(&session, "hello", None);
+    settle().await;
+    assert!(!backend.turns.lock().unwrap()[0].1.is_cancelled());
+    session.cancel().await;
+    assert!(backend.turns.lock().unwrap()[0].1.is_cancelled(), "pi checks it when it accepts the prompt");
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::Cancelled);
 }
 
 #[tokio::test]
@@ -130,7 +219,7 @@ async fn cancel_clears_queued_prompts() {
     session.cancel().await;
     assert_eq!(second.await.unwrap().unwrap(), TurnEnd::Cancelled);
     assert!(client.update_bodies().iter().any(|update| update["content"]["text"] == "Cleared queued prompts."));
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(first.await.unwrap().unwrap(), TurnEnd::Cancelled);
     assert_eq!(backend.prompt_texts(), ["one"]);
 }
@@ -142,7 +231,7 @@ async fn slash_commands_reach_pi_unchanged_for_its_own_expansion() {
     let turn = start(&session, "/hello world", None);
     settle().await;
     assert_eq!(backend.prompt_texts(), ["/hello world"]);
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
 }
 
@@ -179,7 +268,7 @@ async fn a_rejected_prompt_starts_the_next_queued_one() {
     gate.notify_one();
     settle().await;
     assert_eq!(backend.prompt_texts(), ["one", "two"]);
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(second.await.unwrap().unwrap(), TurnEnd::EndTurn);
 }
 
@@ -192,7 +281,8 @@ async fn usage_updates_follow_context_usage_and_skip_bad_values() {
     let session = session_with(&backend, &client, &here());
     let turn = start(&session, "hello", None);
     settle().await;
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
     assert_eq!(
         client.of_kind("usage_update"),
@@ -246,7 +336,8 @@ async fn the_prompt_response_reports_the_turns_token_usage() {
     session.handle_pi_event(end("assistant", usage(100, 20, Some(8)))).await;
     assert_eq!(client.of_kind("usage_update").len(), 1, "an assistant message publishes context usage");
     session.handle_pi_event(end("assistant", usage(300, 40, None))).await;
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
     let (result, usage) = turn.await.unwrap();
     assert_eq!(result.unwrap(), TurnEnd::EndTurn);
     assert_eq!(
@@ -260,7 +351,8 @@ async fn the_prompt_response_reports_the_turns_token_usage() {
         tokio::spawn(async move { session.prompt_with_usage("quiet".into(), Vec::new(), None).await })
     };
     settle().await;
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
     assert_eq!(quiet.await.unwrap().1, None, "a turn without assistant messages reports no usage");
 }
 
@@ -271,7 +363,8 @@ async fn failing_or_slow_stats_do_not_block_the_turn() {
     let session = session_with(&backend, &client, &here());
     let turn = start(&session, "hello", None);
     settle().await;
-    session.handle_pi_event(json!({"type": "agent_settled"})).await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.handle_pi_event(backend.settled()).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
     assert!(client.of_kind("usage_update").is_empty());
 
@@ -280,9 +373,11 @@ async fn failing_or_slow_stats_do_not_block_the_turn() {
     tokio::time::pause();
     let turn = start(&session, "again", None);
     settle().await;
+    session.handle_pi_event(backend.accepted()).await;
+    let event = backend.settled();
     let settled = {
         let session = session.clone();
-        tokio::spawn(async move { session.handle_pi_event(json!({"type": "agent_settled"})).await })
+        tokio::spawn(async move { session.handle_pi_event(event).await })
     };
     tokio::time::advance(crate::acp::SESSION_STATS_TIMEOUT + Duration::from_millis(10)).await;
     settled.await.unwrap();
@@ -305,11 +400,11 @@ async fn new_sessions_are_named_after_their_first_prompt() {
     assert_eq!(info.len(), 1);
     assert_eq!(info[0]["title"], "Fix thread titles");
     assert!(info[0]["updatedAt"].is_string());
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     turn.await.unwrap().unwrap();
     let second = start(&session, "second prompt", Some("Second title"));
     settle().await;
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     second.await.unwrap().unwrap();
     assert_eq!(backend.calls(), ["name:Fix thread titles"]);
 }
@@ -321,7 +416,7 @@ async fn existing_and_manual_names_win_over_automatic_titles() {
     let session = titled(&backend, &client, true);
     let turn = start(&session, "hello", Some("Automatic title"));
     settle().await;
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     turn.await.unwrap().unwrap();
     assert!(backend.calls().is_empty());
     assert_eq!(titles(&client).last().unwrap(), "Manual title");
@@ -332,7 +427,7 @@ async fn existing_and_manual_names_win_over_automatic_titles() {
     let turn = start(&session, "hello", Some("Automatic title"));
     settle().await;
     session.set_session_name("Manual title").await.unwrap();
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     turn.await.unwrap().unwrap();
     assert_eq!(backend.calls(), ["name:Automatic title", "name:Manual title"]);
     assert_eq!(titles(&client).last().unwrap(), "Manual title");
@@ -346,7 +441,7 @@ async fn auto_title_failures_do_not_fail_the_prompt() {
     let session = titled(&backend, &client, true);
     let turn = start(&session, "hello", Some("Automatic title"));
     settle().await;
-    finish_run(&session).await;
+    finish_run(&session, &backend).await;
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
     assert!(titles(&client).is_empty());
 }

@@ -13,7 +13,7 @@ mod session;
 mod translate;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -27,7 +27,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use super::agent::{AcpAgent, AcpAgentOptions};
 use super::auth::TerminalLaunch;
-use super::backend::{AcpClient, BackendFactory, PiBackend};
+use super::backend::{AcpClient, BackendFactory, PROMPT_ACCEPTED, PiBackend};
 use super::mcp_servers::ClientMcpServers;
 use super::session::{AcpSession, AcpSessionParams};
 
@@ -140,6 +140,9 @@ impl Default for FakeConfig {
 pub struct FakeBackend {
     pub config: Mutex<FakeConfig>,
     pub prompts: Mutex<Vec<(String, Vec<pi_ai::ContentBlock>)>>,
+    /// The turn and cancel token of each prompt, in order.
+    pub turns: Mutex<Vec<(u64, tokio_util::sync::CancellationToken)>>,
+    settled: AtomicU64,
     pub ui_responses: Mutex<Vec<Value>>,
     pub calls: Mutex<Vec<String>>,
     pub aborts: AtomicUsize,
@@ -160,6 +163,8 @@ impl FakeBackend {
         Arc::new(Self {
             config: Mutex::new(config),
             prompts: Mutex::new(Vec::new()),
+            turns: Mutex::new(Vec::new()),
+            settled: AtomicU64::new(0),
             ui_responses: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
             aborts: AtomicUsize::new(0),
@@ -186,6 +191,18 @@ impl FakeBackend {
 
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
+    }
+
+    /// The event pi sends when it accepts the latest prompt (see `PROMPT_ACCEPTED`).
+    pub fn accepted(&self) -> Value {
+        let turn = self.turns.lock().unwrap().last().expect("a prompt").0;
+        json!({"type": PROMPT_ACCEPTED, "turn": turn, "settled": self.settled.load(Ordering::SeqCst)})
+    }
+
+    /// The `agent_settled` event of the next run.
+    pub fn settled(&self) -> Value {
+        let number = self.settled.fetch_add(1, Ordering::SeqCst) + 1;
+        json!({"type": "agent_settled", "aborted": false, "settled": number})
     }
 
     /// From now on each prompt waits for one notification before pi answers it.
@@ -223,8 +240,15 @@ impl PiBackend for FakeBackend {
         self.events.lock().unwrap().take()
     }
 
-    async fn prompt(&self, message: String, images: Vec<pi_ai::ContentBlock>) -> anyhow::Result<()> {
+    async fn prompt(
+        &self,
+        turn: u64,
+        message: String,
+        images: Vec<pi_ai::ContentBlock>,
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> anyhow::Result<()> {
         self.prompts.lock().unwrap().push((message, images));
+        self.turns.lock().unwrap().push((turn, cancel));
         let gate = self.prompt_gate.lock().unwrap().clone();
         if let Some(gate) = gate {
             gate.notified().await;

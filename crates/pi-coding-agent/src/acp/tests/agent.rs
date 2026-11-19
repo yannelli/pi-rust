@@ -279,7 +279,8 @@ async fn prompts_restore_stored_sessions() {
         tokio::spawn(async move { agent.prompt(prompt_request("stored-session", "hello again")).await })
     };
     settle().await;
-    backend.emit(json!({"type": "agent_settled"}));
+    backend.emit(backend.accepted());
+    backend.emit(backend.settled());
     assert_eq!(task.await.unwrap().unwrap().stop_reason, StopReason::EndTurn);
     assert_eq!(
         *factory.spawns.lock().unwrap(),

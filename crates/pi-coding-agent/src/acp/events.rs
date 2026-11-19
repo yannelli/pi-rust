@@ -8,6 +8,7 @@ use agent_client_protocol_schema::{
 };
 use serde_json::{Value, json};
 
+use super::backend::PROMPT_ACCEPTED;
 use super::bash::{
     bash_command, bash_exit_code, bash_output_delta, bash_result_text, bash_terminal_content, bash_terminal_exit_meta,
     bash_terminal_info_meta, bash_terminal_output_meta, is_bash_tool,
@@ -143,7 +144,8 @@ impl AcpSession {
             }
             "agent_start" => lock(&self.inner).in_agent_loop = true,
             "agent_end" => lock(&self.inner).in_agent_loop = false,
-            "agent_settled" => self.settle_turn().await,
+            "agent_settled" => self.settle_turn(&event).await,
+            PROMPT_ACCEPTED => self.arm_turn(&event),
             _ => {}
         }
     }

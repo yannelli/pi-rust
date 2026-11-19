@@ -17,6 +17,17 @@ const BACKGROUND: &str = r#"export default function (pi) {
 }
 "#;
 
+/// [`BACKGROUND`], and an input handler that holds the prompt "cancel me" before pi takes it.
+const SLOW_INPUT: &str = r#"export default function (pi) {
+	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	pi.registerTool({ name: "slow", label: "Slow", description: "Waits", parameters: { type: "object", properties: {} },
+		annotations: { readOnlyHint: true },
+		async execute() { await wait(1500); return { content: [{ type: "text", text: "slow done" }] }; } });
+	pi.on("session_start", () => { setTimeout(() => pi.sendUserMessage("background task finished"), 300); });
+	pi.on("input", async (event) => { if (event.text === "cancel me") await wait(500); });
+}
+"#;
+
 fn with_extension(setup: &mut Setup, source: &str) {
     let dir = setup.root.path().join("agent/extensions");
     std::fs::create_dir_all(&dir).unwrap();
@@ -82,4 +93,34 @@ async fn cancelling_a_prompt_that_joined_a_run_drops_it() {
     assert_eq!(requests.len(), 2);
     let second = serde_json::to_string(&requests[1].messages).unwrap();
     assert!(second.contains("fresh question") && !second.contains("cancel me"), "{second}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prompt_cancelled_before_pi_took_it_stops_before_its_reply() {
+    let mut setup = setup(vec![
+        FauxResponse::tool_call("s1", "slow", json!({})),
+        FauxResponse::text("Ghost reply."),
+        FauxResponse::text("Fresh answer."),
+    ]);
+    with_extension(&mut setup, SLOW_INPUT);
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].as_str().unwrap_or_else(|| panic!("{created}")).to_string();
+    client
+        .until(|m| m["params"]["update"]["toolCallId"] == "s1" && m["params"]["update"]["status"] == "in_progress")
+        .await;
+    let prompt = |text: &str| json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]});
+    // The input handler holds this prompt; the cancel arrives before pi takes it.
+    let pending = client.send_request("session/prompt", prompt("cancel me")).await;
+    client.until(|m| m["params"]["update"]["_meta"]["piAcp"]["running"] == true).await;
+    client.notify("session/cancel", json!({"sessionId": id})).await;
+    assert_eq!(client.response(pending).await["result"]["stopReason"], "cancelled");
+
+    let fresh = client.send_request("session/prompt", prompt("fresh question")).await;
+    let response = client.response(fresh).await;
+    assert_eq!(response["result"]["stopReason"], "end_turn", "{response}");
+    let reply = reply_before_response(&client.seen, fresh);
+    assert!(reply.ends_with("Fresh answer.") && !reply.contains("Ghost"), "{reply}");
 }
