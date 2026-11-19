@@ -208,6 +208,79 @@ async fn a_cancel_before_pi_accepted_the_prompt_reaches_pi_with_it() {
     assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::Cancelled);
 }
 
+fn assistant_end(stop: &str, error: Option<&str>) -> Value {
+    json!({"type": "message_end", "message": {"role": "assistant", "stopReason": stop, "errorMessage": error}})
+}
+
+#[tokio::test]
+async fn a_run_that_ends_with_a_model_error_fails_the_turn() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    let run = |events: Vec<Value>| {
+        let (session, backend) = (session.clone(), backend.clone());
+        async move {
+            let turn = start(&session, "hello", None);
+            settle().await;
+            session.handle_pi_event(backend.accepted()).await;
+            for event in events {
+                session.handle_pi_event(event).await;
+            }
+            session.handle_pi_event(backend.settled()).await;
+            turn.await.unwrap()
+        }
+    };
+    let retried = vec![
+        assistant_end("error", Some("529 overloaded")),
+        json!({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 1}),
+        assistant_end("stop", None),
+    ];
+    assert_eq!(run(retried).await.unwrap(), TurnEnd::EndTurn, "only the final failure counts");
+    let failed = vec![
+        assistant_end("error", Some("529 overloaded")),
+        json!({"type": "auto_retry_end", "success": false, "attempt": 3, "finalError": "400 invalid_request_error: unknown field"}),
+        assistant_end("error", Some("400 invalid_request_error: unknown field")),
+    ];
+    let error = run(failed).await.unwrap_err();
+    assert_eq!(
+        serde_json::to_value(&error).unwrap(),
+        json!({"code": -32603, "message": "400 invalid_request_error: unknown field"})
+    );
+    let error = run(vec![assistant_end("error", None)]).await.unwrap_err();
+    assert_eq!(error.message, "The model request failed");
+    assert_eq!(run(vec![assistant_end("aborted", Some("Request was aborted"))]).await.unwrap(), TurnEnd::EndTurn);
+}
+
+#[tokio::test]
+async fn model_errors_belong_to_their_own_run() {
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    let session = session_with(&backend, &client, &here());
+    // A failed run pi started on its own does not fail the next turn.
+    session.handle_pi_event(assistant_end("error", Some("background failure"))).await;
+    session.handle_pi_event(backend.settled()).await;
+    let turn = start(&session, "/extension-command", None);
+    settle().await;
+    session.handle_pi_event(backend.accepted()).await;
+    let current = backend.turns.lock().unwrap().last().unwrap().0;
+    session.handle_pi_event(json!({"type": "agent_settled", "aborted": false, "turn": current})).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::EndTurn);
+    // A run that failed before its acceptance reached the session fails its turn.
+    let turn = start(&session, "hello", None);
+    settle().await;
+    let accepted = backend.accepted();
+    session.handle_pi_event(assistant_end("error", Some("401 invalid key"))).await;
+    session.handle_pi_event(backend.settled()).await;
+    session.handle_pi_event(accepted).await;
+    assert_eq!(turn.await.unwrap().unwrap_err().message, "401 invalid key");
+    // A cancelled turn stays cancelled.
+    let turn = start(&session, "hello", None);
+    settle().await;
+    session.handle_pi_event(backend.accepted()).await;
+    session.cancel().await;
+    session.handle_pi_event(assistant_end("error", Some("socket hang up"))).await;
+    session.handle_pi_event(backend.settled()).await;
+    assert_eq!(turn.await.unwrap().unwrap(), TurnEnd::Cancelled);
+}
+
 #[tokio::test]
 async fn cancel_clears_queued_prompts() {
     let (client, backend) = (FakeClient::new(), FakeBackend::new());

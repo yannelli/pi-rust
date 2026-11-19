@@ -78,6 +78,10 @@ pub(super) struct Inner {
     generation: u64,
     /// The highest `settled` number of the `agent_settled` events so far.
     last_settled: u64,
+    /// The error of the last assistant message of the running run, if it failed.
+    run_error: Option<String>,
+    /// The error the run numbered `last_settled` ended with.
+    last_settled_error: Option<String>,
     pub tool_calls: HashMap<String, ToolPhase>,
     pub in_agent_loop: bool,
     pub snapshots: HashMap<String, Snapshot>,
@@ -272,14 +276,14 @@ impl AcpSession {
         let (Some(turn), Some(before)) = (event["turn"].as_u64(), event["settled"].as_u64()) else { return };
         let settled = {
             let mut inner = lock(&self.inner);
-            let last_settled = inner.last_settled;
+            let (last_settled, error) = (inner.last_settled, inner.last_settled_error.clone());
             let Some(pending) = inner.pending.as_mut().filter(|pending| pending.generation == turn) else { return };
             pending.armed = Some(before);
-            last_settled > before
+            (last_settled > before).then_some(error)
         };
         // The run settled before this event reached the session.
-        if settled {
-            self.end_turn();
+        if let Some(error) = settled {
+            self.end_turn(error);
         }
     }
 
@@ -309,19 +313,24 @@ impl AcpSession {
     pub(super) async fn settle_turn(&self, event: &Value) {
         self.publish_context_usage().await;
         let settled = event["settled"].as_u64();
-        let ends = {
+        let (ends, error) = {
             let mut inner = lock(&self.inner);
+            // A prompt handled without a run has no error of its own.
+            let mut error = None;
             if let Some(settled) = settled {
+                error = inner.run_error.take();
                 inner.last_settled = inner.last_settled.max(settled);
+                inner.last_settled_error = error.clone();
             }
-            inner.pending.as_ref().map(|pending| match (pending.armed, settled, event["turn"].as_u64()) {
+            let ends = inner.pending.as_ref().map(|pending| match (pending.armed, settled, event["turn"].as_u64()) {
                 (Some(before), Some(settled), _) => settled > before,
                 (Some(_), None, Some(turn)) => turn == pending.generation,
                 _ => false,
-            })
+            });
+            (ends, error)
         };
         match ends {
-            Some(true) => self.end_turn(),
+            Some(true) => self.end_turn(error),
             Some(false) => {}
             // A run pi started on its own.
             None => {
@@ -331,13 +340,18 @@ impl AcpSession {
         }
     }
 
-    /// End the pending turn and start the next queued prompt.
-    fn end_turn(&self) {
+    /// End the pending turn, failed with `error` when its run ended with a model error, and start
+    /// the next queued prompt.
+    fn end_turn(&self, error: Option<String>) {
         let next = {
             let mut inner = lock(&self.inner);
-            let reason = if inner.cancel_requested { TurnEnd::Cancelled } else { TurnEnd::EndTurn };
+            let result = match error {
+                _ if inner.cancel_requested => Ok(TurnEnd::Cancelled),
+                Some(error) => Err(prompt_failed(&error)),
+                None => Ok(TurnEnd::EndTurn),
+            };
             if let Some(pending) = inner.pending.take() {
-                let _ = pending.sender.send((Ok(reason), pending.usage));
+                let _ = pending.sender.send((result, pending.usage));
             }
             inner.in_agent_loop = false;
             inner.queue.pop_front().map(|turn| (turn, inner.queue.len()))
@@ -379,10 +393,16 @@ impl AcpSession {
         }
     }
 
-    /// `message_end` of an assistant message: count its usage for the running turn.
-    pub(super) fn record_turn_usage(&self, usage: &Value) {
-        if let Some(pending) = lock(&self.inner).pending.as_mut() {
-            add_turn_usage(&mut pending.usage, usage);
+    /// `message_end` of an assistant message: count its usage for the running turn, and keep its
+    /// error. Only the last message of a run counts, so a retry that succeeds clears it.
+    pub(super) fn record_assistant_message(&self, message: &Value) {
+        let mut inner = lock(&self.inner);
+        inner.run_error = (message["stopReason"] == "error").then(|| {
+            let error = message["errorMessage"].as_str().map(str::trim).unwrap_or_default();
+            if error.is_empty() { "The model request failed".to_string() } else { error.to_string() }
+        });
+        if let Some(pending) = inner.pending.as_mut() {
+            add_turn_usage(&mut pending.usage, &message["usage"]);
         }
     }
 

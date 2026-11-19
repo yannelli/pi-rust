@@ -68,6 +68,30 @@ async fn a_prompt_sent_while_pi_runs_on_its_own_joins_that_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_model_error_fails_the_prompt_once_the_retries_are_used_up() {
+    let setup = setup(vec![
+        FauxResponse::Error("529 overloaded_error: Overloaded".into()),
+        FauxResponse::text("Recovered."),
+        FauxResponse::Error("400 invalid_request_error: unknown field".into()),
+    ]);
+    setup.options.app.settings.as_ref().expect("settings").set_retry_base_delay_ms(1);
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    client.request("initialize", json!({"protocolVersion": 1, "clientCapabilities": {}})).await;
+    let created = client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let id = created["result"]["sessionId"].as_str().unwrap_or_else(|| panic!("{created}")).to_string();
+    let prompt = |text: &str| json!({"sessionId": id, "prompt": [{"type": "text", "text": text}]});
+
+    let retried = client.request("session/prompt", prompt("first")).await;
+    assert_eq!(retried["result"]["stopReason"], "end_turn", "{retried}");
+    let text = texts(&client.updates(&id), "agent_message_chunk");
+    assert!(text.contains("Retrying (attempt 1/") && text.contains("Recovered."), "{text}");
+
+    let failed = client.request("session/prompt", prompt("second")).await;
+    assert_eq!(failed["error"], json!({"code": -32603, "message": "400 invalid_request_error: unknown field"}));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn cancelling_a_prompt_that_joined_a_run_drops_it() {
     let mut setup = setup(vec![FauxResponse::tool_call("s1", "slow", json!({})), FauxResponse::text("Fresh answer.")]);
     with_extension(&mut setup, BACKGROUND);

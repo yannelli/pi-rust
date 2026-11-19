@@ -28,6 +28,7 @@ Each editor session runs a pi session in its project directory. pi saves it in `
 - A turn ends with the run that its prompt started or joined, also when the event that ends an earlier run arrives late.
 - `session/cancel` stops the run and drops the prompts that pi queued for it. A cancelled prompt that pi did not take yet, for example while extension `input` handlers run, sends no model request.
 - When pi rejects a prompt, `session/prompt` fails with a JSON-RPC error (code `-32603`) whose message is pi's message. Missing credentials give `AUTH_REQUIRED` (`-32000`), as before. Earlier versions ended such a turn with `end_turn` and no text.
+- When the turn's run ends with a failed model request, `session/prompt` fails the same way, with the provider's error message. pi retries transient errors first, as set in the `retry` settings, and shows `Retrying (attempt n/max, waiting s)...` meanwhile. Only the last request of the run counts: a retry that succeeds ends the turn normally. Paseo marks such a turn failed and shows the message; Zed shows it in an error callout. Earlier versions ended the turn with `end_turn` and no text.
 
 ## Editor features
 
