@@ -25,6 +25,14 @@ use crate::headless_commands::{
 /// until the session is idle).
 pub(crate) const ABORT_REPLY_LIMIT: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// `record` with the request `id`, when the request had one.
+fn with_id(mut record: Value, id: Option<&Value>) -> Value {
+    if let Some(id) = id {
+        record["id"] = id.clone();
+    }
+    record
+}
+
 fn ok(id: Option<&Value>, command: &str, data: Option<Value>) -> anyhow::Result<Option<Reply>> {
     Ok(Some(Reply::Json(success(id, command, data))))
 }
@@ -313,6 +321,7 @@ impl RpcServer {
         let accepted = Arc::new(AtomicBool::new(false));
         let (flag, output, response_id) = (accepted.clone(), self.output.clone(), id.cloned());
         let weak = Arc::downgrade(&session);
+        let runs_before = session.runs_started();
         let options = PromptOptions {
             images,
             streaming_behavior: streaming_behavior.map(Into::into),
@@ -323,10 +332,21 @@ impl RpcServer {
                     PromptDisposition::Started => Some(true),
                     PromptDisposition::Handled => weak.upgrade().and_then(|session| {
                         // A run that an extension prompt starts counts as pending until it ends.
-                        match session.has_pending_extension_prompts() {
-                            true => Some(true),
-                            false => (!session.is_streaming()).then_some(false),
+                        if !session.has_pending_extension_prompts() {
+                            return (!session.is_streaming()).then_some(false);
                         }
+                        // The prompt may still start no run: an abort cancels it, or an `input`
+                        // handler takes it. Then `prompt_result` corrects the answer, as Paseo
+                        // expects, so the client's turn does not wait for a run.
+                        let (output, id) = (output.clone(), response_id.clone());
+                        tokio::spawn(async move {
+                            session.wait_for_extension_prompts().await;
+                            if session.runs_started() == runs_before {
+                                let correction = json!({"type": "prompt_result", "agentInvoked": false});
+                                output.send(&with_id(correction, id.as_ref()));
+                            }
+                        });
+                        Some(true)
                     }),
                     PromptDisposition::Queued => None,
                 };

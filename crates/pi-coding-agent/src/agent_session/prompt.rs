@@ -225,6 +225,7 @@ impl AgentSession {
             }
             state.abort_requested = false;
             state.run_active = true;
+            state.runs_started += 1;
         }
         self.file_checkpoints.begin_prompt(&self.session_id());
         self.notify_idle();

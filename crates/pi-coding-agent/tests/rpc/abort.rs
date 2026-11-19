@@ -111,13 +111,16 @@ async fn an_abort_while_agent_settled_handlers_run_answers_after_the_settled_eve
 async fn an_abort_cancels_an_extension_prompt_that_has_not_started() {
     let mut rpc = with_extension(vec![FauxResponse::text("only for the next prompt")], LATER).await;
     rpc.send(json!({"id": "c", "type": "prompt", "message": "/later"})).await;
-    rpc.response("c").await;
+    assert_eq!(rpc.response("c").await["data"], json!({"disposition": "handled", "agentInvoked": true}));
     let started = Instant::now();
     rpc.send(json!({"id": "a", "type": "abort"})).await;
     rpc.response("a").await;
     assert!(started.elapsed() < Duration::from_millis(1500), "abort took {:?}", started.elapsed());
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(rpc.records_of("agent_start").is_empty(), "the stopped extension prompt must not run");
+    // The command's prompt started no run, so a client such as Paseo can end the command's turn.
+    let correction = rpc.wait_for(|record| record["type"] == "prompt_result").await;
+    assert_eq!(correction, json!({"type": "prompt_result", "agentInvoked": false, "id": "c"}));
     rpc.send(json!({"id": "p", "type": "prompt", "message": "Next"})).await;
     assert_eq!(rpc.response("p").await["success"], true);
     assert_eq!(rpc.settled(1).await, json!({"type": "agent_settled", "aborted": false}));

@@ -132,5 +132,7 @@ async fn a_command_that_sends_a_prompt_reports_that_it_invoked_the_agent() {
     let requests = rpc.h.requests();
     let prompt = requests.last().and_then(|request| request.messages.iter().rev().find(|m| m.role() == "user"));
     assert_eq!(prompt.map(text).as_deref(), Some("from the command"));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(rpc.records_of("prompt_result").is_empty(), "the prompt ran, so no correction");
     rpc.finish().await;
 }
