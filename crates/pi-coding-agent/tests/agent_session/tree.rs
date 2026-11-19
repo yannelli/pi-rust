@@ -113,6 +113,23 @@ async fn in_memory_sessions_cannot_export_html() {
     assert_eq!(error.to_string(), "Cannot export in-memory session to HTML");
 }
 
+// pi-rust keeps the last context usage, which native extensions read with every event.
+#[tokio::test]
+async fn context_usage_follows_appended_entries_and_tree_navigation() {
+    let h = harness(Options { responses: vec![FauxResponse::text("one")], ..Options::default() }).await;
+    h.session.prompt("first question", Vec::new()).await.unwrap();
+    let answer = h.session.session_manager().leaf_id().unwrap().to_string();
+    let tokens = || h.session.context_usage().unwrap().tokens.unwrap();
+    let before = tokens();
+    assert_eq!(tokens(), before);
+    let note = pi_ai::UserContent::Text("a note that adds to the context ".repeat(50));
+    h.session.session_manager().append_custom_message_entry("note", note, Some(true), None).unwrap();
+    let grown = tokens();
+    assert!(grown > before, "{grown} > {before}");
+    h.session.navigate_tree(&answer, NavigateTreeOptions::default()).await.unwrap();
+    assert_eq!(tokens(), before, "the note left the branch");
+}
+
 // Upstream issue 11451: a resume restored the level of a change left on the abandoned branch.
 #[tokio::test]
 async fn prompts_after_tree_navigation_record_the_live_thinking_level() {

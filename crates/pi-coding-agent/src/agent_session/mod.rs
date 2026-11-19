@@ -165,6 +165,9 @@ pub struct AgentSession {
     request_hooks: RequestHooksSlot,
     /// Files the edit and write tools changed, per prompt, for `/undo`.
     file_checkpoints: file_checkpoints::FileCheckpoints,
+    /// The last [`Self::context_usage`] and what it depends on (pi-rust): native extensions read
+    /// it with every event.
+    context_usage_cache: Mutex<Option<(tree::UsageKey, Option<crate::compaction::ContextUsage>)>>,
     weak: Weak<AgentSession>,
 }
 
