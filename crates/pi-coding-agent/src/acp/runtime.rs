@@ -394,6 +394,8 @@ impl PiBackend for RuntimeBackend {
     }
 
     async fn get_commands(&self) -> anyhow::Result<Value> {
+        // Skills and prompts of `resources_discover` are known once extensions are bound.
+        self.session.wait_extensions_bound().await;
         let mut commands = builtin_commands(&self.session);
         if let Some(host) = &self.host {
             commands.extend(host.commands(&self.session));

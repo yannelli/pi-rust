@@ -44,7 +44,7 @@ These features of the editor work:
 - The **Fast mode** selector (pi-rust extension, choices **Fast off** and **Fast on**). It shows only for models that have a fast mode. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
 - Tool call diffs and terminals. See [Bash calls](#bash-calls).
 - Context usage.
-- Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`.
+- Slash commands: prompt templates, `/skill:name`, `/compact`, `/autocompact`, `/export`, `/session`, `/name`, `/steering`, `/follow-up`, and `/changelog`. pi sends the list after the extensions are bound, so it has the skills and prompt templates that extensions add. Skills kept out of the system prompt, such as deferred or user-only skills, are in the list too.
 - The pi-rust commands `/usage`, `/context`, `/extensions`, `/fast`, and `/reload`. They run in pi without a model call and answer with an agent message. [RPC mode](rpc.md#built-in-commands) describes each one. After `/reload` or an extension change, pi sends `available_commands_update` again.
 - `/mcp` while MCP runs for the session. Its notices are agent messages with `_meta.piAcp.notify`.
 

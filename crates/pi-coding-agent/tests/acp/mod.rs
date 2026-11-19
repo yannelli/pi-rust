@@ -3,6 +3,7 @@
 
 use crate::agent_session::{http_mock, mcp_fake};
 use crate::offline_guard;
+use crate::rpc::extension_host::add_late_skill_extension;
 
 mod bash;
 mod binary;
@@ -21,6 +22,7 @@ use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
 use pi_coding_agent::acp::{AcpModeOptions, serve_acp};
 use pi_coding_agent::app::AppOptions;
+use pi_coding_agent::extensions::rpc::ExtensionRpcHost;
 use pi_coding_agent::settings::SettingsManager;
 use serde_json::{Value, json};
 
@@ -328,6 +330,20 @@ async fn headless_commands_answer_without_a_model_call() {
     assert!(texts(&updates, "agent_message_chunk").starts_with("Reloaded extensions"), "{updates:?}");
     assert!(updates.iter().any(|update| update["sessionUpdate"] == "available_commands_update"));
     assert!(setup.provider.requests().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn advertised_commands_include_the_skills_extensions_discover() {
+    let mut setup = setup(Vec::new());
+    setup.options.extension_host = Some(ExtensionRpcHost::shared());
+    add_late_skill_extension(&setup.root.path().join("agent"), &setup.root.path().join("discovered"));
+    let work = setup.root.path().join("work");
+    let mut client = start(&setup);
+    client.request("session/new", json!({"cwd": work, "mcpServers": []})).await;
+    let advertised =
+        client.until(|message| message["params"]["update"]["sessionUpdate"] == "available_commands_update").await;
+    let commands = &advertised["params"]["update"]["availableCommands"];
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "skill:late"), "{commands}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
