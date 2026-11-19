@@ -358,7 +358,10 @@ async fn reports_protocol_errors() {
     let relative = client.request("session/new", json!({"cwd": "relative", "mcpServers": []})).await;
     assert_eq!(relative["error"]["code"], -32602);
     let missing = client.request("session/load", json!({"sessionId": "nope", "cwd": "/tmp", "mcpServers": []})).await;
-    assert_eq!(missing["error"]["data"], "Unknown sessionId: nope");
+    assert_eq!(
+        missing["error"],
+        json!({"code": -32602, "message": "Invalid params: Unknown sessionId: nope", "data": "Unknown sessionId: nope"})
+    );
     assert_eq!(client.request("authenticate", json!({"methodId": "pi_terminal_login"})).await["result"], json!({}));
 }
 

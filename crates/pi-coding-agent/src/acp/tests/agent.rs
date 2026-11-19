@@ -289,7 +289,10 @@ async fn prompts_restore_stored_sessions() {
     assert_eq!(backend.prompt_texts(), ["hello again"]);
     assert_eq!(agent.store.get("stored-session").unwrap().cwd, "/tmp/store-project");
     let error = agent.prompt(prompt_request("unknown", "hi")).await.unwrap_err();
-    assert_eq!((code(&error), error.data.clone()), (-32602, Some(json!("Unknown sessionId: unknown"))));
+    assert_eq!(
+        serde_json::to_value(&error).unwrap(),
+        json!({"code": -32602, "message": "Invalid params: Unknown sessionId: unknown", "data": "Unknown sessionId: unknown"})
+    );
 }
 
 #[tokio::test]

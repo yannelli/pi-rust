@@ -9,9 +9,15 @@ pub type AcpResult<T> = Result<T, Error>;
 
 const AUTH_REQUIRED_MESSAGE: &str = "Configure an API key or log in with an OAuth provider.";
 
-/// `RequestError.invalidParams(data)`: the detail travels as `data`.
+/// `RequestError.invalidParams(data)`, with a text detail also in the message: clients such as
+/// Paseo show only the message when `data` is no object.
 pub fn invalid_params(data: impl Into<Value>) -> Error {
-    Error::new(-32602, "Invalid params").data(data.into())
+    let data = data.into();
+    let message = match data.as_str().map(str::trim) {
+        Some(detail) if !detail.is_empty() => format!("Invalid params: {detail}"),
+        _ => "Invalid params".to_string(),
+    };
+    Error::new(-32602, message).data(data)
 }
 
 /// `RequestError.internalError(data, message)`.
