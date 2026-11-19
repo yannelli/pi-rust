@@ -14,6 +14,7 @@ mod gaps;
 pub(crate) mod harness;
 mod host_additions;
 mod init;
+mod interrupt;
 mod keys;
 mod notify;
 mod prompt_history;

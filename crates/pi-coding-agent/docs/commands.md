@@ -6,6 +6,10 @@ If you type while the agent works, pi puts your input in the queue as steering. 
 
 pi sends steering after the tool calls of the current turn. It sends follow-ups only when the agent stops. To send the queued follow-ups now, press Alt+Down. On Windows, press Alt+S. This key moves the follow-ups to the steering queue and does not stop the current turn. To use a different key, set `app.message.sendNow` in `keybindings.json`. To edit the queue, press Alt+Up. On Windows, press Alt+Q.
 
+To stop the agent and send your message immediately, press Ctrl+Enter. pi stops the current turn or the compaction, also a tool call that runs for a long time. Then pi sends the queued messages and the text in the editor as one prompt, with a blank line between the messages. Ctrl+Enter does the same as Esc and then Enter. A slash command or a `!` command in the editor runs as with Enter and does not stop the agent. When the agent does not work, Ctrl+Enter does the same as Enter.
+
+To use a different key, set `app.message.interrupt` in `keybindings.json`. Terminals without the Kitty keyboard protocol or modifyOtherKeys send Ctrl+Enter as Enter, or in Windows Terminal as a new line. In these terminals, set a different key. If your `keybindings.json` gives Ctrl+Enter to `tui.input.submit` or `tui.input.newLine`, Ctrl+Enter keeps that action, and `app.message.interrupt` has no key until you set one.
+
 pi-rust adds `/diff`, `/context`, `/usage`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, `/widgets`, `/fast`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
 
 `/fast` turns fast mode on or off. See [Fast mode](providers.md#fast-mode-pi-rust-extension).

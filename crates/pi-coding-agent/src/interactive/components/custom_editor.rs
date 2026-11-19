@@ -201,7 +201,9 @@ impl EditorHandle {
             self.editor.handle_input(data);
             return;
         }
-        let submits = keys.matches(data, "tui.input.submit") || keys.matches(data, "app.message.followUp");
+        let submits = ["tui.input.submit", "app.message.followUp", "app.message.interrupt"]
+            .iter()
+            .any(|id| keys.matches(data, id));
         self.leading_space.set(submits && self.editor.get_text().starts_with(' '));
         if keys.matches(data, "app.clipboard.pasteImage") {
             let handler = self.handlers.borrow().on_paste_image.clone();

@@ -13,7 +13,7 @@ use pi_tui::{AutocompleteProvider, Tui, TuiOptions, ui_loop};
 
 use super::{CustomEditor, EditorHandle, StatusIndicator};
 use crate::agent_session::CompactionReason;
-use crate::interactive_components::test_support::setup_with;
+use crate::interactive_components::test_support::{setup, setup_with};
 
 fn plain_theme() -> EditorTheme {
     let plain: StyleFn = Rc::new(str::to_string);
@@ -52,6 +52,60 @@ fn gives_an_explicit_history_binding_precedence_over_model_cycling() {
 
     editor.handle_input("\x0e");
     assert_eq!(editor.get_text(), "draft");
+}
+
+/// Ctrl+Enter in its Kitty and modifyOtherKeys forms.
+const CTRL_ENTER: [&str; 2] = ["\x1b[13;5u", "\x1b[27;5;13~"];
+
+/// The message actions an editor ran and the texts it submitted.
+#[derive(Default)]
+struct Recorded {
+    actions: RefCell<Vec<&'static str>>,
+    submitted: RefCell<Vec<String>>,
+}
+
+fn recording_editor(tui: &Tui) -> (EditorHandle, Rc<Recorded>) {
+    let editor = editor(tui);
+    let recorded = Rc::new(Recorded::default());
+    for id in ["app.message.followUp", "app.message.dequeue", "app.message.sendNow", "app.message.interrupt"] {
+        let recorded = recorded.clone();
+        editor.on_action(id, move || recorded.actions.borrow_mut().push(id));
+    }
+    let sink = recorded.clone();
+    editor.on_submit(move |text| sink.submitted.borrow_mut().push(text.to_string()));
+    (editor, recorded)
+}
+
+#[test]
+fn ctrl_enter_runs_only_the_interrupt_action() {
+    let _keys = setup();
+    let tui = tui();
+    let (editor, recorded) = recording_editor(&tui);
+    editor.set_text("draft");
+
+    for sequence in CTRL_ENTER {
+        editor.handle_input(sequence);
+    }
+    assert_eq!(*recorded.actions.borrow(), ["app.message.interrupt"; 2]);
+    assert!(recorded.submitted.borrow().is_empty());
+    assert_eq!(editor.get_text(), "draft", "no new line");
+
+    editor.handle_input("\r");
+    assert_eq!(*recorded.submitted.borrow(), ["draft"]);
+    assert_eq!(recorded.actions.borrow().len(), 2);
+}
+
+#[test]
+fn ctrl_enter_keeps_a_new_line_binding_from_keybindings_json() {
+    let _keys = setup_with(&[("tui.input.newLine", "ctrl+enter")]);
+    let tui = tui();
+    let (editor, recorded) = recording_editor(&tui);
+    editor.set_text("draft");
+
+    editor.handle_input(CTRL_ENTER[0]);
+    assert!(recorded.actions.borrow().is_empty());
+    assert!(recorded.submitted.borrow().is_empty());
+    assert_eq!(editor.get_text(), "draft\n");
 }
 
 /// Offers `/command-0` to `/command-11` and replaces the cursor line with the chosen value.

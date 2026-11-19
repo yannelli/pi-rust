@@ -65,6 +65,7 @@ pub fn app_keybindings_for(platform: &str, windows: bool) -> KeybindingDefinitio
         ("app.message.followUp", def(&[pick("ctrl+q", "alt+enter")], "Queue follow-up message")),
         ("app.message.dequeue", def(&[pick("alt+q", "alt+up")], "Restore queued messages")),
         ("app.message.sendNow", def(&[pick("alt+s", "alt+down")], "Send queued follow-ups now")),
+        ("app.message.interrupt", def(&["ctrl+enter"], "Interrupt and send now")),
         (
             "app.clipboard.pasteImage",
             def(&[pick("alt+v", "ctrl+v")], "Paste files on macOS, images, or text from clipboard"),
@@ -365,6 +366,23 @@ pub fn migrate_keybindings_config_file(agent_dir: &Path) {
     }
 }
 
+/// [`keybindings`] for `user`. A `keybindings.json` that gives Ctrl+Enter to submit or a new line
+/// keeps it there, and `app.message.interrupt` then has no default key.
+fn keybindings_with(user: &KeybindingsConfig) -> KeybindingDefinitions {
+    let mut definitions = keybindings();
+    let takes_ctrl_enter = |id: &str| {
+        let keys = user.get(id).map(KeybindingValue::keys).unwrap_or_default();
+        keys.iter().any(|key| key == "ctrl+enter" || key == "ctrl+return")
+    };
+    if (takes_ctrl_enter("tui.input.submit") || takes_ctrl_enter("tui.input.newLine"))
+        && !user.contains_key("app.message.interrupt")
+        && let Some(interrupt) = definitions.get_mut("app.message.interrupt")
+    {
+        interrupt.default_keys.clear();
+    }
+    definitions
+}
+
 /// The coding agent's keybindings: [`keybindings`] plus the user's `keybindings.json`.
 #[derive(Debug, Clone)]
 pub struct KeybindingsManager {
@@ -374,7 +392,8 @@ pub struct KeybindingsManager {
 
 impl KeybindingsManager {
     pub fn new(user_bindings: KeybindingsConfig, config_path: Option<PathBuf>) -> Self {
-        Self { inner: pi_tui::KeybindingsManager::new(keybindings(), user_bindings), config_path }
+        let definitions = keybindings_with(&user_bindings);
+        Self { inner: pi_tui::KeybindingsManager::new(definitions, user_bindings), config_path }
     }
 
     /// Loads `<agent dir>/keybindings.json`.
@@ -387,7 +406,8 @@ impl KeybindingsManager {
     /// Re-reads the config file (for `/reload`). Call [`Self::install`] afterwards.
     pub fn reload(&mut self) {
         if let Some(path) = &self.config_path {
-            self.inner.set_user_bindings(load_keybindings_file(path));
+            let user_bindings = load_keybindings_file(path);
+            self.inner = pi_tui::KeybindingsManager::new(keybindings_with(&user_bindings), user_bindings);
         }
     }
 

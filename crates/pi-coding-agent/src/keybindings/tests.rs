@@ -27,6 +27,9 @@ fn platform_defaults_apply_consistently() {
         assert_eq!(keys(&definitions, "app.model.cycleBackward"), pick("alt+p", "shift+ctrl+p"));
         assert_eq!(keys(&definitions, "app.message.dequeue"), pick("alt+q", "alt+up"));
         assert_eq!(keys(&definitions, "app.message.sendNow"), pick("alt+s", "alt+down"));
+        assert_eq!(keys(&definitions, "app.message.interrupt"), ["ctrl+enter"]);
+        let interrupt = definitions.get("app.message.interrupt").unwrap();
+        assert_eq!(interrupt.description.as_deref(), Some("Interrupt and send now"));
         let undo = if platform == "win32" { vec!["ctrl+z".to_string()] } else { pick("alt+z", "ctrl+-") };
         assert_eq!(keys(&definitions, "tui.editor.undo"), undo);
         let previous: Vec<&str> = if windows { vec!["ctrl+up"] } else { vec!["ctrl+shift+up", "ctrl+up"] };
@@ -117,6 +120,29 @@ fn invalid_values_and_schema_are_ignored_and_reload_rereads() {
     manager.reload();
     assert_eq!(manager.get_keys("app.exit"), ["ctrl+q"]);
     assert_eq!(manager.get_keys("app.model.select"), ["ctrl+l"]);
+}
+
+#[test]
+fn ctrl_enter_stays_with_submit_or_new_line_from_keybindings_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = keybindings_path(dir.path());
+    let interrupt = |text: &str| {
+        std::fs::write(&path, text).unwrap();
+        KeybindingsManager::create(dir.path()).get_keys("app.message.interrupt")
+    };
+    assert!(interrupt(r#"{"tui.input.newLine": ["shift+enter", "ctrl+enter"]}"#).is_empty());
+    assert!(interrupt(r#"{"tui.input.submit": "ctrl+return"}"#).is_empty());
+    let own = r#"{"tui.input.submit": "ctrl+enter", "app.message.interrupt": "ctrl+enter"}"#;
+    assert_eq!(interrupt(own), ["ctrl+enter"]);
+    assert_eq!(interrupt(r#"{"tui.input.submit": ["enter", "alt+enter"]}"#), ["ctrl+enter"]);
+
+    std::fs::write(&path, r#"{"tui.input.newLine": "ctrl+enter"}"#).unwrap();
+    let mut manager = KeybindingsManager::create(dir.path());
+    assert!(manager.get_keys("app.message.interrupt").is_empty());
+    std::fs::write(&path, "{}").unwrap();
+    manager.reload();
+    assert_eq!(manager.get_keys("app.message.interrupt"), ["ctrl+enter"]);
+    assert_eq!(manager.get_keys("tui.input.newLine"), ["shift+enter", "ctrl+j"]);
 }
 
 #[test]
