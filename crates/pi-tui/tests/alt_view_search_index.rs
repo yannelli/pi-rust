@@ -6,12 +6,12 @@ use crate::alt_view_common;
 use std::rc::Rc;
 
 use alt_view_common::{column_of, last_column_of};
-use pi_tui::Component;
 use pi_tui::alt_screen_search::{
     AltScreenSearchComponent, AltScreenSearchIndex, AltScreenSearchMatch, AltScreenSearchSegment,
     find_alt_screen_search_matches,
 };
 use pi_tui::utils::{strip_terminal_sequences, visible_width};
+use pi_tui::{ChunkedLines, Component};
 use regex::Regex;
 
 fn segment(row: usize, start_col: usize, end_col: usize) -> AltScreenSearchSegment {
@@ -41,21 +41,22 @@ fn maps_normalized_ascii_and_unicode_search_matches_back_to_rendered_columns() {
 #[test]
 fn reuses_indexed_transcript_matches_until_the_query_or_rendered_lines_change() {
     let mut index = AltScreenSearchIndex::default();
-    let initial = index.search(&lines(&["alpha needle", "omega"]), "needle");
+    let chunked = |values: &[&str]| ChunkedLines::from(lines(values).as_ref().clone());
+    let initial = index.search(&chunked(&["alpha needle", "omega"]), "needle");
     assert!(initial.changed);
     assert_eq!(initial.matches.len(), 1);
     let initial_matches = initial.matches.as_ptr();
 
-    let cached = index.search(&lines(&["alpha needle", "omega"]), "needle");
+    let cached = index.search(&chunked(&["alpha needle", "omega"]), "needle");
     assert!(!cached.changed);
     assert_eq!(cached.matches.as_ptr(), initial_matches);
 
-    let changed_query = index.search(&lines(&["alpha needle", "omega"]), "omega");
+    let changed_query = index.search(&chunked(&["alpha needle", "omega"]), "omega");
     assert!(changed_query.changed);
     assert_ne!(changed_query.matches.as_ptr(), initial_matches);
     assert_eq!(changed_query.matches.first().map(|found| found.segments.clone()), Some(vec![segment(1, 0, 5)]));
 
-    let changed_lines = index.search(&lines(&["alpha needle", "no match"]), "omega");
+    let changed_lines = index.search(&chunked(&["alpha needle", "no match"]), "omega");
     assert!(changed_lines.changed);
     assert!(changed_lines.matches.is_empty());
 }

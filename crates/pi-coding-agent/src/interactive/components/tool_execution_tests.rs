@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use pi_tui::line_chunks::{chunks_len, flatten_chunks};
 use pi_tui::utils::strip_terminal_sequences;
 use pi_tui::{Component, ComponentRef, Tui};
 use serde_json::{Value, json};
@@ -152,4 +153,52 @@ fn an_extension_draws_the_expanded_body_with_a_height_limit() {
     component.update_result(view(json!({})), false);
     let plain = shown(&mut component);
     assert!(plain.contains("shortened") && !plain.contains("original"), "{plain}");
+}
+
+fn same_chunks(a: &[Rc<Vec<String>>], b: &[Rc<Vec<String>>]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| Rc::ptr_eq(a, b))
+}
+
+#[test]
+fn shared_chunks_match_render_and_stay_shared_while_unchanged() {
+    let harness = Harness::new(120, 10, |_| pi_tui::Spacer::new(0));
+    let renderer = Rc::new(crate::interactive::renderers::ShellRenderer { prompt: "$" });
+    let mut component = ToolExecutionComponent::new(
+        "bash",
+        "tool-1",
+        json!({"command": "seq 1 40"}),
+        ToolExecutionOptions::default(),
+        ToolDisplay::Renderer(renderer),
+        &harness.tui,
+        PathBuf::from("."),
+    );
+    let output = (1..=40).map(|n| n.to_string()).collect::<Vec<_>>().join("\n");
+    let result = ToolResultView {
+        content: vec![pi_ai::ContentBlock::text(&output)],
+        duration_ms: Some(12),
+        ..ToolResultView::default()
+    };
+    component.update_result(result, false);
+
+    let chunks = |component: &mut ToolExecutionComponent, width: usize| {
+        let mut out = Vec::new();
+        component.render_chunks(width, &mut out);
+        out
+    };
+    let check = |component: &mut ToolExecutionComponent, width: usize| {
+        let first = chunks(component, width);
+        assert_eq!(flatten_chunks(first.clone()), component.render(width), "width {width}");
+        assert!(same_chunks(&first, &chunks(component, width)), "unchanged output keeps its chunks");
+        first
+    };
+    let wide = check(&mut component, 120);
+    let narrow = check(&mut component, 60);
+    assert!(!same_chunks(&wide, &narrow));
+    component.set_expanded(true);
+    let expanded = check(&mut component, 120);
+    assert!(chunks_len(&expanded) > chunks_len(&wide));
+    component.set_expanded(false);
+    check(&mut component, 120);
+    component.invalidate();
+    check(&mut component, 120);
 }

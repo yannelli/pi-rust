@@ -16,6 +16,7 @@ use crate::component::{ComponentRef, component_key};
 use crate::components::scroll_view::ScrollViewHandle;
 use crate::components::stack::{allocate_stack_sizes, visible_stack_entries};
 use crate::layout_node::{LayoutNode, LayoutViewport, StackAlign, StackDirection, get_layout_node};
+use crate::line_chunks::ChunkedLines;
 use crate::utils::visible_width;
 
 pub(crate) static OSC133_ZONE_PREFIX: LazyLock<Regex> =
@@ -53,13 +54,13 @@ pub struct LayoutBox {
     pub clip: LayoutRect,
     pub children: Vec<LayoutBox>,
     /// Rendered lines of a leaf component.
-    pub lines: Option<Rc<Vec<String>>>,
+    pub lines: Option<Rc<ChunkedLines>>,
     /// First line shown when a leaf is taller than its box (keeps the cursor line visible).
     pub line_offset: usize,
     /// Scroll state when this box is a scroll view.
     pub scroll_view: Option<ScrollViewHandle>,
     /// Full content lines of a scroll view.
-    pub scroll_content_lines: Option<Rc<Vec<String>>>,
+    pub scroll_content_lines: Option<Rc<ChunkedLines>>,
     pub layer: i32,
 }
 
@@ -76,19 +77,21 @@ pub struct LayoutFrame {
 
 struct LayoutContext {
     viewport: LayoutViewport,
-    render_cache: HashMap<(usize, usize), Rc<Vec<String>>>,
+    render_cache: HashMap<(usize, usize), Rc<ChunkedLines>>,
     request_render: Rc<dyn Fn()>,
     primary_scroll_view: Option<ScrollViewHandle>,
 }
 
 impl LayoutContext {
-    fn render_cached(&mut self, component: &ComponentRef, width: i64) -> Rc<Vec<String>> {
+    fn render_cached(&mut self, component: &ComponentRef, width: i64) -> Rc<ChunkedLines> {
         let safe_width = width.max(1) as usize;
         let key = (component_key(component), safe_width);
         if let Some(lines) = self.render_cache.get(&key) {
             return lines.clone();
         }
-        let lines = Rc::new(component.borrow_mut().render(safe_width));
+        let mut chunks = Vec::new();
+        component.borrow_mut().render_chunks(safe_width, &mut chunks);
+        let lines = Rc::new(ChunkedLines::new(chunks));
         self.render_cache.insert(key, lines.clone());
         lines
     }

@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::layout_node::LayoutNode;
+use crate::line_chunks::{LineChunks, chunks_len, flatten_chunks};
 
 /// Shared, mutable handle to a component. Identity matters (focus, overlays), so compare with
 /// [`same_component`].
@@ -149,6 +150,12 @@ pub enum MouseResponse {
 pub trait Component: AsAny {
     /// Renders the component to lines for the given viewport width.
     fn render(&mut self, width: usize) -> Vec<String>;
+
+    /// Appends the lines of [`Component::render`] to `out` as shared chunks. Components that keep
+    /// their lines append the same `Rc` while the lines stay unchanged, so the fullscreen layout reuses them.
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        out.push(Rc::new(self.render(width)));
+    }
 
     /// Handles keyboard input while the component has focus. Only called when
     /// [`Component::handles_input`] returns true.
@@ -297,6 +304,11 @@ impl Container {
         render_children_with_layout(&self.children, width, &mut self.mouse_layout)
     }
 
+    /// [`Container::render_children`] as the children's shared chunks, appended to `out`.
+    pub fn render_children_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        render_children_chunks(&self.children, width, &mut self.mouse_layout, out);
+    }
+
     /// Container mouse dispatch: finds the child under the pointer and forwards the event.
     pub fn handle_children_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
         dispatch_children_mouse(&self.children, self.mouse_layout.as_ref(), event).map(MouseResponse::Forwarded)
@@ -322,15 +334,31 @@ pub fn render_children_with_layout(
     width: usize,
     mouse_layout: &mut MouseLayout,
 ) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut heights = Vec::with_capacity(children.len());
+    let mut chunks = Vec::with_capacity(children.len());
+    render_children_chunks(children, width, mouse_layout, &mut chunks);
+    flatten_chunks(chunks)
+}
+
+/// [`render_children_with_layout`] as the children's shared chunks, appended to `out`.
+pub fn render_children_chunks(
+    children: &[ComponentRef],
+    width: usize,
+    mouse_layout: &mut MouseLayout,
+    out: &mut LineChunks,
+) {
+    let mut heights = match mouse_layout.take() {
+        Some((_, mut heights)) => {
+            heights.clear();
+            heights
+        }
+        None => Vec::with_capacity(children.len()),
+    };
     for child in children {
-        let child_lines = child.borrow_mut().render(width);
-        heights.push((child.clone(), child_lines.len()));
-        lines.extend(child_lines);
+        let start = out.len();
+        child.borrow_mut().render_chunks(width, out);
+        heights.push((child.clone(), chunks_len(&out[start..])));
     }
     *mouse_layout = Some((width, heights));
-    lines
 }
 
 /// Upstream `Container.handleMouse`: hit tests stacked children and forwards the event.
@@ -362,6 +390,10 @@ pub fn dispatch_children_mouse(
 impl Component for Container {
     fn render(&mut self, width: usize) -> Vec<String> {
         self.render_children(width)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        self.render_children_chunks(width, out);
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {

@@ -9,6 +9,7 @@ use std::rc::{Rc, Weak};
 use pi_ai::ContentBlock;
 use pi_tui::components::StyleFn;
 use pi_tui::components::image::{ImageOptions, ImageTheme};
+use pi_tui::line_chunks::{LineChunks, blank_line_chunk, chunks_len, flatten_chunks};
 use pi_tui::terminal_image::get_capabilities;
 use pi_tui::{
     BoxComponent, Component, ComponentRef, Container, Image, MouseRegion, MouseResponse, Spacer, Text, Tui,
@@ -381,44 +382,47 @@ impl ToolExecutionComponent {
     }
 
     /// The renderer's own lines after a blank line, then the images; nothing when both are empty.
-    fn render_self_shell(&mut self, width: usize) -> Vec<String> {
-        let content = self.self_container.borrow_mut().render(width);
-        self.self_height.set(content.len());
-        if content.is_empty() && self.images.is_empty() {
-            return Vec::new();
+    fn render_self_shell(&mut self, width: usize, out: &mut LineChunks) {
+        let mut content = Vec::new();
+        self.self_container.borrow_mut().render_chunks(width, &mut content);
+        let content_len = chunks_len(&content);
+        self.self_height.set(content_len);
+        if content_len > 0 {
+            out.push(blank_line_chunk());
+            out.extend(content);
         }
-        let mut lines = Vec::new();
-        if !content.is_empty() {
-            lines.push(String::new());
-            lines.extend(content);
-        }
+        self.push_image_chunks(width, out);
+    }
+
+    fn push_image_chunks(&self, width: usize, out: &mut LineChunks) {
         for image in &self.images {
-            lines.push(String::new());
-            lines.extend(image.component.borrow_mut().render(width));
+            out.push(blank_line_chunk());
+            image.component.borrow_mut().render_chunks(width, out);
         }
-        lines
     }
 }
 
 impl Component for ToolExecutionComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
+        let mut chunks = Vec::new();
+        self.render_chunks(width, &mut chunks);
+        flatten_chunks(chunks)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
         if self.dirty.take() || self.args_pending {
             self.update_display();
         }
         if self.is_self_shell() {
-            return self.render_self_shell(width);
+            return self.render_self_shell(width, out);
         }
-        let mut lines = Spacer::new(1).render(width);
         let content: ComponentRef = match self.display {
             ToolDisplay::Unknown => self.content_text.clone(),
             _ => self.content_box.clone(),
         };
-        lines.extend(content.borrow_mut().render(width));
-        for image in &self.images {
-            lines.push(String::new());
-            lines.extend(image.component.borrow_mut().render(width));
-        }
-        lines
+        out.push(blank_line_chunk());
+        content.borrow_mut().render_chunks(width, out);
+        self.push_image_chunks(width, out);
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {

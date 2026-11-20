@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use pi_ai::{AssistantMessage, ContentBlock, StopReason};
 use pi_tui::components::markdown::{DefaultTextStyle, MarkdownOptions};
+use pi_tui::line_chunks::{ChunkMemo, LineChunks, chunks_len, flatten_chunks};
 use pi_tui::{
     Component, Container, Markdown, MouseRegion, MouseResponse, Spacer, Text, TuiMouseButton, TuiMouseEvent,
     TuiMouseEventResult, TuiMouseEventType, component,
@@ -74,18 +75,29 @@ struct Prefixed {
     child: Markdown,
     prefix: String,
     pad: usize,
+    memo: ChunkMemo,
 }
 
 impl Component for Prefixed {
     fn render(&mut self, width: usize) -> Vec<String> {
+        let mut chunks = Vec::new();
+        self.render_chunks(width, &mut chunks);
+        flatten_chunks(chunks)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
         let prefix_width = pi_tui::visible_width(&self.prefix);
         if width <= prefix_width + self.pad + 1 {
-            return self.child.render(width);
+            return self.child.render_chunks(width, out);
         }
-        prefix_lines(self.child.render(width - prefix_width), &self.prefix, self.pad)
+        let mut child = Vec::with_capacity(1);
+        self.child.render_chunks(width - prefix_width, &mut child);
+        let (prefix, pad) = (&self.prefix, self.pad);
+        out.push(self.memo.get(child, |chunks| prefix_lines(flatten_chunks(chunks.to_vec()), prefix, pad)));
     }
 
     fn invalidate(&mut self) {
+        self.memo.clear();
         self.child.invalidate();
     }
 }
@@ -166,6 +178,8 @@ pub struct AssistantMessageComponent {
     thinking_runs: usize,
     /// A thinking run clicked during mouse dispatch, applied once dispatch returns.
     pending_toggle: Rc<Cell<Option<(usize, bool)>>>,
+    /// The content lines marked as one OSC 133 zone.
+    zone: ChunkMemo,
 }
 
 impl AssistantMessageComponent {
@@ -199,6 +213,7 @@ impl AssistantMessageComponent {
             overrides: HashMap::new(),
             thinking_runs: 0,
             pending_toggle: Rc::default(),
+            zone: ChunkMemo::default(),
         };
         if let Some(message) = message {
             component.update_content(message, false);
@@ -288,7 +303,9 @@ impl AssistantMessageComponent {
                     if let Some(shown) = shown {
                         let markdown = self.markdown(shown.trim(), MarkdownMessageType::Assistant, None);
                         let child: pi_tui::ComponentRef = match prefix.take() {
-                            Some(prefix) => component(Prefixed { child: markdown, prefix, pad }),
+                            Some(prefix) => {
+                                component(Prefixed { child: markdown, prefix, pad, memo: ChunkMemo::default() })
+                            }
                             None => component(markdown),
                         };
                         add_visible(&mut self.content, &mut needs_spacer, child);
@@ -373,8 +390,20 @@ impl AssistantMessageComponent {
 
 impl Component for AssistantMessageComponent {
     fn render(&mut self, width: usize) -> Vec<String> {
-        let lines = self.content.render(width);
-        if self.has_tool_calls || lines.is_empty() { lines } else { mark_zone(lines) }
+        let mut chunks = Vec::new();
+        self.render_chunks(width, &mut chunks);
+        flatten_chunks(chunks)
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        if self.has_tool_calls {
+            return self.content.render_chunks(width, out);
+        }
+        let mut chunks = Vec::with_capacity(self.content.children.len());
+        self.content.render_chunks(width, &mut chunks);
+        if chunks_len(&chunks) > 0 {
+            out.push(self.zone.get(chunks, |chunks| mark_zone(flatten_chunks(chunks.to_vec()))));
+        }
     }
 
     fn handle_mouse(&mut self, event: &TuiMouseEvent) -> Option<MouseResponse> {
@@ -533,5 +562,30 @@ mod tests {
         streaming.set_hide_thinking_block(true);
         streaming.set_hide_thinking_block(false);
         assert_eq!(plain(streaming.render(30)), ["", " planning"], "the toggle opens collapsed runs");
+    }
+
+    #[test]
+    fn shared_chunks_match_render_and_stay_shared_while_unchanged() {
+        let message = thinking_then(ContentBlock::text("an **answer** with\n\n- a list"), StopReason::Stop);
+        let mut component = AssistantMessageComponent::new(Some(&message), false, "∴ Thought", styled());
+        let chunks = |component: &mut AssistantMessageComponent, width: usize| {
+            let mut out = Vec::new();
+            component.render_chunks(width, &mut out);
+            out
+        };
+        let check = |component: &mut AssistantMessageComponent, width: usize| {
+            let first = chunks(component, width);
+            assert_eq!(flatten_chunks(first.clone()), component.render(width), "width {width}");
+            let again = chunks(component, width);
+            assert!(first.len() == again.len() && first.iter().zip(&again).all(|(a, b)| Rc::ptr_eq(a, b)));
+        };
+        check(&mut component, 80);
+        check(&mut component, 30);
+        component.set_hide_thinking_block(true);
+        check(&mut component, 80);
+        component.set_chat_style(ChatStyle::default());
+        check(&mut component, 80);
+        component.invalidate();
+        check(&mut component, 80);
     }
 }

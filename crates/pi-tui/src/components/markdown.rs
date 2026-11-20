@@ -15,6 +15,7 @@ use std::rc::Rc;
 
 use crate::component::Component;
 use crate::components::scroll_view::StyleFn;
+use crate::line_chunks::LineChunks;
 use crate::terminal_image::is_image_line;
 use crate::utils::{apply_background_to_line, flatten_lines, js_trim, visible_width, wrap_text_with_ansi};
 use token::Token;
@@ -93,7 +94,8 @@ pub struct Markdown {
     theme: MarkdownTheme,
     options: MarkdownOptions,
     default_style_prefix: Option<String>,
-    cache: Option<(String, usize, Vec<String>)>,
+    /// Rendered lines and their width. `set_text` and `invalidate` clear it.
+    cache: Option<(usize, Rc<Vec<String>>)>,
     /// Tokens depend only on the source, so they survive theme and width invalidation.
     cached_tokens: Option<(String, Rc<Vec<Token>>)>,
 }
@@ -183,8 +185,22 @@ impl Markdown {
 
 impl Component for Markdown {
     fn render(&mut self, width: usize) -> Vec<String> {
-        if let Some((text, cached_width, lines)) = &self.cache
-            && *text == self.text
+        self.render_shared(width).as_ref().clone()
+    }
+
+    fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
+        out.push(self.render_shared(width));
+    }
+
+    fn invalidate(&mut self) {
+        self.cache = None;
+    }
+}
+
+impl Markdown {
+    /// The rendered lines, shared with the cache.
+    fn render_shared(&mut self, width: usize) -> Rc<Vec<String>> {
+        if let Some((cached_width, lines)) = &self.cache
             && *cached_width == width
         {
             return lines.clone();
@@ -196,8 +212,9 @@ impl Component for Markdown {
             None => self.text.clone(),
         };
         if js_trim(&text).is_empty() {
-            self.cache = Some((self.text.clone(), width, Vec::new()));
-            return Vec::new();
+            let lines = Rc::new(Vec::new());
+            self.cache = Some((width, lines.clone()));
+            return lines;
         }
 
         let normalized = text.replace('\t', "   ");
@@ -231,11 +248,8 @@ impl Component for Markdown {
         result.extend(content_lines);
         result.extend(std::iter::repeat_n(empty_line, self.padding_y));
         flatten_lines(&mut result);
-        self.cache = Some((self.text.clone(), width, result.clone()));
-        if result.is_empty() { vec![String::new()] } else { result }
-    }
-
-    fn invalidate(&mut self) {
-        self.cache = None;
+        let lines = Rc::new(result);
+        self.cache = Some((width, lines.clone()));
+        if lines.is_empty() { Rc::new(vec![String::new()]) } else { lines }
     }
 }
