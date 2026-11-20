@@ -3,6 +3,7 @@
 // extensionless TypeScript) and pi-js's transpiler. Node loads everything else itself.
 const Module = require("node:module");
 const { fileURLToPath, pathToFileURL } = require("node:url");
+const { create: createNamespaces } = require("./worker_namespaces.cjs");
 
 const OWN_DIR = pathToFileURL(__dirname).href + "/";
 const NODE_22 = process.versions.node.startsWith("22.");
@@ -21,23 +22,37 @@ function isBuiltin(specifier) {
 }
 
 function install({ ask, answer, hooksPort, config }) {
-  const resolveRust = (specifier, parent, kind) => ask({ t: "resolve", specifier, parent, kind });
-  const loadRust = (filename) => answer(ask({ t: "load", path: filename }));
+  const scope = (namespace) => (namespace ? { ns: namespace } : {});
+  const resolveRust = (specifier, parent, kind, namespace) =>
+    ask({ t: "resolve", specifier, parent, kind, ...scope(namespace) });
+  const loadReply = (filename, namespace) => ask({ t: "load", path: filename, ...scope(namespace) });
+  const loadRust = (filename) => answer(loadReply(filename));
+  const namespaces = createNamespaces({ resolveRust, loadRust: loadReply, answer });
 
   if (typeof Module.registerHooks === "function") {
     Module.registerHooks({
       resolve(specifier, context, nextResolve) {
+        if (namespaces.isEntry(specifier)) return namespaces.resolveEntry(specifier);
         if (isBuiltin(specifier)) return nextResolve(specifier, context);
         const kind = context.conditions?.includes("require") ? "require" : "import";
-        const reply = resolveRust(plain(specifier), parentPath(context.parentURL), kind);
-        if (reply.ok) return { url: reply.ok.url, shortCircuit: true };
+        const parent = namespaces.infoOf(context.parentURL);
+        const reply = parent
+          ? resolveRust(plain(specifier), parent.path, kind, parent.ns)
+          : resolveRust(plain(specifier), parentPath(context.parentURL), kind);
+        if (reply.ok) return { url: namespaces.located(reply), shortCircuit: true };
+        // Only Rust names a namespace, resolves files inside one, and resolves `pi:` modules,
+        // which Node's default loader cannot load.
         try {
-          return nextResolve(specifier, context);
-        } catch {
-          return answer(reply);
-        }
+          const next = nextResolve(specifier, context);
+          const rustOnly = next.url.startsWith("pi:") || namespaces.infoOf(next.url);
+          if (!rustOnly && !(parent && next.url.startsWith("file:"))) return next;
+        } catch {}
+        return answer(reply);
       },
       load(url, context, nextLoad) {
+        namespaces.reparentLoading(url);
+        const info = namespaces.infoOf(url);
+        if (info) return namespaces.loadHook(info, context);
         if (!url.startsWith("file:") || url.endsWith(".node")) return nextLoad(url, context);
         const loaded = loadRust(fileURLToPath(url));
         if (!loaded) {
@@ -50,8 +65,8 @@ function install({ ask, answer, hooksPort, config }) {
       },
     });
     // Node 22 compiles CommonJS files that import() loads with a require that skips the hooks.
-    patchResolve(resolveRust, answer);
-    return;
+    patchResolve(resolveRust, answer, namespaces);
+    return namespaces;
   }
 
   Module.register(pathToFileURL(`${__dirname}/hooks.mjs`).href, {
@@ -59,6 +74,7 @@ function install({ ask, answer, hooksPort, config }) {
     transferList: [hooksPort],
   });
   patchRequire(resolveRust, loadRust, answer);
+  return namespaces;
 }
 
 /** CommonJS loading for Node versions without `module.registerHooks`. */
@@ -67,10 +83,13 @@ function patchRequire(resolveRust, loadRust, answer) {
   patchExtensions(loadRust);
 }
 
-function patchResolve(resolveRust, answer) {
+function patchResolve(resolveRust, answer, namespaces) {
   const resolveFilename = Module._resolveFilename;
   Module._resolveFilename = function (request, parent, isMain, options) {
     if (isBuiltin(request)) return resolveFilename.call(this, request, parent, isMain, options);
+    // Node evaluates namespaced CommonJS that `import` loads by its alias path, without hooks
+    // or a parent (esm/translators.js:331-336); the alias has no file to find.
+    if (!parent && namespaces?.isAlias(request)) return request;
     const reply = resolveRust(request, parent?.filename ?? null, "require");
     if (reply.ok) {
       const url = reply.ok.url;

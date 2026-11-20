@@ -59,10 +59,8 @@ pub(crate) fn install<'js>(ctx: &Ctx<'js>, native: &Object<'js>) -> rquickjs::Re
     let host = Object::new(ctx.clone())?;
     set_fn(&host, "call", |ctx: Ctx<'js>, name: String, args: Rest<Value<'js>>| {
         let function =
-            state().shared.host_functions.read().unwrap_or_else(|poison| poison.into_inner()).get(&name).cloned();
-        let function = function.ok_or_else(|| {
-            throw(&ctx, &JsError::new(format!("Unknown host function: {name}")).with_code("ERR_PI_HOST_FUNCTION"))
-        })?;
+            state().shared.host_functions.read().unwrap_or_else(|poison| poison.into_inner()).lookup(&name).cloned();
+        let function = function.map_err(|error| throw(&ctx, &error))?;
         call_host(&ctx, &function, args.0)
     })?;
     set_fn(&host, "has", |name: String| {
