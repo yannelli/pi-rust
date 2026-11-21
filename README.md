@@ -14,6 +14,8 @@ pi-rust is a Rust port of the [pi](https://github.com/earendil-works/pi) coding 
 
 pi-rust does not need Node.js or a different JavaScript runtime. In this file, "upstream pi" is the original pi, which is written in TypeScript.
 
+Website and documentation: [pi-rust.com](https://pi-rust.com).
+
 ## Install
 
 Linux and macOS:
