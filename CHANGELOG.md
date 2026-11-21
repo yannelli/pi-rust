@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.21] - 2026-11-20
+
+### Changed
+
+- **tui:** reuse rendered lines across frames in fullscreen mode ([f1470cd](https://github.com/yannelli/pi-rust/commit/f1470cd6c098923c36daf44b3fc46677167521cd))
+
 ## [0.12.20] - 2026-11-19
 
 ### Fixed
