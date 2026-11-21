@@ -314,6 +314,33 @@ async fn compaction_can_be_cancelled_by_extensions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn compaction_handlers_can_set_the_summary_instructions() {
+    let body = r#"
+	pi.on("session_before_compact", (event) => ({ customInstructions: `${event.customInstructions}; keep the hook notes` }));
+	pi.on("session_compact", (event) => pi.appendEntry("compacted", { fromExtension: event.fromExtension }));
+"#;
+    let h = harness(Setup {
+        files: vec![("compact.ts", with_probe(body))],
+        load: vec!["compact.ts"],
+        responses: ["first", "second", "summary", "prefix summary"].map(FauxResponse::text).to_vec(),
+        settings: json!({"compaction": {"keepRecentTokens": 1}}),
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("one", Vec::new()).await.unwrap();
+    h.session.prompt("two", Vec::new()).await.unwrap();
+    h.session.compact(Some("list the files")).await.unwrap();
+    let requests =
+        serde_json::to_string(&h.provider.requests().iter().map(|r| &r.messages).collect::<Vec<_>>()).unwrap();
+    assert!(requests.contains("Additional focus: list the files; keep the hook notes"), "{requests}");
+    let entries = h.entries();
+    let compaction = entries.iter().find(|entry| entry["type"] == "compaction").expect("compaction entry");
+    assert_eq!(compaction["fromHook"], false);
+    let compacted = entries.iter().find(|entry| entry["customType"] == "compacted").expect("session_compact");
+    assert_eq!(compacted["data"]["fromExtension"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_message_that_triggers_a_turn_during_compaction_runs_after_it() {
     let body = r#"
 	pi.on("session_before_compact", async () => {

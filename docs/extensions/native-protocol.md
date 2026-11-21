@@ -105,7 +105,7 @@ pi sends `event` only for the names the extension subscribed to. `footer_changed
 The `context` of `turn_end` and `agent_before_settle` is a preview of the whole model context (`contextEntries`, `contextMessages`, `llmMessages`, `pendingMessages`, `canContinue`), so it is as large as the context. pi sends it only for the events in `contextEvents`. An extension that sends no `contextEvents` gets it with every `turn_end` and `agent_before_settle` (feature `contextEvents`; older hosts always send it). Without it, a handler can ask for it with `event.context` and the `eventId` of the request, so pi builds the context only for handlers that need it.
 
 - `patch` is an RFC 7386 JSON merge patch. pi applies it to the event object in place before the next handler runs. A `null` value removes the key. pi ignores a patch that is not a JSON object and logs a line.
-- `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }` or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
+- `result` is the handler return value: `{ block, reason }` for `tool_call`, `{ action: "transform", text }` for `input`, `{ compaction }`, `{ customInstructions }` (pi-rust only), or `{ cancel: true }` for `session_before_compact`, `{ message }` for `message_end`, `{ messages }` for `context`, `{ entries, continue }` for `agent_before_settle`, and the other results of upstream pi.
 
 How each event uses a patch:
 
@@ -116,6 +116,8 @@ How each event uses a patch:
 | All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
+
+A `session_before_compact` result with `customInstructions` and no `compaction` sets the instructions of pi's summary for that compaction. The text replaces `event.customInstructions` (the text of `/compact <text>`), so add to that text to keep it. When several handlers return a result, pi uses the last one.
 
 A `resources_discover` result can also have `contextEntries` (pi-rust only): entries such as agent configs that pi lists in the system prompt or defers to `tool_search`. See [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries).
 

@@ -518,6 +518,10 @@
     {
       "item": "registerToolResultExpander",
       "reason": "pi-rust extension: `pi.registerToolResultExpander((toolName, result) => ({ maxHeight, render }))` draws the expanded body of any tool's result in a height-limited, scrollable view, for the tool-results extension. Upstream has no such call."
+    },
+    {
+      "item": "SessionBeforeCompactResult.customInstructions",
+      "reason": "pi-rust extension: a `session_before_compact` result can set `customInstructions`, which replaces the instructions of pi's summary for that compaction, as `session_before_tree` does. The hooks extension sends the stdout of PreCompact hooks in it. Upstream reads only `cancel` and `compaction`."
     }
   ],
   "nodeBuiltins": [
