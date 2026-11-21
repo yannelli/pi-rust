@@ -341,6 +341,31 @@ async fn compaction_handlers_can_set_the_summary_instructions() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_instructions_result_keeps_the_compaction_of_an_earlier_handler() {
+    let body = r#"
+	pi.on("session_before_compact", (event) => ({
+		compaction: { summary: "extension summary", firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: 7 },
+	}));
+	pi.on("session_before_compact", () => ({ customInstructions: "keep the hook notes" }));
+"#;
+    let h = harness(Setup {
+        files: vec![("compact.ts", with_probe(body))],
+        load: vec!["compact.ts"],
+        responses: ["first", "second", "summary", "prefix summary"].map(FauxResponse::text).to_vec(),
+        settings: json!({"compaction": {"keepRecentTokens": 1}}),
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("one", Vec::new()).await.unwrap();
+    h.session.prompt("two", Vec::new()).await.unwrap();
+    h.session.compact(None).await.unwrap();
+    let entries = h.entries();
+    let compaction = entries.iter().find(|entry| entry["type"] == "compaction").expect("compaction entry");
+    assert_eq!(compaction["summary"], "extension summary");
+    assert_eq!(compaction["fromHook"], true);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_message_that_triggers_a_turn_during_compaction_runs_after_it() {
     let body = r#"
 	pi.on("session_before_compact", async () => {
