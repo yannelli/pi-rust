@@ -52,11 +52,7 @@ The formula installs the release archive for your platform. Update with `brew up
 
 ## Manual install
 
-Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for each platform and a `SHA256SUMS` file. Each archive contains a `pi-vX.Y.Z-<target>/` folder with these files:
-
-- `pi` or `pi.exe`
-- `README.md` and `CHANGELOG.md`
-- `LICENSE`, `LICENSE-pi-acp`, `LICENSE-node`, `LICENSE-v8`, `LICENSE-mcp-typescript-sdk`, `LICENSE-chalk`, `LICENSE-proper-lockfile`, `LICENSE-signal-exit`, and `THIRD-PARTY-LICENSES.md`
+Each [release](https://github.com/yannelli/pi-rust/releases) has an archive for each platform and a `SHA256SUMS` file. An archive holds the `pi` program (`pi.exe` on Windows), the readme, the changelog, and the license files, in a `pi-vX.Y.Z-<target>/` folder.
 
 | Platform | Target |
 | --- | --- |
