@@ -2,17 +2,41 @@
 
 In interactive mode, type `/` to see the list of commands. Examples are `/login`, `/model`, `/settings`, `/tree`, `/fork`, `/compact`, `/export`, `/share`, `/mcp`, and `/hotkeys`.
 
-If you type while the agent works, pi puts your input in the queue as steering. To put it in the queue as a follow-up, press Alt+Enter. On Windows, press Ctrl+Q.
+If you type while the agent works, pi puts your input in the queue as steering. pi sends steering after the tool calls of the current turn. It sends follow-ups only when the agent stops.
 
-pi sends steering after the tool calls of the current turn. It sends follow-ups only when the agent stops. To send the queued follow-ups now, press Alt+Down. On Windows, press Alt+S. This key moves the follow-ups to the steering queue and does not stop the current turn. To use a different key, set `app.message.sendNow` in `keybindings.json`. To edit the queue, press Alt+Up. On Windows, press Alt+Q.
+| Action | Key | Key on Windows |
+| --- | --- | --- |
+| Put your input in the queue as a follow-up. | Alt+Enter | Ctrl+Q |
+| Send the queued follow-ups now. | Alt+Down | Alt+S |
+| Edit the queue. | Alt+Up | Alt+Q |
 
-To stop the agent and send your message immediately, press Ctrl+Enter. pi stops the current turn or the compaction, also a tool call that runs for a long time. Then pi sends the queued messages and the text in the editor as one prompt, with a blank line between the messages. Ctrl+Enter does the same as Esc and then Enter. A slash command or a `!` command in the editor runs as with Enter and does not stop the agent. When the agent does not work, Ctrl+Enter does the same as Enter.
+Alt+Down (Alt+S on Windows) moves the follow-ups to the steering queue and does not stop the current turn. To use a different key for it, set `app.message.sendNow` in `keybindings.json`.
+
+To stop the agent and send your message immediately, press Ctrl+Enter. Ctrl+Enter does the same as Esc and then Enter:
+
+1. pi stops the current turn or the compaction. This includes a tool call that runs for a long time.
+2. pi sends the queued messages and the text in the editor as one prompt, with a blank line between the messages.
+
+A slash command or a `!` command in the editor runs as with Enter and does not stop the agent. When the agent does not work, Ctrl+Enter does the same as Enter.
 
 To use a different key, set `app.message.interrupt` in `keybindings.json`. Terminals without the Kitty keyboard protocol or modifyOtherKeys send Ctrl+Enter as Enter, or in Windows Terminal as a new line. In these terminals, set a different key. If your `keybindings.json` gives Ctrl+Enter to `tui.input.submit` or `tui.input.newLine`, Ctrl+Enter keeps that action, and `app.message.interrupt` has no key until you set one.
 
-pi-rust adds `/diff`, `/context`, `/usage`, `/init`, `/review`, `/undo`, `/retry`, `/extensions`, `/widgets`, `/fast`, and the prompt history. `/export` is also in upstream pi. pi-rust adds its Markdown output.
+pi-rust adds these commands:
 
-`/fast` turns fast mode on or off. See [Fast mode](providers.md#fast-mode-pi-rust-extension).
+| Command | Effect |
+| --- | --- |
+| `/diff` | Shows the uncommitted git changes. |
+| `/context` | Shows how much of the context window the conversation uses. |
+| `/usage` | Shows the subscription limits of the providers that you are logged in to. |
+| `/init` | Tells the agent to write an `AGENTS.md` file, or to improve the existing context file. |
+| `/review` | Tells the agent to review the uncommitted changes. |
+| `/undo` | Restores the files that the edit and write tools changed during the last prompt. |
+| `/retry` | Runs the last prompt of the current branch again. |
+| `/extensions` | Opens a browser for the installed extensions and the marketplace. |
+| `/widgets` | Shows all widgets in full, or changes how they collapse. |
+| `/fast` | Turns fast mode on or off. See [Fast mode](providers.md#fast-mode-pi-rust-extension). |
+
+pi-rust also adds the prompt history and the Markdown output of `/export`. The `/export` command itself is in upstream pi.
 
 ## /diff
 
@@ -40,7 +64,15 @@ The count of tokens in use is the usage that the last response reported, plus es
 
 ## /usage
 
-`/usage` shows the subscription limits of each provider that you are logged in to: `anthropic`, `openai-codex`, `cursor`, `xai` (SuperGrok, which includes Grok Build), and `google-antigravity`. For each window it shows a bar, the used percentage, and the time to the reset. `/usage <provider>` shows one provider. Each `/usage` fetches the limits again. A provider whose request fails shows the error.
+`/usage` shows the subscription limits of each of these providers that you are logged in to:
+
+- `anthropic`
+- `openai-codex`
+- `cursor`
+- `xai` (SuperGrok, which includes Grok Build)
+- `google-antigravity`
+
+For each window, it shows a bar, the used percentage, and the time to the reset. `/usage <provider>` shows one provider. Each `/usage` fetches the limits again. A provider whose request fails shows the error.
 
 The status line extension (`marketplace:statusline`) shows the limits of the current provider with its `usage` and `usageReset` segments. [Subscription usage limits](../../../docs/providers/usage.md) lists the endpoints.
 
@@ -70,7 +102,9 @@ Images change to placeholders.
 
 If the directory already has a context file that pi loads, the agent improves that file. These context files are `AGENTS.md`, `CLAUDE.md`, and `AGENTS.override.md`.
 
-pi adds the text after `/init` to the prompt as more instructions. The prompt is a normal message. It shows in the chat, uses the current model, and pi saves it in the session. As with other built-in commands, `/init` has priority over a prompt template or an extension command with the name `init`. `/init` works only in interactive mode.
+pi adds the text after `/init` to the prompt as more instructions. The prompt is a normal message. It shows in the chat, uses the current model, and pi saves it in the session.
+
+As with other built-in commands, `/init` has priority over a prompt template or an extension command with the name `init`. `/init` works only in interactive mode.
 
 ## /review
 
@@ -139,14 +173,18 @@ Changes:
 
 After a change, the browser shows `Extensions changed. Ctrl+R to reload.` pi loads the change after the reload. While a change runs, the browser shows `busy: changes disabled`. Until the change is complete, you cannot start a different change or close the browser.
 
-If the marketplace index does not load, the Marketplace tab shows `Marketplace unavailable:` and the error. For example, the signature is not correct, or `PI_OFFLINE=1` is set. The Installed tab continues to work. If an install fails, the status line shows `Extension change failed:` and the error. For example, the SHA-256 digest of the archive is not correct. pi does not install the extension or change the settings.
+If the marketplace index does not load, the Marketplace tab shows `Marketplace unavailable:` and the error. For example, the signature is not correct, or `PI_OFFLINE=1` is set. The Installed tab continues to work.
+
+If an install fails, the status line shows `Extension change failed:` and the error. For example, the SHA-256 digest of the archive is not correct. pi does not install the extension or change the settings.
 
 ## /widgets
 
 Extensions show widgets above and below the editor, for example the todo list, background tasks, subagents, and goals. All widgets together can use a third of the terminal rows. When they need more rows, each widget shows only its first line and the number of hidden lines. When there are more widgets than rows in the budget, the last row shows `+N more widgets · /widgets`.
 
 - `/widgets` shows all widgets in full in the chat, each under its key.
-- `/widgets collapse` shows one line for each widget, `/widgets expand` shows all lines, and `/widgets auto` collapses the widgets only when they need more rows than the budget.
+- `/widgets collapse` shows one line for each widget.
+- `/widgets expand` shows all lines.
+- `/widgets auto` collapses the widgets only when they need more rows than the budget.
 - Alt+W (`app.widgets.toggle`) changes between the collapsed and the expanded view. On macOS, Option+W sends Alt+W only when the terminal uses Option as Meta.
 
 ## /statusline and /terminal-setup

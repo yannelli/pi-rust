@@ -20,7 +20,15 @@ Settings load from `<agent dir>/settings.json` (normally `~/.pi/agent/settings.j
 
 `PI_REDUCED_MOTION=1` makes `"scroll"` behave as `"truncate"`. The scroll timer runs while an overflowing selected row is rendered and stops when it fits or the list closes.
 
-This applies to command and extension selection menus, settings, config resources, sessions, the session tree, user messages, model and provider selectors, and the extensions browser. Native extensions can read the same key with `host.settings::<String>("listOverflow")` and fit their own lists.
+`listOverflow` applies to these lists:
+
+- Command and extension selection menus.
+- Settings and config resources.
+- Sessions, the session tree, and user messages.
+- Model and provider selectors.
+- The extensions browser.
+
+Native extensions can read the same key with `host.settings::<String>("listOverflow")` and fit their own lists.
 
 ## Git worktrees
 

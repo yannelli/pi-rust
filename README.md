@@ -41,8 +41,13 @@ The script downloads the latest release, compares it with `SHA256SUMS`, and inst
 ## Quick start
 
 ```sh
-export ANTHROPIC_API_KEY=...        # or OPENAI_API_KEY, GEMINI_API_KEY, ...; or run /login
-pi                                  # interactive session in the current directory
+# set an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, ...)
+# or run /login
+export ANTHROPIC_API_KEY=...
+
+# interactive session in the current directory
+pi
+
 pi -p "Summarize src/main.rs"       # print mode: run once, print the answer
 pi --mode json -p "List the TODOs"  # one JSON event per line
 pi --mode rpc                       # JSON-RPC over stdio for other programs
@@ -51,7 +56,9 @@ pi -r                               # pick a session to resume
 pi --model openai/gpt-5.5 --thinking high
 pi @notes.md @screenshot.png "What changed?"
 cat error.log | pi -p "Explain this error"
-pi install npm:<package>            # install a pi package (extensions, skills, themes)
+
+# install a pi package (extensions, skills, themes)
+pi install npm:<package>
 ```
 
 Run `pi --help` to see all options. In interactive mode, type `/` to see the commands.
@@ -95,7 +102,11 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 
 ### Runtime
 
-- New Kimi Code OAuth logins use the global `.ai` endpoints. To sign in to mainland China, set `KIMI_CODE_OAUTH_HOST=https://auth.kimi.com`. The login stores its OAuth and API endpoints for later refreshes; older logins without this metadata retain their mainland endpoints. Explicit `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL` values override saved endpoints. A custom model `baseUrl` in `models.json` stays in effect. Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
+- New Kimi Code OAuth logins use the global `.ai` endpoints.
+  - For a mainland China login, set `KIMI_CODE_OAUTH_HOST=https://auth.kimi.com`.
+  - A new login stores its OAuth and API endpoints for later refreshes. Older logins without this metadata keep their mainland endpoints.
+  - `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL`, when set, override the saved endpoints. A custom model `baseUrl` in `models.json` stays in effect.
+- Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
@@ -107,22 +118,50 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
-- IPC handle retries use a pi-js-specific wrapper. Internal handle listeners receive an object with only `close()`, and cluster connections queued to a disconnected worker are not reclaimed. See [Extension runtime](docs/parity/GAPS.md#extension-runtime-pi-js).
+- IPC handle retries use a pi-js-specific wrapper. Internal handle listeners receive an object with only `close()`. Cluster connections queued to a disconnected worker are not reclaimed. See [Extension runtime](docs/parity/GAPS.md#extension-runtime-pi-js).
 - On non-Linux Unix, a concurrent child spawn can inherit an IPC socket before QuickJS marks it close-on-exec. Node closes inherited descriptors in its macOS `posix_spawn` path. See [Platform](docs/parity/GAPS.md#platform).
-- In extensions, `ctx.sessionManager.getEntries()` of the extension's own session returns the same entry objects on each call, and a message entry holds the message object that the `message_end` handlers received, as in upstream pi. The `context` of `turn_end` and `agent_before_settle` holds these objects too. The other `ctx.sessionManager` reads, such as `getEntry()` and `getBranch()`, return new copies on each call, and changes to returned entries do not change the session. Upstream pi returns its own entry objects from all reads.
-- The extension SDK still has gaps in child sessions, resource loading, and model runtimes. A `DefaultResourceLoader` with extensions serves one child session for each `reload()`, and its factories run in the extension host of the caller. `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
-- The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, also for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
+- In extensions, `ctx.sessionManager` reads return copies of entries, except `getEntries()` of the extension's own session. Upstream pi returns its own entry objects from all reads.
+  - As in upstream pi, `getEntries()` of the extension's own session returns the same entry objects on each call, and a message entry holds the message object that the `message_end` handlers received. The `context` of `turn_end` and `agent_before_settle` holds these objects too.
+  - The other reads, such as `getEntry()` and `getBranch()`, return new copies on each call. Changes to returned entries do not change the session.
+- The extension SDK still has gaps in child sessions, resource loading, and model runtimes.
+  - A `DefaultResourceLoader` with extensions serves one child session for each `reload()`. Its factories run in the caller's extension host.
+  - `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references.
+
+  See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
+- The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, including for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
-- After an abort, the running tools and the extension handlers of the run's last events have 400 ms together, so an abort finishes in less than a second. Slow handlers keep running without blocking. RPC `abort` answers within 1.5 s, a prompt sent while a run aborts starts after it, and extension prompts that were waiting to start do not run. Upstream pi waits for every tool and handler, rejects that prompt, and starts the waiting extension prompts. See [RPC mode](crates/pi-coding-agent/docs/rpc.md#abort).
+- An abort finishes in less than a second. Upstream pi waits for every tool and handler.
+  - The running tools and the extension handlers of the run's last events share 400 ms. Slow handlers keep running without blocking.
+  - RPC `abort` answers within 1.5 s.
+  - A prompt sent while a run aborts starts after the run ends. Upstream pi rejects it.
+  - Extension prompts that were waiting to start do not run. Upstream pi starts them.
+
+  See [RPC mode](crates/pi-coding-agent/docs/rpc.md#abort).
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
-- Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries. Thus some word boundaries are different from `Intl.Segmenter` in Node.
+- Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries, so some word boundaries differ from `Intl.Segmenter` in Node.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the `pi` program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets. On Windows, they show a message that they need Unix. Upstream pi also has no Windows transport.
-- When a local shell command exits, pi-durable still stops waiting for output 100 ms after the exit or the last chunk after it, as upstream does. It then delivers queued chunks and any chunk the readers finish reading before they observe the stop signal. On Unix it also takes at most 64 KiB more per stream if readable without waiting. On Windows it starts no further read. See [Platform](docs/parity/GAPS.md#platform).
-- Clearing the message queue (Esc while the agent works, the dequeue key, or the RPC `clear_queue` command) removes only your queued messages. Queued extension messages, such as subagent or background task results, stay queued. When a run is aborted, queued extension messages join the conversation without starting a turn, so the agent sees them with your next prompt. A message an extension sends with `triggerTurn` while the run is ending continues that run. Upstream pi drops queued extension messages with the queue, and in the second case leaves the message queued until the next prompt.
-- In a linked git worktree, project files that the worktree lacks come from the main checkout: `.pi/settings.json`, `.pi/mcp.json`, `.pi/SYSTEM.md`, `.pi/APPEND_SYSTEM.md`, and the `.pi/skills`, `.pi/prompts`, `.pi/extensions`, and `.pi/themes` folders. The worktree's own copy wins. Project packages and relative entries resolve from the folder of the settings file that applies. A trust decision for the main checkout covers its worktrees unless the worktree folder has its own. Upstream pi reads only the worktree. See [Settings](crates/pi-coding-agent/docs/settings.md#git-worktrees).
-- Extension and login `select` menus show at most 10 options and fewer in short terminals, with a `(n/total)` counter, so the selected option stays visible. Upstream pi shows all options.
+- When a local shell command exits, pi-durable stops waiting for output as upstream does: 100 ms after the exit, or 100 ms after the last chunk that follows the exit. Then:
+  - It delivers the queued chunks and any chunk that the readers finish reading before they observe the stop signal.
+  - On Unix, it also takes at most 64 KiB more per stream, if that data is readable without waiting.
+  - On Windows, it starts no further read.
+
+  See [Platform](docs/parity/GAPS.md#platform).
+- When you clear the message queue, pi removes only your queued messages. Upstream pi drops queued extension messages with the queue.
+  - Esc while the agent works, the dequeue key, and the RPC `clear_queue` command clear the queue.
+  - Queued extension messages, such as subagent or background task results, stay queued.
+  - When a run is aborted, queued extension messages join the conversation without starting a turn, so the agent sees them with your next prompt.
+  - A message that an extension sends with `triggerTurn` while the run is ending continues that run. Upstream pi leaves that message queued until the next prompt.
+- In a linked git worktree, pi reads the project files that the worktree lacks from the main checkout. Upstream pi reads only the worktree.
+  - Files: `.pi/settings.json`, `.pi/mcp.json`, `.pi/SYSTEM.md`, and `.pi/APPEND_SYSTEM.md`.
+  - Folders: `.pi/skills`, `.pi/prompts`, `.pi/extensions`, and `.pi/themes`.
+  - The worktree's own copy wins.
+  - Project packages and relative entries resolve from the folder of the settings file that applies.
+  - A trust decision for the main checkout covers its worktrees, unless the worktree folder has its own.
+
+  See [Settings](crates/pi-coding-agent/docs/settings.md#git-worktrees).
+- Extension and login `select` menus show at most 10 options, with a `(n/total)` counter, so the selected option stays visible. Short terminals show fewer options. Upstream pi shows all options.
 
 ### Additions
 
@@ -133,43 +172,45 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 | Prompt history across sessions, with the Ctrl+R search and the `promptHistory` settings | Keeps prompt history only while the process runs | [Prompt history](crates/pi-coding-agent/docs/commands.md#prompt-history) |
 | Alt+Down (Alt+S on Windows, `app.message.sendNow`) sends the queued follow-ups after the current turn. It moves them to the steering queue. | Can only edit the queue or abort the turn | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |
 | Ctrl+Enter (`app.message.interrupt`) stops the agent, also during a long tool call, and sends the queued messages and the editor text as one prompt | Needs Esc, which moves the queue to the editor, and then Enter | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |
-| Esc clears the input draft when the agent is idle, and undo restores the draft. Submitted slash commands join prompts and shell commands in the Up and Down history. | | |
+| Esc clears the input draft when the agent is idle. Undo restores the draft. | | |
+| Submitted slash commands join prompts and shell commands in the Up and Down history | | |
 | `pi completion` and `pi doctor` | Has neither command | [CLI](crates/pi-coding-agent/docs/cli.md) |
 | `pi sessions` and `pi stats` | Lists and deletes sessions only in its session picker (`pi -r` and `/resume`). Shows usage only for the current session (`/session`). | [Sessions](crates/pi-coding-agent/docs/cli.md#sessions) |
 | `pi extensions` lists, installs, removes, enables, and disables extensions through the package and resource settings | | [Extensions](crates/pi-coding-agent/docs/cli.md#extensions) |
-| `marketplace:` package sources and `pi extensions search` and `info` use signed indexes and checksummed native binaries | Has no Rust extension marketplace | [Marketplace](crates/pi-coding-agent/docs/marketplace.md) |
+| `marketplace:` package sources, `pi extensions search`, and `pi extensions info`, which use signed indexes and checksummed native binaries | Has no Rust extension marketplace | [Marketplace](crates/pi-coding-agent/docs/marketplace.md) |
 | The `/extensions` browser searches, installs, updates, removes, enables, and disables extensions, then offers a reload | Has no `/extensions` command | [/extensions](crates/pi-coding-agent/docs/commands.md#extensions) |
 | Run limits (`--max-turns`, `--max-cost`) and structured output (`--output-schema`, `--output-retries`) | | [Run limits](crates/pi-coding-agent/docs/cli.md#run-limits) |
-| `pi --mode acp`. Permission modes are separate from thinking levels and control tool execution. The stdio and HTTP MCP servers the client sends connect for that session. A prompt sent while pi runs on its own joins that run. Rejected prompts and failed model requests fail `session/prompt` with the message. One connection runs several sessions and supports `session/close`. Bash calls also carry `rawInput`, `rawOutput`, and, for clients without Zed's terminal metadata, the output as text. | Needs the separate pi-acp adapter, which accepts no HTTP MCP servers, keeps one session per connection, rejects a prompt while pi runs on its own, and ends failed turns with `end_turn` | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
-| RPC and ACP modes run `/usage`, `/context`, `/extensions [list\|status\|enable\|disable]`, `/fast`, and `/reload` without a model call. RPC mode also runs `/session`, `/changelog`, `/export`, and `/name`, lists all of them in `get_commands`, sends their output as a `command_output` record, and sets `agentInvoked` in `prompt` responses. In RPC mode, an extension command with the same name replaces a built-in command. ACP mode sends `config_option_update` when the model, thinking level, or fast mode changes inside the session. | Sends these prompts to the model in RPC mode | [RPC mode](crates/pi-coding-agent/docs/rpc.md) |
+| `pi --mode acp`, with several sessions per connection and the client's stdio and HTTP MCP servers | Needs the separate pi-acp adapter. pi-acp accepts no HTTP MCP servers, keeps one session per connection, rejects a prompt while pi runs on its own, and ends failed turns with `end_turn`. | [ACP mode](crates/pi-coding-agent/docs/acp.md) |
+| RPC and ACP modes run `/usage`, `/context`, `/extensions`, `/fast`, and `/reload` without a model call. RPC mode also runs `/session`, `/changelog`, `/export`, and `/name`. | Sends these prompts to the model in RPC mode | [RPC mode](crates/pi-coding-agent/docs/rpc.md) |
 | Account model lists for OpenAI Codex, Anthropic, GitHub Copilot, OpenAI, xAI, Google, and Cursor | Limits only OpenRouter | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
 | Claude Mythos 5.2 (`claude-mythos-5-2`) is in the `anthropic` catalog with the settings and prices of Claude Fable 5.2. pi removes it for an account whose model list does not name it. | Has no Mythos 5.2 model | [Account model lists](crates/pi-coding-agent/docs/providers.md#account-model-lists) |
-| `/usage`, `pi usage`, and the native extension method `usage.get` show the subscription limits of the Claude, ChatGPT (Codex), Cursor, SuperGrok (`xai`, with Grok Build), and Google Antigravity logins: the 5-hour and weekly windows, the used percentage, and the reset time | Has no usage report | [Subscription usage limits](docs/providers/usage.md) |
+| `/usage`, `pi usage`, and the native extension method `usage.get` show the subscription limits of the Claude, ChatGPT (Codex), Cursor, SuperGrok (`xai`, with Grok Build), and Google Antigravity logins | Has no usage report | [Subscription usage limits](docs/providers/usage.md) |
 | Fast mode for models that have one: `/fast`, `--fast`, the `fastMode` setting, the ACP **Fast mode** option, and RPC `set_fast_mode` | Has no fast mode | [Fast mode](crates/pi-coding-agent/docs/providers.md#fast-mode-pi-rust-extension) |
-| The providers `cursor` and `google-antigravity`. Antigravity supports `/acp mode`, `/model`, and `/thinking` before a prompt, with the agent confirming selections before pi saves them. | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
-| ACP agents as providers: Kiro CLI (V3), Amp, and the agents of the ACP registry run over stdio with their own tools. `/acp` installs them from the registry in the global or project settings, logs in, enables, disables, moves, and sets the default. The `acpAgents` setting stores them. They get pi's MCP servers, their slash commands complete in the editor, and `/undo` covers their file changes. | Has no ACP client | [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) |
+| The subscription providers `cursor` and `google-antigravity` | Has none of them | [Subscription providers](crates/pi-coding-agent/docs/providers.md#cursor-and-google-antigravity-pi-rust-extension) |
+| ACP agents as providers: Kiro CLI (V3), Amp, and the agents of the ACP registry run over stdio with their own tools. `/acp` installs and manages them. | Has no ACP client | [ACP agents](crates/pi-coding-agent/docs/acp-providers.md) |
 | The global `disabledProviders` setting hides providers from model selection and keeps their credentials. The TUI `/settings` menu has a **Disabled providers** list. | | [Disable providers](crates/pi-coding-agent/docs/providers.md#disable-providers) |
-| The global `rememberLastModel` setting (on by default, **Remember last model** in `/settings`) saves each model you switch to as the default: a `/model` selector pick, `/model <provider>/<id>`, and ACP model changes. Model cycling with Ctrl+P saves it with either setting. RPC `set_model` and `cycle_model` never save it, as in upstream pi. | Saves the default model only with the selector's set-as-default key. Does not save on `/model <provider>/<id>`, RPC, or model cycling. | [Remember the last model](crates/pi-coding-agent/docs/providers.md#remember-the-last-model-pi-rust-extension) |
+| The global `rememberLastModel` setting (on by default) saves each model you switch to as the default | Saves the default model only with the selector's set-as-default key | [Remember the last model](crates/pi-coding-agent/docs/providers.md#remember-the-last-model-pi-rust-extension) |
 | `/settings` items for the `retry.*` and `retry.provider.*` values | Sets these values only in `settings.json` | [Retry settings](crates/pi-coding-agent/docs/providers.md#retry-settings) |
 | `listOverflow` and **List overflow** in `/settings`: truncate, wrap, or scroll long list rows; `PI_REDUCED_MOTION=1` disables scrolling | Truncates list rows | [List overflow](crates/pi-coding-agent/docs/settings.md#list-overflow) |
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |
-| The status line and `/statusline` are the `marketplace:statusline` extension (`pi install marketplace:statusline`). It reads the legacy `statusLine` setting. Interactive mode offers to install it when `statusLine` is set. | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
+| The status line and `/statusline`, as the `marketplace:statusline` extension | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
-| The iTerm2 integration and `/terminal-setup` are the `marketplace:iterm2` extension (`pi install marketplace:iterm2`). It reads the legacy `terminal.iterm2` setting. Interactive mode offers to install it when `terminal.iterm2` is on. | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
-| Extension UI calls: `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal. Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`). | Has none of them | |
+| The iTerm2 integration and `/terminal-setup`, as the `marketplace:iterm2` extension | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
+| The extension UI call `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal | Has no such call | |
+| Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`) | Has neither | |
 | Native extensions: a package lists programs in `package.json` `pi.native`, and pi runs each one as an extension over a JSON-RPC protocol on stdio | Loads only TypeScript and JavaScript extensions | [Native extension protocol](docs/extensions/native-protocol.md) |
-| Extensions call a tool of an MCP server of the session outside of a tool call, for example for a hook: `pi.callMcpTool(server, tool, args)` and the native method `mcp.callTool` | Has no MCP tool calls for extensions | [mcp.callTool](docs/extensions/native-protocol.md#mcp) |
-| Extension events for hook runners: `instructions_loaded`, `prompt_expansion` (can block a skill or template prompt or add context), `notification`, `tool_call_blocked`, `cwd_changed`, and `before_provider_auth` (sends a request with another login of the model's provider, such as a second subscription account). `session_start` handlers can call `ctx.switchSession()`. | Has none of these events. Only command contexts have `switchSession`. | [pi-rust events](docs/extensions/native-protocol.md#pi-rust-events) |
-| Native extensions draw the rows of tools without renderers, such as the built-in tools (`toolRenderers`), animate a spinner inside drawn rows, refresh rows on a timer, read the TUI theme (`ui.getTheme`, `theme.changed`), and set the working indicator. `ctx.ui.setChatStyle` (`ui.setChatStyle`) puts prefixes before user and assistant messages, collapses finished thinking, and rounds the editor | | [Renderers](docs/extensions/native-protocol.md#renderers) |
-| `ctx.ui.setChatStyle` also sets the editor border color (`editorBorderColor`: a theme color token or `#rrggbb`, in place of the thinking level color) and the prompt layout (`promptLayout`: `frame`, `caret` for a rounded box with a `›` gutter and a placeholder, or `harbor` for a caret box with plain border rules) | | [Chat style](docs/extensions/native-protocol.md#ui) |
-| An expanded tool row can show an extension's view of the result (`pi.registerToolResultExpander`, native `toolResultExpander` and `render.toolResultExpanded`), for example the full text behind a shortened result. pi shows at most `maxHeight` lines with a position line, and the mouse wheel scrolls the view in fullscreen mode | Has no expander for other tools' results | [Renderers](docs/extensions/native-protocol.md#renderers) |
+| Extensions call tools of the session's MCP servers outside a tool call, for example from a hook: `pi.callMcpTool(server, tool, args)` and the native method `mcp.callTool` | Has no MCP tool calls for extensions | [mcp.callTool](docs/extensions/native-protocol.md#mcp) |
+| Extension events for hook runners: `instructions_loaded`, `prompt_expansion`, `notification`, `tool_call_blocked`, `cwd_changed`, and `before_provider_auth`. `session_start` handlers can call `ctx.switchSession()`. | Has none of these events. Only command contexts have `switchSession`. | [pi-rust events](docs/extensions/native-protocol.md#pi-rust-events) |
+| Native extensions draw the rows of tools without renderers, such as the built-in tools (`toolRenderers`). They can also animate a spinner inside drawn rows, refresh rows on a timer, read the TUI theme, and set the working indicator. | | [Renderers](docs/extensions/native-protocol.md#renderers) |
+| `ctx.ui.setChatStyle` (`ui.setChatStyle`) puts prefixes before user and assistant messages, collapses finished thinking, and rounds the editor. It also sets the editor border color and the prompt layout (`frame`, `caret`, or `harbor`). | | [Chat style](docs/extensions/native-protocol.md#ui) |
+| An expanded tool row can show an extension's view of the result (`pi.registerToolResultExpander`, native `toolResultExpander`), for example the full text behind a shortened result | Has no expander for other tools' results | [Renderers](docs/extensions/native-protocol.md#renderers) |
 | Native extensions write their own top-level settings key in the global or a trusted project `settings.json` with `settings.set`. pi refuses its own setting keys. | Extensions have no settings write | [settings.set](docs/extensions/native-protocol.md#settings) |
 | `pi.registerProvider` takes `oauth: { builtin: "<provider id>", name? }`: the provider logs in and refreshes with a login flow of pi, and stores the credential under its own id | Reuses a flow only through an imported OAuth object | [provider.register](docs/extensions/native-protocol.md#providers) |
-| Extension widgets above and below the editor share a budget of a third of the terminal rows. Over the budget, each widget shows its first line. Alt+W (`app.widgets.toggle`) and `/widgets collapse`, `expand`, or `auto` change this, and `/widgets` shows all widgets in full in the chat. | Caps only text widgets, at 10 lines each | [/widgets](crates/pi-coding-agent/docs/commands.md#widgets) |
-| MCP servers with `"lifecycle": "lazy"` in `mcp.json` (per server or as the top-level default) connect on first use. pi saves each server's tool list in `mcp-cache/` in the agent directory, so a lazy server's tools are known before it connects. `/mcp` and `pi mcp add --lifecycle` set it. | Connects every enabled server when the session starts | [MCP server lifecycle](crates/pi-coding-agent/docs/mcp.md) |
+| Extension widgets above and below the editor share a budget of a third of the terminal rows. Over the budget, each widget shows its first line. | Caps only text widgets, at 10 lines each | [/widgets](crates/pi-coding-agent/docs/commands.md#widgets) |
+| MCP servers with `"lifecycle": "lazy"` in `mcp.json` connect on first use. A saved tool list makes their tools known before they connect. | Connects every enabled server when the session starts | [MCP server lifecycle](crates/pi-coding-agent/docs/mcp.md) |
 | MCP elicitation: servers can ask the user for form data or to open a URL. The extension events `mcp_elicitation` and `mcp_elicitation_result` can answer a request or change the answer of the user. | Has no MCP elicitation | [MCP elicitation events](docs/extensions/native-protocol.md#mcp-elicitation-events) |
-| The extension event `message_display` replaces the text of an assistant message on the screen in the TUI. The session and the model context keep the original text. JavaScript and native extensions can listen to it. | Has no display-only event. `registerMarkdownTransformer` changes the Markdown at each render. | [Events](docs/extensions/native-protocol.md#events) |
-| Deferred context: the `contextExposure` setting and the skill frontmatter `exposure: deferred` keep skills and extension context entries, such as agent configs, out of the system prompt. `tool_search` finds them and returns how to load or use them. Extensions add entries with `contextEntries` in their `resources_discover` result. | Lists every skill in the system prompt. Only tools can be deferred. | [Deferred context](crates/pi-coding-agent/docs/deferred-context.md) |
+| The extension event `message_display` replaces the text of an assistant message on the screen in the TUI. The session and the model context keep the original text. | Has no display-only event. `registerMarkdownTransformer` changes the Markdown at each render. | [Events](docs/extensions/native-protocol.md#events) |
+| Deferred context: the `contextExposure` setting and the skill frontmatter `exposure: deferred` keep skills and extension context entries, such as agent configs, out of the system prompt. `tool_search` finds them. | Lists every skill in the system prompt. Only tools can be deferred. | [Deferred context](crates/pi-coding-agent/docs/deferred-context.md) |
 | A choice of extension engine: the `extensionRuntime` setting, `--extension-runtime`, and `PI_EXTENSION_RUNTIME` (`quickjs`, `node`, or `auto`) | Always runs extensions on Node | [Extension runtime](crates/pi-coding-agent/docs/cli.md#extension-runtime) |
 
 ### Bug fixes that are open upstream

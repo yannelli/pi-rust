@@ -9,7 +9,14 @@ pi can run an external [Agent Client Protocol](https://agentclientprotocol.com) 
 1. Each enabled entry of `acpAgents` is a provider `<id>-acp` (or `<id>` when the ID ends in `-acp`) in `/model`, with the API `acp`. Selecting the provider opens its ACP session without sending a prompt, so its advertised models are available before the first turn. The `default` model keeps the agent's own model choice.
 2. A request starts the agent command over stdio in the session working directory, sends `initialize` (protocol 1, `fs` and `terminal` client capabilities, `auth.terminal`), then `session/new` with the MCP servers of criterion 13. A later request of the same pi session reuses the ACP session. After a restart of pi, `session/load` resumes the ACP session when the agent advertises `loadSession`. Otherwise pi sends the earlier conversation as a context resource.
 3. `session/prompt` gets the user text, images (when `promptCapabilities.image`), and a `resource_link` for each file that the user message names with `@`.
-4. `session/update` goes into one assistant message: message chunks as text, thought chunks as thinking, tool calls as text lines with the kind, title, and status, with diffs as fenced `diff` blocks and terminal output when the call ends, plans as a checklist, and `usage_update` as context use. Every stream ends with `Done` or `Error` through `MessageBuilder`. A compacted transcript keeps the ACP session: pi finds the last reply of the session by its timestamp and sends only what comes after it.
+4. `session/update` goes into one assistant message:
+   - Message chunks as text.
+   - Thought chunks as thinking.
+   - Tool calls as text lines with the kind, title, and status, with diffs as fenced `diff` blocks and terminal output when the call ends.
+   - Plans as a checklist.
+   - `usage_update` as context use.
+
+   Every stream ends with `Done` or `Error` through `MessageBuilder`. A compacted transcript keeps the ACP session: pi finds the last reply of the session by its timestamp and sends only what comes after it.
 5. `session/request_permission` shows a dialog with the options of the agent (allow once, allow always, reject once, reject always). Without a UI, pi rejects. A cancel answers open requests with `cancelled`.
 6. `fs/read_text_file`, `fs/write_text_file`, and `terminal/create`, `terminal/output`, `terminal/wait_for_exit`, `terminal/kill`, `terminal/release` work for paths inside the session working directory. Paths outside it fail.
 7. Escape sends `session/cancel`. The stream ends with stop reason `aborted`.
@@ -18,7 +25,11 @@ pi can run an external [Agent Client Protocol](https://agentclientprotocol.com) 
 10. Install uses the distribution of the registry entry: `npx` and `uvx` store the command; `binary` downloads the archive for the platform, checks the SHA-256 when the entry has one, and unpacks it under `~/.pi/agent/acp/agents/<id>/<version>/`.
 11. Log in shows the `authMethods` of the agent. A terminal method (`type: "terminal"` or `_meta["terminal-auth"]`) runs in the terminal while the TUI is stopped. Other methods go to `authenticate`.
 12. Tests use a fake ACP agent and a local mock HTTP server. They cover initialize, prompt streaming, tool call updates, permission requests, fs read and write, cancel, registry fetch, install, and criteria 13 to 17. No test uses the network, a real agent, or a key.
-13. `session/new` and `session/load` get the enabled, not hidden servers of `mcp.json`, plus `.pi/mcp.json` in a trusted project. A stdio server always goes to the agent, with a bare command resolved on PATH. An `http` or `sse` server with its own headers goes to the agent only when `agentCapabilities.mcpCapabilities` has that transport. An HTTP server whose login pi holds (OAuth, or `auth.provider`) goes through `pi-mcp`, a loopback MCP server with a bearer token: the agent lists its tools (in pages of 64 with `nextCursor`), and pi calls them over its own MCP connection. `pi-mcp` needs `mcpCapabilities.http`. When the agent cannot take a server, the reply starts with a line that names it.
+13. `session/new` and `session/load` get the enabled, not hidden servers of `mcp.json`, plus `.pi/mcp.json` in a trusted project:
+    - A stdio server always goes to the agent, with a bare command resolved on PATH.
+    - An `http` or `sse` server with its own headers goes to the agent only when `agentCapabilities.mcpCapabilities` has that transport.
+    - An HTTP server whose login pi holds (OAuth, or `auth.provider`) goes through `pi-mcp`, a loopback MCP server with a bearer token. The agent lists its tools (in pages of 64 with `nextCursor`), and pi calls them over its own MCP connection. `pi-mcp` needs `mcpCapabilities.http`.
+    - When the agent cannot take a server, the reply starts with a line that names it.
 14. `available_commands_update` gives the slash commands of the agent. pi keeps them per provider in `state.json`, and the editor completes them while an ACP model is selected. `/<name> <input>` goes to the agent as prompt text. A name that a pi command uses completes as `/acp:<name>`, and the provider sends `/<name>`.
 15. The `size` of `usage_update` is the context window of the pi model, per provider and model ID. Before an agent sends one, the window and `maxTokens` are 0, which means unknown: threshold compaction does not run, and the footer and `/context` show `?` or `unknown`. The model input has images unless the agent reported `promptCapabilities.image: false`.
 16. A request that is not a turn of a live pi session, such as a compaction or branch summary, runs in a new ACP process with a new session. That session gets the system prompt of the request, no MCP servers, and no `session/load`. pi rejects its file writes and terminals, cancels its permission requests, and records nothing in `state.json`. After the reply or a cancel, pi stops the process group of the agent, which includes the processes it started, and waits for the agent to exit. pi stops the group the same way when it drops any agent process.
@@ -92,20 +103,44 @@ Sources: [amp-acp](https://github.com/tao12345666333/amp-acp) `src/server.ts`, t
 ## Use an ACP agent
 
 1. Run `/acp`. The **Registry** tab lists the agents of the registry, plus Kiro CLI (V3) and Amp.
-2. Select an agent and press Enter, then choose the global settings (every project) or the project settings (this project only). A project entry replaces a global entry with the same ID.
-3. In the **Installed** tab, select the agent and choose **Log in** if the agent needs a login. For Kiro without `kiro-cli` on PATH or in `~/.local/bin`, Install offers to run the official installer (`curl -fsSL https://cli.kiro.dev/install | bash`) in the terminal after you confirm. Then log in with `kiro-cli login` or the **Log in** action. Kiro CLI exits before ACP starts when it has no login, so **Log in** runs `kiro-cli login` in the terminal. The installer and an authenticated Kiro session were not run in the tests.
+2. Select an agent and press Enter. Then choose the global settings (every project) or the project settings (this project only). A project entry replaces a global entry with the same ID.
+3. If the agent needs a login, select the agent in the **Installed** tab and choose **Log in**. For Kiro:
+   - If `kiro-cli` is not on PATH or in `~/.local/bin`, Install offers to run the official installer (`curl -fsSL https://cli.kiro.dev/install | bash`) in the terminal after you confirm.
+   - Then log in with `kiro-cli login` or the **Log in** action. Kiro CLI exits before ACP starts when it has no login, so **Log in** runs `kiro-cli login` in the terminal.
+   - The installer and an authenticated Kiro session were not run in the tests.
 4. Select the model `<provider>/default` with `/model`, or choose **Set as default**. pi opens that provider's session, and `/model` then lists its advertised models without a prompt. A selected ACP provider also opens at startup. Other providers are not started just to populate the list.
-5. Run `/acp mode` to change an advertised permission mode or another agent setting. Run `/thinking` to choose a supported thinking level. These controls open the session when needed; a failed change leaves the local selection unchanged.
+5. Run `/acp mode` to change an advertised permission mode or another agent setting. Run `/thinking` to choose a supported thinking level. These controls open the session when needed. A failed change leaves the local selection unchanged.
 
 The agent edits files and runs commands with its own tools. pi shows its permission requests as dialogs. In print mode (`pi -p`), pi rejects the requests.
 
 ## Add a custom agent
 
-On the **Installed** tab of `/acp`, select **Add custom agent** or press Ctrl+N. Name and Command are required; Command is an executable name or path. The ID defaults to a slug of the name and is editable before saving. It must use lowercase letters, digits, and dashes and be unique across global and project settings. The provider is `<id>-acp`, or `<id>` when it already ends in `-acp`.
+On the **Installed** tab of `/acp`, select **Add custom agent** or press Ctrl+N. The form has these fields:
 
-**Arguments** and the optional **Login command** accept shell-style words with quotes and backslash escapes. For example, `acp --agent-engine=v3` gives two arguments. **Environment** takes `KEY=VALUE` pairs, one per line; Enter adds a line, and multiline paste works. Details mask the values. Description is optional. Choose global or project scope; **Enabled** defaults to on.
+| Field | Value |
+| --- | --- |
+| Name | Required. |
+| ID | A slug of the name by default. You can edit it before you save. |
+| Command | Required. An executable name or path. |
+| Arguments | Shell-style words with quotes and backslash escapes. |
+| Login command | Optional. Shell-style words, as in Arguments. |
+| Description | Optional. |
+| Environment | `KEY=VALUE` pairs, one per line. |
+| Scope | Global or project. |
+| Enabled | On by default. |
 
-Tab and Shift+Tab change fields. Enter or Space changes scope or enabled state. Ctrl+S or **Save** saves and updates the provider list; errors keep the input. Escape cancels. **Edit** opens the same form with ID and scope read-only and preserves source, version, install directory, and unknown fields. Use the move action to change scope.
+- The ID must use lowercase letters, digits, and dashes, and be unique across global and project settings. The provider is `<id>-acp`, or `<id>` when the ID already ends in `-acp`.
+- In Arguments, `acp --agent-engine=v3` gives two arguments.
+- In Environment, Enter adds a line, and multiline paste works. Details mask the values.
+
+| Key | Action |
+| --- | --- |
+| Tab, Shift+Tab | Change fields. |
+| Enter or Space | Change the scope or the enabled state. |
+| Ctrl+S or **Save** | Save and update the provider list. After an error, the form keeps the input. |
+| Escape | Cancel. |
+
+**Edit** opens the same form with ID and scope read-only. It preserves the source, version, install directory, and unknown fields. To change the scope, use the move action.
 
 ## Settings
 
