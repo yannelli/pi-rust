@@ -353,7 +353,9 @@ async fn gives_the_same_read_and_bash_tool_results() {
         (false, json!({ "path": "bom.txt" })),
         (false, json!({ "path": "bad.txt" })),
         (false, json!({ "path": "missing.txt" })),
-        (true, json!({ "command": "cat text.txt; echo err >&2; exit 0" })),
+        // stdout and stderr are separate pipes, so their relative order is not defined, as in Node.
+        (true, json!({ "command": "cat text.txt; exit 0" })),
+        (true, json!({ "command": "echo err >&2; exit 0" })),
         (true, json!({ "command": "exit 3" })),
         (true, json!({ "command": "printf 'a\\nb'; ls" })),
     ];
