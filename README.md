@@ -132,6 +132,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   - `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references.
 
   See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
+- `pi.registerProvider(provider)` with an upstream `Provider` object, which has `getModels()` and no string `api`, registers nothing and reports a `register_provider` error. Use `pi.registerProvider(name, { api, baseUrl, models, streamSimple })`. An object with `id` and a string `api` registers as that config. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, including for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - An abort finishes in less than a second. Upstream pi waits for every tool and handler.
