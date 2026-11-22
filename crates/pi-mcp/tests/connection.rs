@@ -215,7 +215,7 @@ async fn closes_a_transport_created_after_close_started() {
             if let Some(entered) = gate.0.take() {
                 let _ = entered.send(());
             }
-            let _ = gate.1.recv();
+            let _ = tokio::task::block_in_place(|| gate.1.recv());
             transport.clone() as SharedTransport
         });
         let (connection, _) = connect_with(stdio(), vec![opener]);
