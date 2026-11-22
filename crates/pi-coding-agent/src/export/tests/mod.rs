@@ -1,4 +1,5 @@
 mod markdown;
+mod pi_rust_share;
 mod session;
 mod share;
 

@@ -279,6 +279,14 @@ impl SettingsManager {
         self.set_global_value("sessionShareDestination", serde_json::to_value(destination).ok());
     }
 
+    choice!(
+        session_share_viewer,
+        set_session_share_viewer,
+        "sessionShareViewer",
+        session_share_viewer,
+        SessionShareViewer
+    );
+
     pub fn compaction_enabled(&self) -> bool {
         self.state().merged.compaction.as_ref().and_then(|c| c.enabled).unwrap_or(COMPACTION_ENABLED)
     }

@@ -218,7 +218,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 45);
+    assert_eq!(ids.len(), 46);
     let network = ids.iter().position(|id| id == "http-idle-timeout").unwrap();
     assert_eq!(
         &ids[network..network + 10],
@@ -239,7 +239,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 43);
+    assert_eq!(without.len(), 44);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/43)"), "{screen}");
+    assert!(screen.contains("(1/44)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");
@@ -278,8 +278,10 @@ fn dispatches_parsed_values() {
     let pad = Calls::new();
     let auto_compact = Calls::new();
     let share = Calls::new();
+    let viewer = Calls::new();
     let callbacks = SettingsCallbacks {
         on_session_share_destination_change: Box::new(share.recorder()),
+        on_session_share_viewer_change: Box::new(viewer.recorder()),
         on_steering_mode_change: Box::new(steering.recorder()),
         on_http_idle_timeout_ms_change: Box::new(http.recorder()),
         on_quiet_startup_change: Box::new(quiet.recorder()),
@@ -291,9 +293,13 @@ fn dispatches_parsed_values() {
     let mut selector = SettingsSelector::new(SettingsConfig::default(), callbacks);
     send(&mut selector, &[keys::SPACE]);
     let list = selector.settings_list();
-    for (id, presses) in
-        [("steering-mode", 2), ("http-idle-timeout", 2), ("quiet-startup", 3), ("share-destination", 3)]
-    {
+    for (id, presses) in [
+        ("steering-mode", 2),
+        ("http-idle-timeout", 2),
+        ("quiet-startup", 3),
+        ("share-destination", 4),
+        ("share-viewer", 2),
+    ] {
         list.borrow_mut().select_item(id);
         for _ in 0..presses {
             list.borrow_mut().handle_input(keys::ENTER);
@@ -312,8 +318,10 @@ fn dispatches_parsed_values() {
     let expected = [DefaultProjectTrust::Always, DefaultProjectTrust::Never, DefaultProjectTrust::Ask];
     assert_eq!(trust.get(), expected);
     assert_eq!(pad.get(), [0, 1]);
-    use crate::settings::schema::SessionShareDestination::{Auto, Gist, Radius};
-    assert_eq!(share.get(), [Gist, Radius, Auto]);
+    use crate::settings::schema::SessionShareDestination::{Auto, Gist, PiRust, Radius};
+    assert_eq!(share.get(), [Gist, Radius, PiRust, Auto]);
+    use crate::settings::schema::SessionShareViewer;
+    assert_eq!(viewer.get(), [SessionShareViewer::PiDev, SessionShareViewer::PiRust]);
     assert_eq!(format_http_idle_timeout_ms(45_500), "45.5 sec");
     assert_eq!(format_http_idle_timeout_ms(90_000), "90 sec");
     let trust = list.borrow().items().iter().find(|item| item.id == "default-project-trust").cloned();
@@ -354,6 +362,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
         "quietStartup": "header",
         "defaultProjectTrust": "never",
         "sessionShareDestination": "radius",
+        "sessionShareViewer": "pi.dev",
         "providerIdentity": "pi-rust",
         "warnings": {"anthropicExtraUsage": false},
     })));
@@ -364,6 +373,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(config.default_project_trust, DefaultProjectTrust::Never);
     assert_eq!(config.session_share_destination, crate::settings::schema::SessionShareDestination::Radius);
     assert_eq!(config.provider_identity, crate::settings::schema::ProviderIdentity::PiRust);
+    assert_eq!(config.session_share_viewer, crate::settings::schema::SessionShareViewer::PiDev);
     // The removed warnings setting stays in the file as an unknown key.
     assert!(settings.settings().extra.contains_key("warnings"));
     assert!(config.available_themes.iter().any(|theme| theme == "dark"));
@@ -376,6 +386,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
         "hide-thinking",
         "editor-padding",
         "share-destination",
+        "share-viewer",
         "provider-identity",
     ] {
         list.borrow_mut().select_item(id);
@@ -385,8 +396,10 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(settings.default_project_trust(), "ask");
     assert!(settings.hide_thinking_block());
     assert_eq!(settings.editor_padding_x(), 1);
-    assert_eq!(settings.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
+    assert_eq!(settings.session_share_destination(), crate::settings::schema::SessionShareDestination::PiRust);
+    assert_eq!(settings.session_share_viewer(), crate::settings::schema::SessionShareViewer::PiRust);
     assert_eq!(settings.provider_identity(), crate::settings::schema::ProviderIdentity::Pi);
-    let invalid = SettingsManager::in_memory(json!({"sessionShareDestination": "dropbox"}));
+    let invalid = SettingsManager::in_memory(json!({"sessionShareDestination": "dropbox", "sessionShareViewer": "x"}));
     assert_eq!(invalid.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
+    assert_eq!(invalid.session_share_viewer(), crate::settings::schema::SessionShareViewer::PiRust);
 }

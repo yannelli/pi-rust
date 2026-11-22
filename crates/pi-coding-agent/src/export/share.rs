@@ -1,6 +1,7 @@
-//! `/share` (upstream `modes/interactive/session-share.ts`): upload the branch JSONL as a
-//! Radius artifact when a Radius token is available, otherwise publish the HTML export as a
-//! private GitHub gist through the `gh` CLI and link it in the share viewer.
+//! `/share` (upstream `modes/interactive/session-share.ts`): upload the HTML export to the user's
+//! pi-rust.com account (pi-rust extension), upload the branch JSONL as a Radius artifact, or
+//! publish the HTML export as a private GitHub gist through the `gh` CLI and link it in the share
+//! viewer. Gist links open on pi-rust.com unless `sessionShareViewer` is `pi.dev`.
 
 use std::path::{Path, PathBuf};
 
@@ -10,23 +11,76 @@ use tokio_util::sync::CancellationToken;
 
 use super::html::{ExportTool, HtmlExportOptions, export_session_html};
 use super::jsonl::export_session_to_jsonl;
+use super::pi_rust_share::{PiRustAccount, PiRustError, upload_share};
 use super::session_file::random_hex;
 use super::theme::ExportTheme;
 use super::tool_renderer::ToolHtmlRenderer;
+use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
 
-pub const DEFAULT_SHARE_VIEWER_URL: &str = "https://pi.dev/session/";
+/// The default gist viewer (pi-rust extension); upstream's is [`PI_DEV_SHARE_VIEWER_URL`].
+pub const DEFAULT_SHARE_VIEWER_URL: &str = "https://pi-rust.com/session/";
+pub const PI_DEV_SHARE_VIEWER_URL: &str = "https://pi.dev/session/";
 pub const DEFAULT_RADIUS_GATEWAY: &str = "https://radius.pi.dev";
 pub const ENV_SHARE_VIEWER_URL: &str = "PI_SHARE_VIEWER_URL";
+/// The share title when the session has no name.
+pub const DEFAULT_SHARE_TITLE: &str = "Pi session";
 
-/// Viewer link for a gist: `$PI_SHARE_VIEWER_URL` (or the default) followed by `#<gist id>`.
-pub fn share_viewer_url(gist_id: &str) -> String {
-    share_viewer_url_with(std::env::var(ENV_SHARE_VIEWER_URL).ok().as_deref(), gist_id)
+/// The viewer base URL of a `sessionShareViewer` value.
+pub fn viewer_base_url(viewer: SessionShareViewer) -> &'static str {
+    match viewer {
+        SessionShareViewer::PiRust => DEFAULT_SHARE_VIEWER_URL,
+        SessionShareViewer::PiDev => PI_DEV_SHARE_VIEWER_URL,
+    }
 }
 
-/// [`share_viewer_url`] with an explicit base; `None` or empty uses the default viewer.
-pub fn share_viewer_url_with(base: Option<&str>, gist_id: &str) -> String {
-    let base = base.filter(|url| !url.is_empty()).unwrap_or(DEFAULT_SHARE_VIEWER_URL);
+/// Viewer link for a gist: `$PI_SHARE_VIEWER_URL` (or the `viewer` setting's base) followed by `#<gist id>`.
+pub fn share_viewer_url(viewer: SessionShareViewer, gist_id: &str) -> String {
+    share_viewer_url_with(std::env::var(ENV_SHARE_VIEWER_URL).ok().as_deref(), viewer, gist_id)
+}
+
+/// [`share_viewer_url`] with an explicit override; `None` or empty uses the `viewer` setting's base.
+pub fn share_viewer_url_with(base: Option<&str>, viewer: SessionShareViewer, gist_id: &str) -> String {
+    let base = base.filter(|url| !url.is_empty()).unwrap_or(viewer_base_url(viewer));
     format!("{base}#{gist_id}")
+}
+
+/// Where one `/share` goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShareRoute {
+    /// The signed-in pi-rust.com account.
+    PiRust,
+    /// The pi-rust.com account after the user signs in.
+    PiRustSignIn,
+    Radius,
+    Gist,
+}
+
+pub const RADIUS_NOT_CONFIGURED: &str = "Radius authentication is not configured. Run '/login radius' first.";
+
+/// Whether choosing a route for `destination` needs to know about a Radius credential.
+pub fn route_needs_radius(destination: SessionShareDestination, pi_rust_signed_in: bool) -> bool {
+    match destination {
+        SessionShareDestination::Auto => !pi_rust_signed_in,
+        SessionShareDestination::Radius => true,
+        SessionShareDestination::Gist | SessionShareDestination::PiRust => false,
+    }
+}
+
+/// The route for `destination`: `auto` prefers the signed-in pi-rust.com account, then Radius,
+/// then a gist. An explicit `radius` without a credential fails.
+pub fn share_route(
+    destination: SessionShareDestination,
+    pi_rust_signed_in: bool,
+    radius_available: bool,
+) -> Result<ShareRoute, ShareError> {
+    Ok(match destination {
+        SessionShareDestination::PiRust if pi_rust_signed_in => ShareRoute::PiRust,
+        SessionShareDestination::PiRust => ShareRoute::PiRustSignIn,
+        SessionShareDestination::Auto if pi_rust_signed_in => ShareRoute::PiRust,
+        SessionShareDestination::Auto | SessionShareDestination::Radius if radius_available => ShareRoute::Radius,
+        SessionShareDestination::Radius => return Err(ShareError::Failed(RADIUS_NOT_CONFIGURED.into())),
+        SessionShareDestination::Auto | SessionShareDestination::Gist => ShareRoute::Gist,
+    })
 }
 
 /// The trailing `pi.share` custom entry with the system prompt and tool schemas.
@@ -91,17 +145,19 @@ impl std::fmt::Display for ShareError {
 
 impl std::error::Error for ShareError {}
 
+/// `PiRust` is a share in the user's pi-rust.com account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShareOutcome {
     Radius { url: String },
     Gist { gist_url: String, preview_url: String },
+    PiRust { url: String },
 }
 
 impl ShareOutcome {
     /// The status line upstream shows (without terminal hyperlinks).
     pub fn status_message(&self) -> String {
         match self {
-            Self::Radius { url } => format!("Share URL: {url}"),
+            Self::Radius { url } | Self::PiRust { url } => format!("Share URL: {url}"),
             Self::Gist { gist_url, preview_url } => format!("Share URL: {preview_url}\nGist: {gist_url}"),
         }
     }
@@ -153,7 +209,11 @@ pub async fn check_gh_auth(runner: &dyn ShareCommandRunner) -> Result<(), ShareE
 }
 
 /// `gh gist create --public=false <file>`, returning the gist and viewer URLs.
-pub async fn create_gist(runner: &dyn ShareCommandRunner, file: &Path) -> Result<ShareOutcome, ShareError> {
+pub async fn create_gist(
+    runner: &dyn ShareCommandRunner,
+    file: &Path,
+    viewer: SessionShareViewer,
+) -> Result<ShareOutcome, ShareError> {
     let args = ["gist".into(), "create".into(), "--public=false".into(), file.to_string_lossy().into_owned()];
     let output =
         runner.run("gh", &args).await.map_err(|error| ShareError::Failed(format!("Failed to create gist: {error}")))?;
@@ -167,7 +227,7 @@ pub async fn create_gist(runner: &dyn ShareCommandRunner, file: &Path) -> Result
     if gist_id.is_empty() {
         return Err(ShareError::Failed("Failed to parse gist ID from gh output".into()));
     }
-    let preview_url = share_viewer_url(gist_id);
+    let preview_url = share_viewer_url(viewer, gist_id);
     Ok(ShareOutcome::Gist { gist_url, preview_url })
 }
 
@@ -221,6 +281,11 @@ pub struct ShareRequest<'a> {
     pub tool_renderer: Option<&'a (dyn ToolHtmlRenderer + Sync)>,
     /// Set when the `radius` provider has a valid credential; the gist path is skipped then.
     pub radius: Option<RadiusTarget>,
+    /// The signed-in pi-rust.com account; it wins over Radius and the gist.
+    pub pi_rust: Option<PiRustAccount>,
+    /// The share title on pi-rust.com.
+    pub title: String,
+    pub viewer: SessionShareViewer,
     pub runner: &'a dyn ShareCommandRunner,
     pub http: reqwest::Client,
     pub cancel: CancellationToken,
@@ -234,7 +299,8 @@ impl Drop for TempDir {
     }
 }
 
-/// Share the session through Radius, falling back to a private gist (upstream `shareSession`).
+/// Share the session to the pi-rust.com account, else through Radius, else as a private gist
+/// (upstream `shareSession`).
 pub async fn share_session(request: ShareRequest<'_>) -> Result<ShareOutcome, ShareError> {
     let dir = std::env::temp_dir().join(format!("pi-share-{}", random_hex(12)));
     crate::agent_session::output_file::create_private_dir(&dir).map_err(|error| export_failed(&error))?;
@@ -247,6 +313,16 @@ pub async fn share_session(request: ShareRequest<'_>) -> Result<ShareOutcome, Sh
 
     let cancel = request.cancel.clone();
     let work = async {
+        if let Some(account) = &request.pi_rust {
+            export_share_html(&request, &html_file)?;
+            let html = std::fs::read(&html_file).map_err(|error| export_failed(&error))?;
+            let share = upload_share(&request.http, account, &request.title, html, &cancel).await;
+            return match share {
+                Ok(share) => Ok(ShareOutcome::PiRust { url: share.url }),
+                Err(PiRustError::Cancelled) => Err(ShareError::Cancelled),
+                Err(error) => Err(ShareError::Failed(error.to_string())),
+            };
+        }
         if let Some(radius) = &request.radius {
             let body = std::fs::read(&jsonl_file).map_err(|error| export_failed(&error))?;
             let url = upload_radius_artifact(&request.http, &radius.gateway, &radius.token, body).await?;
@@ -254,7 +330,7 @@ pub async fn share_session(request: ShareRequest<'_>) -> Result<ShareOutcome, Sh
         }
         check_gh_auth(request.runner).await?;
         export_share_html(&request, &html_file)?;
-        create_gist(request.runner, &html_file).await
+        create_gist(request.runner, &html_file, request.viewer).await
     };
     tokio::select! {
         result = work => result,

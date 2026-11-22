@@ -47,6 +47,33 @@ Native extensions can read the same key with `host.settings::<String>("listOverf
 
 Attribution headers, such as OpenRouter's `HTTP-Referer` and `X-OpenRouter-Title`, are sent only while install telemetry is on (`enableInstallTelemetry` or `PI_TELEMETRY=1`). Requests that pi-rust makes to its own services, such as the version check, always send the pi-rust version.
 
+## Session sharing
+
+`/share` uploads the current session. `sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
+
+| Value | Behavior |
+| --- | --- |
+| `"auto"` (default) | Your pi-rust.com account when you are signed in, else Radius when the `radius` provider has a credential, else a secret GitHub gist. |
+| `"pi-rust"` | Your pi-rust.com account. If you are not signed in, `/share` signs you in first. |
+| `"radius"` | A Radius artifact. Run `/login radius` first. |
+| `"gist"` | A secret GitHub gist, created with the `gh` CLI. |
+
+A pi-rust.com share uploads the same HTML export as a gist share, up to 25 MiB, and shows `Share URL: <url>`. The share title is the session name, or `Pi session`.
+
+To sign in, `/share` shows a code and a sign-in URL. Press Enter to open the page and copy the code, then approve the code on pi-rust.com. Esc cancels. The code expires after the time the service sets. pi saves the token in `<agent dir>/pi-rust-account.json`, readable only by you, and not in `auth.json`. If pi-rust.com rejects the token, pi deletes the file, and the next `/share` signs you in again. To sign out, run `/logout` and choose **pi-rust.com**. pi revokes the token on pi-rust.com and deletes the file.
+
+`sessionShareViewer` chooses the page that gist links open:
+
+| Value | Link |
+| --- | --- |
+| `"pi-rust"` (default) | `https://pi-rust.com/session/#<gist id>` |
+| `"pi.dev"` | `https://pi.dev/session/#<gist id>`, as upstream pi |
+
+Environment variables:
+
+- `PI_SHARE_URL` replaces the share service origin `https://pi-rust.com` for sign-in and uploads.
+- `PI_SHARE_VIEWER_URL` replaces the gist viewer base URL, whatever `sessionShareViewer` says.
+
 ## Git worktrees
 
 In a linked git worktree (`git worktree add`), pi reads each project entry from the worktree first. When the worktree does not have it, pi reads the main checkout's copy at the same path. Thus untracked project settings, such as a `.pi/settings.json` or `.pi/mcp.json` that git ignores, apply in every worktree of the repository.

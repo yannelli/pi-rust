@@ -1,15 +1,21 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use serde_json::json;
+
 use async_trait::async_trait;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 use crate::export::ExportTheme;
+use crate::export::pi_rust_share::PiRustAccount;
 use crate::export::share::{
-    CommandOutput, RadiusTarget, ShareCommandRunner, ShareError, ShareOutcome, ShareRequest, check_gh_auth,
-    create_gist, share_session, share_viewer_url, share_viewer_url_with, upload_radius_artifact,
+    CommandOutput, RADIUS_NOT_CONFIGURED, RadiusTarget, ShareCommandRunner, ShareError, ShareOutcome, ShareRequest,
+    ShareRoute, check_gh_auth, create_gist, route_needs_radius, share_route, share_session, share_viewer_url,
+    share_viewer_url_with, upload_radius_artifact,
 };
+use crate::platform::test_http::{TestReply, TestServer};
+use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/export_session.jsonl")
@@ -62,6 +68,9 @@ fn request<'a>(
         theme: ExportTheme::dark(),
         tool_renderer: None,
         radius,
+        pi_rust: None,
+        title: "Pi session".into(),
+        viewer: SessionShareViewer::PiRust,
         runner,
         http: reqwest::Client::builder().no_proxy().build().unwrap(),
         cancel,
@@ -79,9 +88,30 @@ fn share_future_can_be_spawned() {
 
 #[test]
 fn viewer_url_appends_the_gist_id() {
-    assert_eq!(share_viewer_url_with(Some("https://example.com/view/"), "abc"), "https://example.com/view/#abc");
-    assert_eq!(share_viewer_url_with(None, "abc"), "https://pi.dev/session/#abc");
-    assert_eq!(share_viewer_url_with(Some(""), "abc"), "https://pi.dev/session/#abc");
+    let (pi_rust, pi_dev) = (SessionShareViewer::PiRust, SessionShareViewer::PiDev);
+    let custom = Some("https://example.com/view/");
+    assert_eq!(share_viewer_url_with(custom, pi_rust, "abc"), "https://example.com/view/#abc");
+    assert_eq!(share_viewer_url_with(custom, pi_dev, "abc"), "https://example.com/view/#abc");
+    assert_eq!(share_viewer_url_with(None, pi_rust, "abc"), "https://pi-rust.com/session/#abc");
+    assert_eq!(share_viewer_url_with(Some(""), pi_rust, "abc"), "https://pi-rust.com/session/#abc");
+    assert_eq!(share_viewer_url_with(None, pi_dev, "abc"), "https://pi.dev/session/#abc");
+    assert_eq!(SessionShareViewer::default(), pi_rust);
+}
+
+#[test]
+fn auto_prefers_the_pi_rust_account_then_radius_then_a_gist() {
+    use SessionShareDestination::{Auto, Gist, PiRust, Radius};
+    let route = |destination, signed_in, radius| share_route(destination, signed_in, radius);
+    assert_eq!(route(Auto, true, true), Ok(ShareRoute::PiRust));
+    assert_eq!(route(Auto, false, true), Ok(ShareRoute::Radius));
+    assert_eq!(route(Auto, false, false), Ok(ShareRoute::Gist));
+    assert_eq!(route(PiRust, true, true), Ok(ShareRoute::PiRust));
+    assert_eq!(route(PiRust, false, true), Ok(ShareRoute::PiRustSignIn));
+    assert_eq!(route(Radius, true, true), Ok(ShareRoute::Radius));
+    assert_eq!(route(Radius, true, false), Err(ShareError::Failed(RADIUS_NOT_CONFIGURED.into())));
+    assert_eq!(route(Gist, true, true), Ok(ShareRoute::Gist));
+    assert!(route_needs_radius(Auto, false) && route_needs_radius(Radius, true));
+    assert!(!route_needs_radius(Auto, true) && !route_needs_radius(Gist, false) && !route_needs_radius(PiRust, false));
 }
 
 #[tokio::test]
@@ -97,7 +127,7 @@ async fn gist_share_uploads_the_html_export() {
         }
     });
     let outcome = share_session(request(&fixture(), &runner, None, CancellationToken::new())).await.unwrap();
-    let preview_url = share_viewer_url("abc123");
+    let preview_url = share_viewer_url(SessionShareViewer::PiRust, "abc123");
     assert_eq!(outcome, ShareOutcome::Gist { gist_url: "https://gist.github.com/user/abc123".into(), preview_url });
     assert!(outcome.status_message().starts_with("Share URL: "));
 
@@ -123,12 +153,13 @@ async fn gh_failures_use_upstream_messages() {
         failed("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/")
     );
     let file = Path::new("session.html");
+    let viewer = SessionShareViewer::PiRust;
     let runner = MockRunner::new(|_| output(1, "", "  boom \n"));
-    assert_eq!(create_gist(&runner, file).await, failed("Failed to create gist: boom"));
+    assert_eq!(create_gist(&runner, file, viewer).await, failed("Failed to create gist: boom"));
     let runner = MockRunner::new(|_| output(2, "", ""));
-    assert_eq!(create_gist(&runner, file).await, failed("Failed to create gist: Unknown error"));
+    assert_eq!(create_gist(&runner, file, viewer).await, failed("Failed to create gist: Unknown error"));
     let runner = MockRunner::new(|_| output(0, "https://gist.github.com/user/\n", ""));
-    assert_eq!(create_gist(&runner, file).await, failed("Failed to parse gist ID from gh output"));
+    assert_eq!(create_gist(&runner, file, viewer).await, failed("Failed to parse gist ID from gh output"));
 }
 
 #[tokio::test]
@@ -207,4 +238,27 @@ async fn radius_errors_report_the_reason() {
     let (url, _server) = serve_once("500 Internal Server Error", "oops").await;
     let error = upload_radius_artifact(&client, &url, "tok", b"{}\n".to_vec()).await.unwrap_err();
     assert_eq!(error.to_string(), "Failed to upload Radius artifact: Internal Server Error");
+}
+
+#[tokio::test]
+async fn pi_rust_share_uploads_the_html_export_to_the_account() {
+    let server = TestServer::start(|_| {
+        let share =
+            json!({"id": "s1", "url": "https://share.test/s/s1", "title": "Pi session", "size": 1, "createdAt": "x"});
+        TestReply::status(201, &json!({"ok": true, "share": share}).to_string())
+    })
+    .await;
+    let runner = MockRunner::new(|_| panic!("gh must not run for a pi-rust.com share"));
+    let radius = RadiusTarget { gateway: "http://127.0.0.1:9".into(), token: "unused".into() };
+    let account = PiRustAccount { origin: server.url.clone(), token: "tok".into(), email: None };
+    let session = fixture();
+    let mut request = request(&session, &runner, Some(radius), CancellationToken::new());
+    request.pi_rust = Some(account);
+    request.title = "Bug hunt".into();
+    let outcome = share_session(request).await.unwrap();
+    assert_eq!(outcome, ShareOutcome::PiRust { url: "https://share.test/s/s1".into() });
+    assert_eq!(outcome.status_message(), "Share URL: https://share.test/s/s1");
+    let upload = &server.requests()[0];
+    assert_eq!((upload.path(), upload.query("title").as_deref()), ("/v1/shares", Some("Bug hunt")));
+    assert!(String::from_utf8_lossy(&upload.body).contains("<title>Session Export</title>"));
 }

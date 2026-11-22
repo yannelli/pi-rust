@@ -291,7 +291,8 @@ pub enum TreeFilterMode {
     All,
 }
 
-/// Where `/share` uploads: `auto` uses Radius when signed in, else a GitHub gist.
+/// Where `/share` uploads: `auto` uses the pi-rust.com account when signed in, else Radius when
+/// signed in, else a GitHub gist. `pi-rust` is a pi-rust extension.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionShareDestination {
@@ -299,6 +300,18 @@ pub enum SessionShareDestination {
     Auto,
     Gist,
     Radius,
+    #[serde(rename = "pi-rust")]
+    PiRust,
+}
+
+/// `sessionShareViewer` (pi-rust extension): the viewer that gist links from `/share` open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionShareViewer {
+    #[default]
+    #[serde(rename = "pi-rust")]
+    PiRust,
+    #[serde(rename = "pi.dev")]
+    PiDev,
 }
 
 /// `providerIdentity` (pi-rust extension): how model provider requests identify the client.
@@ -405,6 +418,8 @@ pub struct Settings {
     pub transport: Option<Transport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_share_destination: Option<SessionShareDestination>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_share_viewer: Option<SessionShareViewer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steering_mode: Option<QueueMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,6 +557,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "modelThinkingLevels",
     "transport",
     "sessionShareDestination",
+    "sessionShareViewer",
     "steeringMode",
     "followUpMode",
     "theme",

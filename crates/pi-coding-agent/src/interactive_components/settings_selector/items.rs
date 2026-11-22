@@ -176,9 +176,16 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
         item(
             "share-destination",
             "Session share destination",
-            "Where to upload sessions with /share (auto prefers Radius when authenticated, otherwise GitHub Gist)",
+            "Where to upload sessions with /share (auto prefers your pi-rust.com account when signed in, then Radius when authenticated, otherwise GitHub Gist)",
             enum_str(config.session_share_destination),
-            &["auto", "gist", "radius"],
+            &["auto", "gist", "radius", "pi-rust"],
+        ),
+        item(
+            "share-viewer",
+            "Session share viewer",
+            "Viewer that GitHub Gist links from /share open: pi-rust.com or upstream pi.dev",
+            enum_str(config.session_share_viewer),
+            &["pi-rust", "pi.dev"],
         ),
         item(
             "http-idle-timeout",
@@ -355,6 +362,7 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
         "share-destination" => {
             parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_destination_change)
         }
+        "share-viewer" => parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_viewer_change),
         "http-idle-timeout" => {
             let choice = HTTP_IDLE_TIMEOUT_CHOICES.iter().find(|(label, _)| *label == value);
             choice.into_iter().for_each(|(_, ms)| (callbacks.on_http_idle_timeout_ms_change)(*ms));

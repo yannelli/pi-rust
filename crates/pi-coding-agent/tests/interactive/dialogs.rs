@@ -236,3 +236,48 @@ async fn renaming_the_current_session_from_resume_renames_the_live_session() {
     })
     .await;
 }
+
+/// Answers one request with `204 No Content` and returns the request head.
+async fn serve_one_no_content() -> (String, tokio::task::JoinHandle<String>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0u8; 4096];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            let read = socket.read(&mut buffer).await.unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        socket.write_all(b"HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n").await.unwrap();
+        String::from_utf8_lossy(&request).into_owned()
+    });
+    (url, task)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn logout_lists_the_pi_rust_account_and_revokes_its_token() {
+    local(async {
+        let (origin, server) = serve_one_no_content().await;
+        let root = tempfile::tempdir().unwrap();
+        let agent_dir = root.path().join("agent");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        let account = json!({"origin": origin, "token": "tok-secret", "email": "me@share.test"});
+        std::fs::write(agent_dir.join("pi-rust-account.json"), account.to_string()).unwrap();
+        let ui = start(Options { agent_dir: Some(agent_dir.clone()), ..Options::default() }).await;
+        ui.submit("/logout").await;
+        ui.wait_for("Select provider to logout:").await;
+        ui.wait_for("pi-rust.com").await;
+        ui.send("\r").await;
+        ui.wait_for("Logged out of pi-rust.com").await;
+        let request = server.await.unwrap();
+        assert!(request.starts_with("DELETE /v1/token HTTP/1.1\r\n"), "{request}");
+        assert!(request.to_lowercase().contains("authorization: bearer tok-secret\r\n"), "{request}");
+        assert!(!agent_dir.join("pi-rust-account.json").exists());
+    })
+    .await;
+}

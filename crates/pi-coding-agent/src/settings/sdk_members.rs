@@ -62,7 +62,7 @@ pub(super) fn getter(
         }
         "getAllModelThinkingLevels" => Value::Object(spread(v(&["modelThinkingLevels"]))),
         "getTransport" => or(v(&["transport"]), json!("auto")),
-        "getSessionShareDestination" => one_of(v(&["sessionShareDestination"]), &["gist", "radius"], "auto"),
+        "getSessionShareDestination" => one_of(v(&["sessionShareDestination"]), &["gist", "radius", "pi-rust"], "auto"),
         "getCompactionEnabled" => or(v(&["compaction", "enabled"]), json!(true)),
         "getCompactionReserveTokens" => compaction_tokens(merged, "reserveTokens", arg(0))?,
         "getCompactionKeepRecentTokens" => compaction_tokens(merged, "keepRecentTokens", arg(0))?,

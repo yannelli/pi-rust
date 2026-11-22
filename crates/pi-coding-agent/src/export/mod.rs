@@ -7,6 +7,7 @@ mod html;
 pub mod json;
 mod jsonl;
 mod markdown;
+pub mod pi_rust_share;
 pub mod session_file;
 pub mod share;
 mod theme;
