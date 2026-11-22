@@ -6,13 +6,17 @@
 
 # pi-rust
 
-pi-rust is a Rust port of the [pi](https://github.com/earendil-works/pi) coding agent harness. It has these parts:
+pi-rust is a drop-in Rust port of the [pi](https://github.com/earendil-works/pi) coding agent harness, built for 1:1 parity with pi. In this file, "upstream pi" is the original pi, which is written in TypeScript.
+
+- Drop-in replacement: pi-rust is the same `pi` command, and it reads your `~/.pi/agent` setup. Session files, settings keys, config paths, and RPC and JSON events match upstream pi byte for byte, so the two can use one setup.
+- Extensions: your TypeScript extensions, skills, prompt templates, themes, and pi packages work as they are. Extensions run on an embedded QuickJS engine with the Node built-in modules, so pi-rust does not need Node.js or another JavaScript runtime. To run them on Node 22 or later, set `extensionRuntime` to `"node"`.
+- 1:1 parity: the [Parity workflow](docs/parity/README.md) compares pi-rust with upstream pi every day and updates the [parity report](https://github.com/yannelli/pi-rust/issues?q=label%3Aparity-report). [Differences from upstream pi](#differences-from-upstream-pi) lists each intended difference.
+
+One binary has these parts:
 
 - A streaming API for large language models (LLMs) from many providers.
 - An agent loop that calls tools.
 - The `pi` coding agent, which has a command-line interface (CLI).
-
-pi-rust does not need Node.js or a different JavaScript runtime. In this file, "upstream pi" is the original pi, which is written in TypeScript.
 
 Website and documentation: [pi-rust.com](https://pi-rust.com).
 
