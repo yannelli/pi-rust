@@ -1,4 +1,4 @@
-//! Diagnostics: `/bug` reports with redaction, zip export, and Radius upload; crash logs;
+//! Diagnostics: `/bug` reports with redaction, zip export, and upload to pi-rust.com; crash logs;
 //! startup timings (`PI_TIMING`); and the stdout guard for JSON and RPC modes. Resource
 //! diagnostics (upstream `core/diagnostics.ts`) live in [`crate::resources`].
 
@@ -18,11 +18,11 @@ mod tests;
 pub use crate::resources::{ResourceCollision, ResourceDiagnostic};
 pub use bug_report::{
     BUG_REPORT_CUSTOM_ENTRY_TYPE, BugReportBundle, BugReportFile, BugReportMetadataOptions, BugReportSessionEntryData,
-    ExtensionDescription, ProviderDescription, bug_report_archive_file_name, bug_report_files,
+    ExtensionDescription, ProviderDescription, bug_report_archive_file_name, bug_report_files, bug_report_issue_url,
     collect_bug_report_diagnostics, collect_bug_report_metadata, write_bug_report_archive,
 };
 pub use bug_summary::{BugReportSummaryOptions, generate_bug_report_summary};
-pub use bug_upload::{UploadBugReportOptions, radius_gateway_url, upload_bug_report};
+pub use bug_upload::{UploadBugReportOptions, bug_report_url, radius_gateway_url, upload_bug_report};
 pub use crash_log::{
     Crash, CrashContext, CrashRecord, clear_crash_log, crash_log_path, crash_report_instructions, install_crash_hook,
     read_crash_log, record_crash, record_fatal_error, take_unnotified_crash,

@@ -17,7 +17,7 @@ use crate::session::Entry;
 pub const BUG_REPORT_CUSTOM_ENTRY_TYPE: &str = "pi.bug-report";
 const BUG_REPORT_SCHEMA_VERSION: u32 = 1;
 
-pub const BUG_REPORT_DISCLAIMER: &str = "This report goes to the Pi developers (Earendil) and is not shared publicly. It includes your pi version, operating system, the current model and provider configuration (without API keys), loaded extensions, settings, and provider error diagnostics from this session.";
+pub const BUG_REPORT_DISCLAIMER: &str = "If you do not choose Open GitHub Issue, this report goes only to the pi-rust developer. The report contains your pi version, your operating system, and the current model and provider configuration (without API keys). It also contains the loaded extensions, the settings, and the provider error diagnostics from this session.";
 pub const BUG_REPORT_TRANSCRIPT_NOTE: &str = "The transcript contains your messages, model output, tool calls and their results, including file contents and command output read during this session.";
 
 fn node_platform() -> &'static str {
@@ -286,6 +286,46 @@ pub fn write_bug_report_archive(bundle: &BugReportBundle, path: &Path) -> std::i
 
 pub fn bug_report_archive_file_name(id: &str) -> String {
     format!("pi-bug-report-{id}.zip")
+}
+
+/// Keeps the percent-encoded issue URL under GitHub's URL length limit (414 above it).
+const ISSUE_DESCRIPTION_MAX_BYTES: usize = 1500;
+
+/// The new-issue form of the pi-rust repository, prefilled with the description, report ID,
+/// version, platform, and model. The other report files stay in the zip archive.
+pub fn bug_report_issue_url(bundle: &BugReportBundle, archive_name: &str) -> String {
+    let text = |pointer: &str| bundle.metadata.pointer(pointer).and_then(Value::as_str).unwrap_or_default();
+    let hint = text("/hint");
+    let end = hint
+        .char_indices()
+        .map(|(index, ch)| index + ch.len_utf8())
+        .take_while(|end| *end <= ISSUE_DESCRIPTION_MAX_BYTES)
+        .last()
+        .unwrap_or(0);
+    let description = if end == 0 { "<!-- What went wrong? -->" } else { &hint[..end] };
+    let model = match (text("/model/provider"), text("/model/id")) {
+        ("", _) | (_, "") => "none".to_string(),
+        (provider, id) => format!("{provider}/{id}"),
+    };
+    let body = format!(
+        "{description}\n\n- Report ID: `{id}`\n- Version: {version}\n- Platform: {platform} {arch}\n- Model: {model}\n\n\
+         <!-- This issue is public. The full report is {archive_name} in the directory where you ran /bug. \
+         Attach it only if its contents can be public. -->\n",
+        id = text("/id"),
+        version = text("/environment/version"),
+        platform = text("/environment/platform"),
+        arch = text("/environment/arch"),
+    );
+    let mut url = url::Url::parse(&format!("https://github.com/{}/issues/new", crate::update::release::GITHUB_REPO))
+        .expect("valid issue URL");
+    {
+        let mut query = url.query_pairs_mut();
+        if let Some(title) = hint.lines().next().filter(|line| !line.trim().is_empty()) {
+            query.append_pair("title", &title.trim().chars().take(80).collect::<String>());
+        }
+        query.append_pair("body", &body);
+    }
+    url.into()
 }
 
 /// The `pi.bug-report` custom entry recorded in the session after delivery.

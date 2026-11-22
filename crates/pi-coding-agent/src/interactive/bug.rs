@@ -1,5 +1,5 @@
-//! `/bug`: consent, an optional model-written summary, then upload or a zip archive (upstream
-//! `modes/interactive/bug-report.ts`), and the hint after errors that look like pi bugs.
+//! `/bug` (upstream `modes/interactive/bug-report.ts`): upload to pi-rust.com, a prefilled pi-rust
+//! issue form, or a zip archive, and the hint after errors that look like pi bugs.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -7,6 +7,7 @@ use std::rc::Rc;
 use pi_ai::AssistantMessage;
 use pi_ai::retry::is_retryable_assistant_error;
 use pi_tui::component;
+use pi_tui::terminal_image::hyperlink;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
@@ -20,23 +21,26 @@ use crate::diagnostics::bug_report::{
 };
 use crate::diagnostics::{
     BUG_REPORT_CUSTOM_ENTRY_TYPE, BugReportBundle, BugReportMetadataOptions, BugReportSessionEntryData,
-    BugReportSummaryOptions, UploadBugReportOptions, bug_report_archive_file_name, clear_crash_log,
-    collect_bug_report_diagnostics, collect_bug_report_metadata, crash_log_path, generate_bug_report_summary,
-    radius_gateway_url, read_crash_log, upload_bug_report, write_bug_report_archive,
+    BugReportSummaryOptions, UploadBugReportOptions, bug_report_archive_file_name, bug_report_issue_url,
+    bug_report_url, clear_crash_log, collect_bug_report_diagnostics, collect_bug_report_metadata, crash_log_path,
+    generate_bug_report_summary, read_crash_log, upload_bug_report, write_bug_report_archive,
 };
 use crate::export::ExportTool;
 use crate::export::share::create_share_trailing_entries;
 use crate::resources::brand::APP_NAME;
 use crate::resources::source_info::{SourceOrigin, SourceScope};
 use crate::theme::{ThemeColor, theme};
+use crate::update::release::GITHUB_REPO;
 
-const RADIUS_PROVIDER_ID: &str = "radius";
+const UPLOAD: &str = "Upload Report";
+const OPEN_ISSUE: &str = "Open GitHub Issue";
 
 struct BugOptions {
     hint: Option<String>,
     include_session: bool,
     include_summary: bool,
     upload: bool,
+    open_issue: bool,
 }
 
 fn model_name(session: &AgentSession) -> String {
@@ -55,7 +59,7 @@ impl InteractiveMode {
         }
         self.state.borrow_mut().bug_hint_shown = true;
         let pad = self.state.borrow().output_pad;
-        let text = format!("If this looks like a {APP_NAME} bug, /bug sends a report to the developers.");
+        let text = format!("If this looks like a {APP_NAME} bug, /bug reports it to the pi-rust developers.");
         self.add_to_chat(component(ThemedText::new(move || theme().fg(ThemeColor::Muted, &text), pad, 0)));
         self.request_render();
     }
@@ -88,20 +92,27 @@ impl InteractiveMode {
             include_summary = self.bug_choice(&title, &["Yes, generate a summary", "No"], &note).await? != "No";
         }
         let description = hint.trim().to_string();
-        let host = url::Url::parse(&radius_gateway_url()).ok().and_then(|url| url.host_str().map(String::from));
+        let host = url::Url::parse(&bug_report_url()).ok().and_then(|url| url.host_str().map(String::from));
         let summary = if include_summary { format!("written by {}", model_name(&session)) } else { "none".into() };
         let details = format!(
-            "Description: {}\nTranscript: {}\nSummary: {summary}\n\nUpload sends the report to {}. Export writes a zip archive to the current directory instead.",
+            "Description: {}\nTranscript: {}\nSummary: {summary}\n\n{UPLOAD} sends the report only to the pi-rust developer at {}. {OPEN_ISSUE} writes a zip archive to the current directory. It also opens a public issue form on github.com/{GITHUB_REPO}. Attach the zip to the issue only if the contents can be public. Export as Zip only writes the archive.",
             if description.is_empty() { "none" } else { &description },
             if include_session { "included" } else { "not included" },
             host.unwrap_or_default(),
         );
-        let delivery = self.bug_choice("Bug report", &["Upload Report", "Export as Zip", "Cancel"], &details).await?;
+        let delivery =
+            self.bug_choice("Bug report", &[UPLOAD, OPEN_ISSUE, "Export as Zip", "Cancel"], &details).await?;
         if delivery == "Cancel" {
             return None;
         }
         let hint = (!description.is_empty()).then_some(description);
-        Some(BugOptions { hint, include_session, include_summary, upload: delivery == "Upload Report" })
+        Some(BugOptions {
+            hint,
+            include_session,
+            include_summary,
+            upload: delivery == UPLOAD,
+            open_issue: delivery == OPEN_ISSUE,
+        })
     }
 
     /// A cancellable loader in the editor slot; returns it and its cancel token.
@@ -159,12 +170,22 @@ impl InteractiveMode {
         }
         let id = bundle.metadata.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
         let cwd = std::env::current_dir().unwrap_or_else(|_| session.cwd().to_path_buf());
-        let path = cwd.join(bug_report_archive_file_name(&id));
+        let archive_name = bug_report_archive_file_name(&id);
+        let path = cwd.join(&archive_name);
         if let Err(error) = write_bug_report_archive(&bundle, &path) {
             return self.show_error(&format!("Failed to write bug report: {error}"));
         }
         self.record_bug_report(&session, &bundle, "zip", Some(path.display().to_string()));
-        self.show_status(&format!("Bug report exported to: {}\nReport ID: {id}", path.display()));
+        let exported = format!("Bug report exported to: {}\nReport ID: {id}", path.display());
+        if !options.open_issue {
+            return self.show_status(&exported);
+        }
+        let url = bug_report_issue_url(&bundle, &archive_name);
+        pi_ai::auth::oauth::open_browser(&url);
+        self.show_status(&format!(
+            "{exported}\nIssue form on {GITHUB_REPO}: {}\nThe issue is public after you submit it. Attach the zip only if the contents can be public.",
+            hyperlink(&url, &url)
+        ));
     }
 
     /// Uploads `bundle`; `None` when done or cancelled, else the failure.
@@ -175,14 +196,10 @@ impl InteractiveMode {
     ) -> Option<String> {
         let loader = self.show_bug_loader("Uploading bug report...");
         let cancel = loader.borrow().signal();
-        let (runtime, upload, token) = (session.model_runtime().clone(), bundle.clone(), cancel.clone());
-        let has_radius = runtime.registry().provider_name(RADIUS_PROVIDER_ID).is_some();
-        let result = tokio::spawn(async move {
-            let token_value = if has_radius { runtime.api_key_for(RADIUS_PROVIDER_ID).await } else { None };
-            let options = UploadBugReportOptions { token: token_value, ..Default::default() };
-            upload_bug_report(&upload, &options, &token).await
-        })
-        .await;
+        let (upload, token) = (bundle.clone(), cancel.clone());
+        let result =
+            tokio::spawn(async move { upload_bug_report(&upload, &UploadBugReportOptions::default(), &token).await })
+                .await;
         self.close_bug_loader(&loader);
         if cancel.is_cancelled() {
             self.show_status("Bug report cancelled");

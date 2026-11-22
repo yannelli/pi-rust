@@ -188,3 +188,44 @@ fn long_transcripts_keep_the_newest_messages() {
     assert!(!prompt.contains("<user-report>"));
     assert!(prompt.ends_with("Keep the report factual and concise."));
 }
+
+#[test]
+fn issue_url_prefills_the_pi_rust_issue_form_without_private_report_files() {
+    let bundle = BugReportBundle {
+        metadata: json!({
+            "id": "r1",
+            "hint": "Crash on /tree\nsteps: open a long session",
+            "environment": {"version": "1.2.3", "platform": "darwin", "arch": "arm64"},
+            "model": {"provider": "anthropic", "id": "claude-opus-5-5"},
+            "session": {"cwd": "/private/work"},
+            "settings": {"global": {"theme": "dark"}},
+        }),
+        diagnostics: json!({"assistant": [{"error": "secret diagnostics"}]}),
+        session_jsonl: Some("{\"type\":\"session\"}\n".into()),
+        summary: Some("private summary".into()),
+    };
+    let url = url::Url::parse(&bug_report_issue_url(&bundle, "pi-bug-report-r1.zip")).unwrap();
+    assert_eq!(url.as_str().split('?').next(), Some("https://github.com/yannelli/pi-rust/issues/new"));
+    let query: BTreeMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(query["title"], "Crash on /tree");
+    let body = &query["body"];
+    assert!(body.starts_with("Crash on /tree\nsteps: open a long session\n\n- Report ID: `r1`\n"));
+    assert!(body.contains("- Version: 1.2.3\n- Platform: darwin arm64\n- Model: anthropic/claude-opus-5-5\n"));
+    assert!(body.contains("pi-bug-report-r1.zip"));
+    for private in ["/private/work", "dark", "secret diagnostics", "private summary", "\"type\""] {
+        assert!(!body.contains(private), "{private}");
+    }
+
+    let long = BugReportBundle { metadata: json!({"id": "r3", "hint": "é".repeat(5000)}), ..bundle.clone() };
+    let url = bug_report_issue_url(&long, "pi-bug-report-r3.zip");
+    assert!(url.len() < 8000, "{}", url.len());
+    let query: BTreeMap<String, String> = url::Url::parse(&url).unwrap().query_pairs().into_owned().collect();
+    assert!(query["body"].starts_with(&format!("{}\n\n- Report ID: `r3`", "é".repeat(750))));
+
+    let empty = BugReportBundle { metadata: json!({"id": "r2"}), ..bundle };
+    let url = url::Url::parse(&bug_report_issue_url(&empty, "pi-bug-report-r2.zip")).unwrap();
+    let query: BTreeMap<String, String> = url.query_pairs().into_owned().collect();
+    assert!(!query.contains_key("title"));
+    assert!(query["body"].starts_with("<!-- What went wrong? -->\n\n- Report ID: `r2`\n"));
+    assert!(query["body"].contains("- Model: none\n"));
+}
