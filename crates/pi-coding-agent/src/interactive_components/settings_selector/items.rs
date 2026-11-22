@@ -1,5 +1,6 @@
 //! The settings of the selector, in upstream order, and the dispatch of value changes.
 
+use pi_ai::UPSTREAM_PI_VERSION;
 use pi_tui::components::settings_list::{SettingItem, SubmenuFactory};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -8,6 +9,7 @@ use super::super::key_display_text;
 use super::config::{
     DefaultProjectTrust, HTTP_IDLE_TIMEOUT_CHOICES, SettingsCallbacks, SettingsConfig, format_http_idle_timeout_ms,
 };
+use crate::platform::VERSION;
 use crate::settings::QuietStartup;
 
 /// The serde name of a settings enum, such as `one-at-a-time`.
@@ -236,6 +238,13 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             BOOL,
         ),
         item(
+            "provider-identity",
+            "Provider identity",
+            &format!("How model requests identify pi: 'pi' as upstream pi {UPSTREAM_PI_VERSION}, 'pi-rust' as pi-rust {VERSION}"),
+            enum_str(config.provider_identity),
+            &["pi", "pi-rust"],
+        ),
+        item(
             "default-project-trust",
             "Default project trust",
             "Fallback behavior when no extension or saved trust decision decides project trust",
@@ -364,6 +373,7 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
             (callbacks.on_quiet_startup_change)(quiet);
         }
         "install-telemetry" => (callbacks.on_enable_install_telemetry_change)(flag),
+        "provider-identity" => parse_enum(value).into_iter().for_each(&mut callbacks.on_provider_identity_change),
         "default-project-trust" => {
             let trust = DefaultProjectTrust::ALL.into_iter().find(|trust| trust.label() == value);
             trust.into_iter().for_each(&mut callbacks.on_default_project_trust_change);

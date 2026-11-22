@@ -30,6 +30,23 @@ Settings load from `<agent dir>/settings.json` (normally `~/.pi/agent/settings.j
 
 Native extensions can read the same key with `host.settings::<String>("listOverflow")` and fit their own lists.
 
+## Provider identity
+
+`providerIdentity` is a pi-rust setting that chooses how requests to model providers identify the client. Set it in `settings.json`, or open `/settings` and change **Provider identity**. A trusted project's value overrides the global one.
+
+```json
+{
+  "providerIdentity": "pi-rust"
+}
+```
+
+| Value | `User-Agent` | Attribution |
+| --- | --- | --- |
+| `"pi"` (default) | `pi/<upstream version> (<platform>; rust; <arch>)`. The version is the upstream pi release that pi-rust has parity with (`syncedVersion` in [`docs/parity/upstream.json`](../../../docs/parity/upstream.json)). | pi, `https://pi.dev` |
+| `"pi-rust"` | `pi-rust/<pi-rust version> (<platform>; rust; <arch>)` | pi-rust, `https://pi-rust.com` |
+
+Attribution headers, such as OpenRouter's `HTTP-Referer` and `X-OpenRouter-Title`, are sent only while install telemetry is on (`enableInstallTelemetry` or `PI_TELEMETRY=1`). Requests that pi-rust makes to its own services, such as the version check, always send the pi-rust version.
+
 ## Git worktrees
 
 In a linked git worktree (`git worktree add`), pi reads each project entry from the worktree first. When the worktree does not have it, pi reads the main checkout's copy at the same path. Thus untracked project settings, such as a `.pi/settings.json` or `.pi/mcp.json` that git ignores, apply in every worktree of the repository.

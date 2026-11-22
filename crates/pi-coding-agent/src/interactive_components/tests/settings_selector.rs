@@ -218,7 +218,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 44);
+    assert_eq!(ids.len(), 45);
     let network = ids.iter().position(|id| id == "http-idle-timeout").unwrap();
     assert_eq!(
         &ids[network..network + 10],
@@ -239,7 +239,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 42);
+    assert_eq!(without.len(), 43);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/42)"), "{screen}");
+    assert!(screen.contains("(1/43)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");
@@ -354,6 +354,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
         "quietStartup": "header",
         "defaultProjectTrust": "never",
         "sessionShareDestination": "radius",
+        "providerIdentity": "pi-rust",
         "warnings": {"anthropicExtraUsage": false},
     })));
     let config = SettingsConfig::from_settings(&settings);
@@ -362,6 +363,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(config.quiet_startup, QuietStartup::Header);
     assert_eq!(config.default_project_trust, DefaultProjectTrust::Never);
     assert_eq!(config.session_share_destination, crate::settings::schema::SessionShareDestination::Radius);
+    assert_eq!(config.provider_identity, crate::settings::schema::ProviderIdentity::PiRust);
     // The removed warnings setting stays in the file as an unknown key.
     assert!(settings.settings().extra.contains_key("warnings"));
     assert!(config.available_themes.iter().any(|theme| theme == "dark"));
@@ -374,6 +376,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
         "hide-thinking",
         "editor-padding",
         "share-destination",
+        "provider-identity",
     ] {
         list.borrow_mut().select_item(id);
         selector.handle_input(keys::ENTER);
@@ -383,6 +386,7 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert!(settings.hide_thinking_block());
     assert_eq!(settings.editor_padding_x(), 1);
     assert_eq!(settings.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
+    assert_eq!(settings.provider_identity(), crate::settings::schema::ProviderIdentity::Pi);
     let invalid = SettingsManager::in_memory(json!({"sessionShareDestination": "dropbox"}));
     assert_eq!(invalid.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
 }

@@ -27,9 +27,18 @@ fn uses_the_crate_version() {
 }
 
 #[test]
+fn reports_the_upstream_version_of_the_parity_record() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/parity/upstream.json");
+    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(record["syncedVersion"].as_str(), Some(UPSTREAM_PI_VERSION));
+    assert_eq!(client_version(None), UPSTREAM_PI_VERSION);
+}
+
+#[test]
 fn formats_user_agents() {
     let (platform, arch) = (node_platform(), node_arch());
-    assert_eq!(format_user_agent(None), format!("pi/{PI_AI_VERSION} ({platform}; rust; {arch})"));
+    assert_eq!(format_user_agent(None), format!("pi/{UPSTREAM_PI_VERSION} ({platform}; rust; {arch})"));
+    assert_eq!(detailed_user_agent("pi-rust", "0.9.0"), format!("pi-rust/0.9.0 ({platform}; rust; {arch})"));
     let versioned = ClientIdentity { version: Some("9.9.9".into()), ..ClientIdentity::default() };
     assert_eq!(format_user_agent(Some(&versioned)), format!("pi/9.9.9 ({platform}; rust; {arch})"));
     let short = ClientIdentity { user_agent: Some(UserAgentMode::Short), ..versioned };
@@ -70,6 +79,26 @@ fn identities_are_plain_json() {
         json!({"attribution": null})
     );
     assert_eq!(serde_json::from_value::<ClientIdentity>(json!({})).unwrap(), ClientIdentity::default());
+}
+
+#[test]
+fn pi_rust_has_its_own_attribution() {
+    let value = json!({"name": "pi-rust", "url": "https://pi-rust.com", "categories": ["cli-agent"]});
+    assert_eq!(serde_json::to_value(pi_rust_attribution()).unwrap(), value);
+    let openrouter = target("openrouter", "https://openrouter.ai/api/v1");
+    assert_eq!(
+        attribution_headers(openrouter, with(pi_rust_attribution()).as_ref()),
+        [
+            ("HTTP-Referer", "https://pi-rust.com".to_string()),
+            ("X-OpenRouter-Title", "pi-rust".into()),
+            ("X-OpenRouter-Categories", "cli-agent".into())
+        ]
+    );
+    let nim = target("nvidia", "https://integrate.api.nvidia.com/v1");
+    assert_eq!(
+        attribution_headers(nim, with(pi_rust_attribution()).as_ref()),
+        [("X-BILLING-INVOKE-ORIGIN", "Pi-rust".to_string())]
+    );
 }
 
 #[test]

@@ -75,6 +75,22 @@ fn list_overflow_defaults_validates_and_round_trips() {
 }
 
 #[test]
+fn provider_identity_defaults_to_pi_and_project_wins() {
+    use super::schema::ProviderIdentity;
+    let dirs = Dirs::new();
+    let settings = dirs.manager(true);
+    assert_eq!(settings.provider_identity(), ProviderIdentity::Pi);
+    settings.set_provider_identity(ProviderIdentity::PiRust);
+    assert_eq!(read(&dirs.global())["providerIdentity"], "pi-rust");
+    assert_eq!(dirs.manager(true).provider_identity(), ProviderIdentity::PiRust);
+    write(&dirs.project(), json!({"providerIdentity": "pi"}));
+    assert_eq!(dirs.manager(true).provider_identity(), ProviderIdentity::Pi);
+    write(&dirs.global(), json!({"providerIdentity": "pi.dev"}));
+    assert_eq!(dirs.manager(false).provider_identity(), ProviderIdentity::Pi);
+    assert!(super::schema::PI_SETTINGS_KEYS.contains(&"providerIdentity"));
+}
+
+#[test]
 fn writes_keep_unknown_keys_and_external_edits() {
     let dirs = Dirs::new();
     write(&dirs.global(), json!({"theme": "dark", "enabledModels": ["a/*"], "customKey": {"x": 1}}));

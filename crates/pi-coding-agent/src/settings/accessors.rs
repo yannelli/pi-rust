@@ -129,6 +129,7 @@ impl SettingsManager {
         fullscreen_copy_on_select,
         true
     );
+    choice!(provider_identity, set_provider_identity, "providerIdentity", provider_identity, ProviderIdentity);
     choice!(steering_mode, set_steering_mode, "steeringMode", steering_mode, QueueMode);
     choice!(follow_up_mode, set_follow_up_mode, "followUpMode", follow_up_mode, QueueMode);
     choice!(

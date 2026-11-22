@@ -1,13 +1,18 @@
 //! How requests identify the calling app to providers (upstream `utils/identity.ts`): the `User-Agent` and the
 //! provider attribution headers. pi-ai sends a detailed `User-Agent` and no attribution unless asked to.
+//! The default `User-Agent` reports pi at [`UPSTREAM_PI_VERSION`], the upstream version this port has parity with.
 
 use reqwest::Url;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::types::Model;
 
-/// The pi-ai version, the default version in the detailed `User-Agent`.
+/// The pi-ai crate version.
 pub const PI_AI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The upstream pi version this port has parity with (`syncedVersion` of `docs/parity/upstream.json`), the
+/// default version in the detailed `User-Agent`.
+pub const UPSTREAM_PI_VERSION: &str = env!("PI_UPSTREAM_VERSION");
 
 const NVIDIA_NIM_HOST: &str = "integrate.api.nvidia.com";
 const OPENCODE_HOST: &str = "opencode.ai";
@@ -75,8 +80,17 @@ pub fn pi_attribution() -> ClientAttribution {
     ClientAttribution { name: "pi".into(), url: "https://pi.dev".into(), categories: Some(vec!["cli-agent".into()]) }
 }
 
+/// pi-rust's own attribution, for the coding agent's `providerIdentity` setting `"pi-rust"`.
+pub fn pi_rust_attribution() -> ClientAttribution {
+    ClientAttribution {
+        name: "pi-rust".into(),
+        url: "https://pi-rust.com".into(),
+        categories: Some(vec!["cli-agent".into()]),
+    }
+}
+
 /// How pi-ai identifies the calling app to providers. Unset fields use pi-ai's defaults: a detailed `User-Agent`
-/// with the pi-ai version and no attribution headers. Plain JSON, so it can be persisted.
+/// with [`UPSTREAM_PI_VERSION`] and no attribution headers. Plain JSON, so it can be persisted.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientIdentity {
@@ -86,7 +100,7 @@ pub struct ClientIdentity {
     /// Provider attribution. `None` (absent) keeps the merged value; `Some(None)` (JSON `null`) turns it off.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "present")]
     pub attribution: Option<Option<ClientAttribution>>,
-    /// Version in the detailed `User-Agent`. Default: [`PI_AI_VERSION`].
+    /// Version in the detailed `User-Agent`. Default: [`UPSTREAM_PI_VERSION`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 }
@@ -138,7 +152,7 @@ pub fn merge_client_identity<'a>(
 
 /// The version in the detailed `User-Agent`.
 pub fn client_version(identity: Option<&ClientIdentity>) -> &str {
-    identity.and_then(|identity| identity.version.as_deref()).unwrap_or(PI_AI_VERSION)
+    identity.and_then(|identity| identity.version.as_deref()).unwrap_or(UPSTREAM_PI_VERSION)
 }
 
 fn node_platform() -> &'static str {
@@ -158,14 +172,17 @@ fn node_arch() -> &'static str {
     }
 }
 
+/// A detailed `User-Agent` for any app: `<name>/<version> (<platform>; rust; <arch>)`.
+pub fn detailed_user_agent(name: &str, version: &str) -> String {
+    format!("{name}/{version} ({}; rust; {})", node_platform(), node_arch())
+}
+
 /// The `User-Agent` value of an identity.
 pub fn format_user_agent(identity: Option<&ClientIdentity>) -> String {
     match identity.and_then(|identity| identity.user_agent.as_ref()).unwrap_or(&UserAgentMode::Detailed) {
         UserAgentMode::Custom(custom) => custom.clone(),
         UserAgentMode::Short => "pi".into(),
-        UserAgentMode::Detailed => {
-            format!("pi/{} ({}; rust; {})", client_version(identity), node_platform(), node_arch())
-        }
+        UserAgentMode::Detailed => detailed_user_agent("pi", client_version(identity)),
     }
 }
 

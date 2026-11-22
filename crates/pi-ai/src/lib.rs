@@ -33,8 +33,8 @@ pub use classify::{
 };
 pub use env::get_env_api_key;
 pub use identity::{
-    ClientAttribution, ClientIdentity, PI_AI_VERSION, UserAgentMode, format_user_agent, merge_client_identity,
-    pi_attribution,
+    ClientAttribution, ClientIdentity, PI_AI_VERSION, UPSTREAM_PI_VERSION, UserAgentMode, detailed_user_agent,
+    format_user_agent, merge_client_identity, pi_attribution, pi_rust_attribution,
 };
 pub use images::{
     AssistantImages, ImagesApi, ImagesContext, ImagesOptions, generate_images, images_api, register_images_api,
