@@ -3417,6 +3417,7 @@ dependencies = [
  "icu_segmenter",
  "ignore",
  "objc2-core-graphics",
+ "pi-tui",
  "png",
  "regex",
  "rustix",
