@@ -5,9 +5,15 @@
 pi-rust has all the wire protocols of upstream pi:
 
 - `anthropic-messages`
-- `openai-responses`, `openai-completions`, `openai-codex-responses` (SSE and WebSocket), and `azure-openai-responses`
-- `google-generative-ai` and `google-vertex`
-- `bedrock-converse-stream`, `mistral-conversations`, and `pi-messages`
+- `openai-responses`
+- `openai-completions`
+- `openai-codex-responses` (SSE and WebSocket)
+- `azure-openai-responses`
+- `google-generative-ai`
+- `google-vertex`
+- `bedrock-converse-stream`
+- `mistral-conversations`
+- `pi-messages`
 
 The bundled model catalog is the catalog of upstream pi. `pi update --models` updates it.
 
@@ -22,7 +28,13 @@ These providers use your subscription. Log in with `/login cursor` or `/login go
 | Provider | Login | Default model |
 | --- | --- | --- |
 | `cursor` | pi opens the Cursor login page and waits until you approve the login. | `claude-opus-5` |
-| `google-antigravity` | If Google's Antigravity ACP server is not installed, pi asks to install it. Then open the Google sign-in link that pi shows. On a remote machine, paste the `127.0.0.1` address from the browser into pi. | `gemini-3.1-pro` |
+| `google-antigravity` | Google sign-in. See the steps under this table. | `gemini-3.1-pro` |
+
+To log in to Google Antigravity:
+
+1. Run `/login google-antigravity`. If Google's Antigravity ACP server is not installed, pi asks to install it.
+2. Open the Google sign-in link that pi shows.
+3. On a remote machine, paste the `127.0.0.1` address from the browser into pi.
 
 - Cursor runs the model on Cursor's agent service. pi gives its tools to Cursor as MCP tools and runs them itself. The model list, the thinking levels, and the context sizes come from your Cursor account.
 - Google Antigravity runs through the Antigravity ACP server. The agent uses the pi tools, so pi runs each tool. The agent also connects to your MCP servers. The model list and the thinking levels come from the server.
@@ -77,7 +89,7 @@ When the global setting `rememberLastModel` is `true` (the default), each model 
 
 When `--models` or `enabledModels` limits the cycle, a saved model outside it joins the cycle, and pi adds it to `enabledModels` when that setting is set. The selector's set-as-default key does the same.
 
-Set `rememberLastModel` to `false` in `settings.json`, or turn off **Remember last model** in `/settings`, to keep the default model fixed. Then only the selector's set-as-default key and model cycling save it. This matches upstream pi except for model cycling: upstream pi does not save the model on Ctrl+P, and pi-rust saves it with either setting.
+To keep the default model fixed, set `rememberLastModel` to `false` in `settings.json`, or turn off **Remember last model** in `/settings`. Then only the selector's set-as-default key and model cycling save it. This matches upstream pi except for model cycling: upstream pi does not save the model on Ctrl+P, and pi-rust saves it with either setting.
 
 RPC `set_model` and `cycle_model` change only the model of the session and never save it, as in upstream pi. RPC clients such as Paseo set the model of each session they run, so saving it would change the default model of every other session.
 
@@ -93,7 +105,7 @@ To hide a provider from model selection, add its exact ID to `disabledProviders`
 }
 ```
 
-You can also open `/settings` in the TUI and use **Disabled providers**. Press Enter to switch the selected provider between enabled and disabled. Type to search the list; Space also switches the provider when the search box is empty. The change applies immediately and pi saves it to the global settings file.
+You can also open `/settings` in the TUI and use **Disabled providers**. Press Enter to switch the selected provider between enabled and disabled. Type to search the list. When the search box is empty, Space also switches the provider. The change applies immediately and pi saves it to the global settings file.
 
 After you edit the file manually, restart pi or its ACP connection.
 
@@ -157,7 +169,11 @@ When pi gets the list, it does these steps:
 
 If the list does not name the default model of the provider, pi removes no models. It only uses the limits and adds models.
 
-pi does not filter image and classifier models. pi saves the list in `models-store.json` with the pi version. It does not save the credential. The base URL that you set in `models.json` applies. After an upgrade, pi shows the full catalog until a new list arrives. Model list requests do not follow redirects, so pi sends the credential only to the configured host.
+- pi does not filter image and classifier models.
+- pi saves the list in `models-store.json` with the pi version. It does not save the credential.
+- The base URL that you set in `models.json` applies.
+- After an upgrade, pi shows the full catalog until a new list arrives.
+- Model list requests do not follow redirects, so pi sends the credential only to the configured host.
 
 ### Full catalog
 
@@ -169,7 +185,7 @@ pi also shows all catalog models in these cases:
 - pi cannot read the body of the model list.
 - The list is empty or names no catalog chat model. In this case, pi does not save the list.
 
-After other failures, redirects too, pi keeps the last saved list.
+After other failures, including redirects, pi keeps the last saved list.
 
 ### OpenAI Codex
 

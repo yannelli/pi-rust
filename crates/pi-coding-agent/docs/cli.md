@@ -31,7 +31,7 @@ pi completion fish > ~/.config/fish/completions/pi.fish
 
 ## Session working directories
 
-A session records the working directory where it was created. Tools, `@path` references, project configuration, and context files use the session's working directory. Opening the session from another directory does not change its saved working directory.
+A session records the working directory where it was created. Tools, `@path` references, project configuration, and context files use the session's working directory. If you open the session from another directory, its saved working directory does not change.
 
 | Entry point | Working directory |
 | --- | --- |
@@ -66,7 +66,7 @@ On a terminal, both commands ask before they delete. In other cases, they need `
 
 `pi mcp login <server> [-l] [--timeout <seconds>]` signs in to a configured OAuth server. The timeout covers the whole sign-in and defaults to 300 seconds. `pi mcp logout <server> [-l]` deletes its saved OAuth credentials.
 
-For either command, `-l` or `--local` requires the server to come from the trusted project's `.pi/mcp.json`. A server defined only in the global config is rejected. Without this option, both commands use the configured server from either scope. If the server name is misspelled, the error suggests a close match when one exists.
+For either command, `-l` or `--local` requires the server to come from the trusted project's `.pi/mcp.json`. The command rejects a server that only the global config defines. Without this option, both commands use the configured server from either scope. If the server name is misspelled, the error suggests a close match when one exists.
 
 `pi mcp add <server> --lifecycle lazy ...` adds a server that connects on first use. See [MCP server lifecycle](mcp.md).
 
@@ -90,7 +90,18 @@ pi stats --since 7d
 
 ## Subscription limits
 
-`pi usage` shows the limits of the subscription logins: the 5-hour and weekly windows of Claude and ChatGPT (Codex), the billing cycle of Cursor, the weekly SuperGrok credits and Grok Build use of the `xai` login, and the quota of Google Antigravity. For each window it shows the used percentage and the time to the reset. `pi usage <provider>` shows one provider. `--json` prints `{ "providers": [...] }` in the shape of the native extension method `usage.get`. The exit code is 1 when every provider has an error.
+`pi usage` shows the limits of the subscription logins:
+
+- Claude and ChatGPT (Codex): the 5-hour and weekly windows.
+- Cursor: the billing cycle.
+- The `xai` login: the weekly SuperGrok credits and Grok Build use.
+- Google Antigravity: the quota.
+
+For each window, it shows the used percentage and the time to the reset.
+
+- `pi usage <provider>` shows one provider.
+- `--json` prints `{ "providers": [...] }` in the shape of the native extension method `usage.get`.
+- The exit code is 1 when every provider has an error.
 
 ```sh
 pi usage
@@ -110,7 +121,8 @@ Both limits apply in all modes, but only for the current process. A limit stops 
 
 ```sh
 pi -p --max-turns 20 --max-cost 0.50 "Fix the failing tests"
-echo $?   # 3 when a limit stopped the run
+# The exit code is 3 when a limit stopped the run.
+echo $?
 ```
 
 When a limit stops a run in print mode or in `--mode json`, pi does these steps:
@@ -145,8 +157,10 @@ If the cost limit stops a prompt before its run starts, pi sends only the event.
 `--output-retries <n>` sets the number of correction prompts that pi sends. The default is 1, and `0` sends none.
 
 ```sh
-pi -p --output-schema review.schema.json "Review the diff in HEAD" > review.json
-echo $?   # 4 when the answer still does not match
+pi -p --output-schema review.schema.json \
+  "Review the diff in HEAD" > review.json
+# The exit code is 4 when the answer still does not match.
+echo $?
 ```
 
 The results are as follows:
@@ -168,15 +182,20 @@ The flag works only in print mode: with `-p`, with `--mode json`, or when stdin 
 ## Extensions
 
 ```sh
-pi extensions list                       # built-in and installed, including disabled
+# List built-in and installed extensions, including disabled ones.
+pi extensions list
 pi extensions search todo
 pi extensions info todo
 pi extensions install marketplace:todo
-pi extensions install npm:<package>      # or a git URL or a local path
+
+# The source can also be a git URL or a local path.
+pi extensions install npm:<package>
 pi extensions disable builtin:mcp
 pi extensions enable builtin:mcp
 pi extensions remove npm:<package>
-pi config                                # TUI to turn resources on and off
+
+# Open a TUI to turn resources on and off.
+pi config
 ```
 
 - If a name matches more than one extension, use the exact path from `list`.
@@ -190,9 +209,16 @@ pi config                                # TUI to turn resources on and off
 pi-rust runs extensions on QuickJS by default. It can also run them on Node 22 or later.
 
 ```sh
-pi --extension-runtime node              # run extensions on Node
-pi --extension-runtime auto              # Node only for packages that need it
-PI_EXTENSION_RUNTIME=node pi             # the same, from the environment
+# Run extensions on Node.
+pi --extension-runtime node
+
+# Use Node only for packages that need it.
+pi --extension-runtime auto
+
+# The same as --extension-runtime node, from the environment.
+PI_EXTENSION_RUNTIME=node pi
+
+# Use the node program at this path.
 PI_NODE_PATH=/opt/node22/bin/node pi --extension-runtime node
 ```
 

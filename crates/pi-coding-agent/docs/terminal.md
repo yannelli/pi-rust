@@ -2,9 +2,14 @@
 
 ## Themes
 
-To select a harness theme, open `/settings` and select Theme. The themes are `system`, `dark`, `light`, `ghostty`, `darcula-islands`, `nord`, and `catppuccin`.
+To select a harness theme, open `/settings` and select Theme. The themes are `system`, `dark`, and `light`, plus these added dark palettes:
 
-The added dark palettes are based on the Ghostty default colors, JetBrains Darcula and Islands, Nord, and Catppuccin Mocha.
+| Theme | Based on |
+| --- | --- |
+| `ghostty` | The Ghostty default colors |
+| `darcula-islands` | JetBrains Darcula and Islands |
+| `nord` | Nord |
+| `catppuccin` | Catppuccin Mocha |
 
 ## Notifications
 
@@ -26,7 +31,13 @@ Settings:
 
 ## iTerm2 integration
 
-The iTerm2 integration is the `marketplace:iterm2` extension. It sets the tab color from the agent state, shows a badge with the session name, sets user variables, requests attention when a run finishes, and adds `/terminal-setup`. Earlier pi-rust versions had it built in.
+The iTerm2 integration is the `marketplace:iterm2` extension. Earlier pi-rust versions had it built in. The extension does these things:
+
+- It sets the tab color from the agent state.
+- It shows a badge with the session name.
+- It sets user variables.
+- It requests attention when a run finishes.
+- It adds `/terminal-setup`.
 
 To install it:
 
