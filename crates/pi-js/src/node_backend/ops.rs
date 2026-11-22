@@ -43,6 +43,12 @@ pub(crate) fn import_frame(specifier: &str, default: bool) -> Map<String, Value>
     frame(json!({ "op": "import", "specifier": specifier, "default": default, "want": "ref" }))
 }
 
+pub(crate) fn namespaced_import_frame(specifier: &str, namespace: &str) -> Map<String, Value> {
+    let mut map = import_frame(specifier, false);
+    map.insert("ns".into(), json!(namespace));
+    map
+}
+
 pub(crate) fn call_frame(
     target: &JsRef,
     method: Option<&str>,

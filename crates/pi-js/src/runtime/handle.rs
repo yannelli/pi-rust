@@ -13,6 +13,7 @@ use super::scope::JsScope;
 use super::state::{LoopState, Message, Shared, try_state};
 use crate::error::JsError;
 use crate::host::{HostFunction, HostValue};
+use crate::modules::namespace::ModuleNamespace;
 use crate::node_backend::client::NodeClient;
 use crate::node_backend::ops::{self as node_ops, Want};
 use crate::virtual_modules::VirtualModule;
@@ -283,6 +284,35 @@ impl JsHandle {
 
     pub fn register_host_function(&self, name: impl Into<String>, function: HostFunction) {
         self.shared.host_functions.write().unwrap_or_else(|poison| poison.into_inner()).insert(name, function);
+    }
+
+    /// Remove the host function `name`; calls made after this fail with
+    /// `ERR_PI_HOST_FUNCTION_DISPOSED`. Returns whether it was registered.
+    pub fn unregister_host_function(&self, name: &str) -> bool {
+        self.shared.host_functions.write().unwrap_or_else(|poison| poison.into_inner()).remove(name).is_some()
+    }
+
+    /// Make `namespace` available to [`Self::import_namespaced`]; each id registers once.
+    pub fn register_module_namespace(&self, namespace: ModuleNamespace) -> Result<(), JsError> {
+        crate::modules::namespace::register(&self.shared, namespace)
+    }
+
+    /// [`Self::import`] into the registered namespace `id`: the module and everything it imports
+    /// or requires get instances of their own, except built-ins and the namespace's shared keys.
+    pub async fn import_namespaced(
+        &self,
+        specifier: impl Into<String>,
+        id: impl Into<String>,
+    ) -> Result<JsRef, JsError> {
+        let (specifier, id) = (specifier.into(), id.into());
+        if self.is_node() {
+            return node_ops::as_ref(
+                node_ops::ask(self, Ok(node_ops::namespaced_import_frame(&specifier, &id))).await?,
+            );
+        }
+        let produce: Produce =
+            Box::new(move |ctx| JsScope::new(ctx.clone()).import_namespaced_promise(&specifier, &id));
+        self.request(produce, persist_value).await
     }
 
     /// Resolves once no timers, immediates, async operations, or jobs remain.

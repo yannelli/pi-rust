@@ -105,6 +105,11 @@ impl<'js> JsScope<'js> {
         Module::import(&self.ctx, key).map(Promise::into_value).map_err(|error| caught(&self.ctx, error))
     }
 
+    pub(crate) fn import_namespaced_promise(&self, specifier: &str, id: &str) -> Result<Value<'js>, JsError> {
+        let key = modules::resolve_scoped(specifier, None, crate::resolve::ResolveKind::Import, Some(id))?.module_key();
+        modules::namespace::import(&self.ctx, &key).map(Promise::into_value).map_err(|error| caught(&self.ctx, error))
+    }
+
     pub(crate) fn module_promise(&self, name: &str, source: String) -> Result<Value<'js>, JsError> {
         let key = modules::register_inline(name, source);
         Module::import(&self.ctx, key).map(Promise::into_value).map_err(|error| caught(&self.ctx, error))

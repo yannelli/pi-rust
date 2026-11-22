@@ -103,7 +103,9 @@ function run(request) {
     case "eval":
       return (0, eval)(request.source);
     case "import": {
-      const loaded = import(importSpecifier(request.specifier));
+      const loaded = request.ns === undefined
+        ? import(importSpecifier(request.specifier))
+        : namespaces.importInto(request.specifier, request.ns);
       return loaded.then((namespace) => new Exact(request.default ? defaultExport(namespace) : namespace));
     }
     case "call": {
@@ -210,6 +212,6 @@ for (const [name, stream] of [["stdout", process.stdout], ["stderr", process.std
   if (config.tty.rows) stream.rows = config.tty.rows;
 }
 
-require("./worker_modules.cjs").install({ ask, answer, hooksPort, config });
+const namespaces = require("./worker_modules.cjs").install({ ask, answer, hooksPort, config });
 portBaseline = process.getActiveResourcesInfo().filter((name) => name === "MessagePort").length;
 post('{"t":"ready"}');
