@@ -13,6 +13,10 @@ Upstream pi makes its edit diffs with the npm package `diff` ([jsdiff](https://g
 
 Extensions can give `contextLines` to `generateDiffString` and `generateUnifiedPatch`. The SDK accepts a non-negative integer or `Infinity`, and throws `ERR_PI_UNSUPPORTED` for other values.
 
+## Saved edits
+
+An edit result stores the numbered display diff in `details.diff` and the unified patch in `details.patch`. A one-line range can appear as `-1` in an older patch or as `-1,1` in a jsdiff patch. Both mean one line. When lines repeat, the two versions can mark different occurrences. The terminal and HTML export read the stored display lines in order. The terminal computes word highlights when it renders a single removed line followed by a single added line.
+
 ## Rules
 
 - Word diffs use JavaScript `\s` for whitespace (`is_js_whitespace`). Rust `char::is_whitespace` gives different results for U+0085 and U+FEFF.
