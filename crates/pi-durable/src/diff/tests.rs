@@ -158,6 +158,22 @@ fn tokens_without_a_match_are_removed_then_added() {
 }
 
 #[test]
+fn oversized_inputs_are_replaced_without_comparing_tokens() {
+    let large: &[()] = &[(); MAX_TOKENS + 1];
+    let small: &[()] = &[()];
+    for (old, new) in [(large, small), (small, large)] {
+        let changes = diff_tokens(old, new, |_, _| panic!("oversized input reached the search"));
+        assert_eq!(
+            changes,
+            [
+                Change { kind: ChangeKind::Removed, start: 0, len: old.len() },
+                Change { kind: ChangeKind::Added, start: 0, len: new.len() },
+            ]
+        );
+    }
+}
+
+#[test]
 #[ignore = "needs PI_JSDIFF_ORACLE, the output of scripts/jsdiff-oracle.mjs"]
 fn matches_jsdiff_oracle() {
     let path = std::env::var("PI_JSDIFF_ORACLE").expect("PI_JSDIFF_ORACLE names the oracle output");
