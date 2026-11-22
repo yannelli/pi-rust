@@ -2,8 +2,10 @@
 //! `FILE_HEADERS_ONLY`.
 
 use std::fmt::Write as _;
+use std::ops::Range;
 
-use super::{Change, ChangeKind, diff_tokens};
+use super::line_tokens::{Lines, line_changes};
+use super::{Change, ChangeKind};
 
 /// The context lines of upstream `generateDiffString` and `generateUnifiedPatch` when the caller gives none.
 pub const DEFAULT_CONTEXT_LINES: usize = 4;
@@ -18,25 +20,26 @@ pub struct EditDiff {
 
 /// jsdiff line tokens: each line with its `\n` or `\r\n`.
 pub fn split_lines(text: &str) -> Vec<&str> {
-    text.split_inclusive('\n').collect()
+    let lines = Lines::new(text, &[0]);
+    (0..lines.len()).map(|i| lines.get(i)).collect()
 }
 
 struct LineDiff<'a> {
-    old: Vec<&'a str>,
-    new: Vec<&'a str>,
+    old: Lines<'a>,
+    new: Lines<'a>,
     changes: Vec<Change>,
 }
 
 impl<'a> LineDiff<'a> {
     fn new(old: &'a str, new: &'a str) -> Self {
-        let (old, new) = (split_lines(old), split_lines(new));
-        let changes = diff_tokens(&old, &new, |a, b| a == b);
+        let (old, new, changes) = line_changes(old, new);
         Self { old, new, changes }
     }
 
-    fn lines(&self, change: &Change) -> &[&'a str] {
+    /// The lines `part` of a change, counted from its first line.
+    fn lines(&self, change: &Change, part: Range<usize>) -> impl Iterator<Item = &'a str> {
         let tokens = if change.kind == ChangeKind::Removed { &self.old } else { &self.new };
-        &tokens[change.start..change.start + change.len]
+        part.map(move |i| tokens.get(change.start + i))
     }
 }
 
@@ -58,13 +61,13 @@ pub fn generate_unified_patch(path: &str, old: &str, new: &str, context: usize) 
     unified_patch(&LineDiff::new(old, new), path, context)
 }
 
-/// `text.split('\n').count()` of the text that gave the tokens.
-fn line_count(tokens: &[&str]) -> usize {
-    tokens.len() + usize::from(tokens.last().is_none_or(|line| line.ends_with('\n')))
+/// Adds `{sign}{number:>width$} {line}` and a line break, with the line without its `\n`.
+fn push_numbered(out: &mut String, sign: char, number: usize, width: usize, line: &str) {
+    let _ = writeln!(out, "{sign}{number:>width$} {}", line.strip_suffix('\n').unwrap_or(line));
 }
 
 fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
-    let width = line_count(&lines.old).max(line_count(&lines.new)).to_string().len();
+    let width = lines.old.count().max(lines.new.count()).to_string().len();
     let mut out = String::new();
     let (mut old_num, mut new_num) = (1usize, 1usize);
     let mut last_was_change = false;
@@ -74,16 +77,15 @@ fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
     };
 
     for (i, change) in lines.changes.iter().enumerate() {
-        let text = lines.lines(change);
+        let n = change.len;
         if change.kind != ChangeKind::Equal {
             first_changed.get_or_insert(new_num);
-            for line in text {
-                let line = line.strip_suffix('\n').unwrap_or(line);
+            for line in lines.lines(change, 0..n) {
                 if change.kind == ChangeKind::Added {
-                    let _ = writeln!(out, "+{new_num:>width$} {line}");
+                    push_numbered(&mut out, '+', new_num, width, line);
                     new_num += 1;
                 } else {
-                    let _ = writeln!(out, "-{old_num:>width$} {line}");
+                    push_numbered(&mut out, '-', old_num, width, line);
                     old_num += 1;
                 }
             }
@@ -91,7 +93,6 @@ fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
             continue;
         }
         let next_is_change = lines.changes.get(i + 1).is_some_and(|next| next.kind != ChangeKind::Equal);
-        let n = text.len();
         let shown: &[(usize, usize)] = match (last_was_change, next_is_change) {
             (true, true) if n <= context.saturating_mul(2) => &[(0, n)],
             (true, true) => &[(0, context), (n - context, n)],
@@ -106,9 +107,8 @@ fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
                 old_num += start - cursor;
                 new_num += start - cursor;
             }
-            for line in &text[start..end] {
-                let line = line.strip_suffix('\n').unwrap_or(line);
-                let _ = writeln!(out, " {old_num:>width$} {line}");
+            for line in lines.lines(change, start..end) {
+                push_numbered(&mut out, ' ', old_num, width, line);
                 old_num += 1;
                 new_num += 1;
             }
@@ -136,33 +136,34 @@ fn unified_patch(lines: &LineDiff, path: &str, context: usize) -> String {
     let (mut old_range_start, mut new_range_start) = (0, 0);
     let (mut old_line, mut new_line) = (1, 1);
     for i in 0..=changes.len() {
-        let (kind, text) =
-            changes.get(i).map_or((ChangeKind::Equal, &[][..]), |change| (change.kind, lines.lines(change)));
+        let change = changes.get(i).copied().unwrap_or(Change { kind: ChangeKind::Equal, start: 0, len: 0 });
+        let (kind, n) = (change.kind, change.len);
         if kind != ChangeKind::Equal {
             if old_range_start == 0 {
                 old_range_start = old_line;
                 new_range_start = new_line;
-                if let Some(prev) = i.checked_sub(1).map(|prev| lines.lines(&changes[prev])) {
-                    hunk = prev[prev.len().saturating_sub(context)..].iter().map(|line| (' ', *line)).collect();
-                    old_range_start -= hunk.len();
-                    new_range_start -= hunk.len();
+                if let Some(prev) = i.checked_sub(1).map(|prev| &changes[prev]) {
+                    let shown = prev.len.min(context);
+                    hunk.extend(lines.lines(prev, prev.len - shown..prev.len).map(|line| (' ', line)));
+                    old_range_start -= shown;
+                    new_range_start -= shown;
                 }
             }
             let sign = if kind == ChangeKind::Added { '+' } else { '-' };
-            hunk.extend(text.iter().map(|line| (sign, *line)));
+            hunk.extend(lines.lines(&change, 0..n).map(|line| (sign, line)));
             if kind == ChangeKind::Added {
-                new_line += text.len();
+                new_line += n;
             } else {
-                old_line += text.len();
+                old_line += n;
             }
             continue;
         }
         if old_range_start != 0 {
-            if text.len() <= context.saturating_mul(2) && i + 1 < changes.len() {
-                hunk.extend(text.iter().map(|line| (' ', *line)));
+            if n <= context.saturating_mul(2) && i + 1 < changes.len() {
+                hunk.extend(lines.lines(&change, 0..n).map(|line| (' ', line)));
             } else {
-                let shown = text.len().min(context);
-                hunk.extend(text[..shown].iter().map(|line| (' ', *line)));
+                let shown = n.min(context);
+                hunk.extend(lines.lines(&change, 0..shown).map(|line| (' ', line)));
                 let old_lines = old_line - old_range_start + shown;
                 let new_lines = new_line - new_range_start + shown;
                 // An empty range starts at the line before it.
@@ -179,8 +180,8 @@ fn unified_patch(lines: &LineDiff, path: &str, context: usize) -> String {
                 new_range_start = 0;
             }
         }
-        old_line += text.len();
-        new_line += text.len();
+        old_line += n;
+        new_line += n;
     }
     out
 }

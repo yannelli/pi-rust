@@ -1,6 +1,7 @@
 //! Token diff ported from jsdiff 8.0.4 (BSD-3-Clause, `LICENSE-jsdiff`), the `diff` package upstream pi uses. It
 //! keeps the greedy Myers search and tie-breaks of jsdiff, so diffs and patches match upstream.
 
+mod line_tokens;
 mod lines;
 #[cfg(test)]
 mod tests;
