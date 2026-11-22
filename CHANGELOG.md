@@ -2,6 +2,16 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.26] - 2026-11-22
+
+### Changed
+
+- **tui:** build vt100 only for tests behind a testing feature ([fe1b431](https://github.com/yannelli/pi-rust/commit/fe1b4312df5f725665a0b17cd0e3827d00921609))
+
+### Fixed
+
+- **js:** move node:crypto RSA to rsa 0.10 and match Node 22 RSA errors ([a2c5da9](https://github.com/yannelli/pi-rust/commit/a2c5da9df62868b7e5b7acfeaa678587d8ca3c9c))
+
 ## [0.12.25] - 2026-11-22
 
 ### Added
