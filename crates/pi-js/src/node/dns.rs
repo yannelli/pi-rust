@@ -147,7 +147,8 @@ fn create_channel<'js>(
     max_timeout: u32,
 ) -> rquickjs::Result<Object<'js>> {
     let list: Option<Vec<(String, u16)>> = super::net::parse_options(&ctx, values)?;
-    let config = if list.is_none() || timeout <= 0 { config::system() } else { config::Config::default() };
+    let config =
+        if list.is_none() || timeout <= 0 { config::system(list.is_none()) } else { config::Config::default() };
     let servers = match list {
         Some(list) => parse_servers(&ctx, list)?,
         None => config.servers,

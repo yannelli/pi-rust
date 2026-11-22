@@ -1,6 +1,4 @@
-//! Resolver for the `node:dns` resolve family: UDP with TCP fallback on truncation,
-//! retries and timeouts as c-ares 1.34 runs them for Node 22, and CNAME following.
-//! No answer cache and no per-server latency metrics.
+//! DNS record queries use UDP, TCP fallback, and bounded CNAME following. Each query starts at the first server.
 
 #[cfg(test)]
 mod tests;

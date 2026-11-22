@@ -110,6 +110,13 @@ async fn dns_fixtures_match_the_node_backend() {
         );
         return;
     }
+    let (quickjs, _) = common::runtime(&root);
+    let servers = r#"return new (require("node:dns").Resolver)().getServers();"#;
+    assert_eq!(
+        run_cjs_within(&quickjs, &root, servers, 30).await,
+        run_cjs_within(&runtime, &root, servers, 30).await,
+        "system DNS servers differ from Node {version}"
+    );
     let mut failures = Vec::new();
     for (name, body, golden) in CASES {
         let actual = run_case(&runtime, &root, body).await;
