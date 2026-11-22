@@ -4,8 +4,12 @@
 mod lines;
 #[cfg(test)]
 mod tests;
+mod words;
 
-pub use lines::{EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch, split_lines};
+pub use lines::{
+    DEFAULT_CONTEXT_LINES, EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch, split_lines,
+};
+pub use words::{diff_words, leading_whitespace};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChangeKind {

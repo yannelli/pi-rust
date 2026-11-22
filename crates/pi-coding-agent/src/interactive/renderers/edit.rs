@@ -11,7 +11,9 @@ use serde_json::Value;
 use super::{ToolRenderContext, ToolRenderer, ToolResultView, path_arg, render_tool_path};
 use crate::interactive::components::diff::render_diff;
 use crate::theme::{ThemeBg, ThemeColor, theme};
-use crate::tools::edit_diff::{Edit, apply_edits_to_normalized_content, generate_diff_string, normalize_to_lf};
+use crate::tools::edit_diff::{
+    DEFAULT_CONTEXT_LINES, Edit, apply_edits_to_normalized_content, generate_diff_string, normalize_to_lf,
+};
 use crate::tools::path_utils::resolve_to_cwd;
 
 pub struct EditRenderer;
@@ -77,7 +79,7 @@ pub fn compute_edits_diff(path: &str, edits: &[Edit], cwd: &Path) -> EditPreview
     let content = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
     match apply_edits_to_normalized_content(&normalize_to_lf(content), edits, path) {
         Ok((base, new)) => {
-            let (diff, first_changed_line) = generate_diff_string(&base, &new);
+            let (diff, first_changed_line) = generate_diff_string(&base, &new, DEFAULT_CONTEXT_LINES);
             EditPreview::Diff { diff, first_changed_line }
         }
         Err(error) => EditPreview::Error(error.to_string()),

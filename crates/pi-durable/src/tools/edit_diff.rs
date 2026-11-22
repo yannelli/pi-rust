@@ -3,7 +3,9 @@
 
 use unicode_normalization::UnicodeNormalization;
 
-pub use crate::diff::{EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch};
+pub use crate::diff::{
+    DEFAULT_CONTEXT_LINES, EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

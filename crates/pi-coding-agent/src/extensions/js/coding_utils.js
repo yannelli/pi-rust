@@ -60,19 +60,21 @@ export function formatSkillsForPrompt(skills, fileReadTool = "read") {
 	return lines.join("\n");
 }
 
-function requireDefaultContext(member, contextLines) {
-	if (contextLines !== undefined && contextLines !== 4) throw unsupportedError(`${member} contextLines other than 4`);
+// Upstream defaults to 4. `Infinity` keeps every line, as MAX_SAFE_INTEGER does.
+function contextSize(member, contextLines = 4) {
+	if (contextLines === Infinity) return Number.MAX_SAFE_INTEGER;
+	if (Number.isSafeInteger(contextLines) && contextLines >= 0) return contextLines;
+	throw unsupportedError(`${member} with a negative or fractional contextLines`);
 }
 
 export function generateDiffString(oldContent, newContent, contextLines) {
-	requireDefaultContext("generateDiffString", contextLines);
-	const { diff, firstChangedLine } = call("sdk.generateDiffString", oldContent, newContent);
+	const context = contextSize("generateDiffString", contextLines);
+	const { diff, firstChangedLine } = call("sdk.generateDiffString", oldContent, newContent, context);
 	return { diff, firstChangedLine: firstChangedLine ?? undefined };
 }
 
 export function generateUnifiedPatch(path, oldContent, newContent, contextLines) {
-	requireDefaultContext("generateUnifiedPatch", contextLines);
-	return call("sdk.generateUnifiedPatch", path, oldContent, newContent);
+	return call("sdk.generateUnifiedPatch", path, oldContent, newContent, contextSize("generateUnifiedPatch", contextLines));
 }
 
 export const renderDiff = (diffText, _options) => call("sdk.renderDiff", diffText);

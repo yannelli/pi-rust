@@ -3,7 +3,9 @@
 use anyhow::{anyhow, bail};
 use unicode_normalization::UnicodeNormalization;
 
-pub use pi_durable::diff::{EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch};
+pub use pi_durable::diff::{
+    DEFAULT_CONTEXT_LINES, EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

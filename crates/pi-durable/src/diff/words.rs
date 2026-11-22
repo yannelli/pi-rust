@@ -1,7 +1,7 @@
-//! jsdiff 8.0.4 `diffWords` (BSD-3-Clause, `crates/pi-durable/src/diff/LICENSE-jsdiff`), which upstream uses for
-//! intra-line highlights. Whitespace is JavaScript `\s`.
+//! jsdiff `diffWords`, which upstream uses for the word highlights of its diff view. Whitespace is
+//! JavaScript `\s`.
 
-use pi_durable::diff::{ChangeKind, diff_tokens};
+use super::{ChangeKind, diff_tokens};
 
 pub fn is_js_whitespace(c: char) -> bool {
     matches!(
@@ -257,6 +257,22 @@ mod tests {
         ("foo bar", "bar", &[(Removed, "foo "), (Equal, "bar")]),
         ("foo bar", "foo", &[(Equal, "foo"), (Removed, " bar")]),
         ("foo \t bar", "foo \tbar baz", &[(Equal, "foo \tbar "), (Added, "baz")]),
+        ("foo baz", "foo bar baz", &[(Equal, "foo "), (Added, "bar "), (Equal, "baz")]),
+        ("bar", "foo bar", &[(Added, "foo "), (Equal, "bar")]),
+        ("foo", "foo bar", &[(Equal, "foo "), (Added, "bar")]),
+        ("foo\tbar baz", "foo baz", &[(Equal, "foo"), (Removed, "\tbar"), (Equal, " baz")]),
+        (
+            "a b c d",
+            "a x c y",
+            &[(Equal, "a "), (Removed, "b"), (Added, "x"), (Equal, " c "), (Removed, "d"), (Added, "y")],
+        ),
+        ("  x", "x  ", &[(Equal, "x  ")]),
+        ("f(a, b)", "f(a,b)", &[(Equal, "f(a,b)")]),
+        (
+            "\u{e9}\u{4e2d}\u{1f600} x",
+            "\u{e9}\u{4e2d} x",
+            &[(Equal, "\u{e9}\u{4e2d}"), (Removed, "\u{1f600}"), (Equal, " x")],
+        ),
     ];
 
     #[test]

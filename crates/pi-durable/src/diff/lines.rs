@@ -5,7 +5,8 @@ use std::fmt::Write as _;
 
 use super::{Change, ChangeKind, diff_tokens};
 
-const CONTEXT: usize = 4;
+/// The context lines of upstream `generateDiffString` and `generateUnifiedPatch` when the caller gives none.
+pub const DEFAULT_CONTEXT_LINES: usize = 4;
 
 /// The display diff, the first changed line of the new text, and the unified patch of one edit.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,25 +40,25 @@ impl<'a> LineDiff<'a> {
     }
 }
 
-/// One line diff for both the display diff and the patch.
+/// One line diff with the default context for both the display diff and the patch.
 pub fn generate_edit_diff(path: &str, old: &str, new: &str) -> EditDiff {
     let lines = LineDiff::new(old, new);
-    let (diff, first_changed_line) = display_diff(&lines, old, new);
-    EditDiff { diff, first_changed_line, patch: unified_patch(&lines, path) }
+    let (diff, first_changed_line) = display_diff(&lines, old, new, DEFAULT_CONTEXT_LINES);
+    EditDiff { diff, first_changed_line, patch: unified_patch(&lines, path, DEFAULT_CONTEXT_LINES) }
 }
 
-/// Display diff with line numbers and 4 lines of context. Returns the diff and the first
-/// changed line number in the new file.
-pub fn generate_diff_string(old: &str, new: &str) -> (String, Option<usize>) {
-    display_diff(&LineDiff::new(old, new), old, new)
+/// Display diff with line numbers and `context` lines around each change. Returns the diff and
+/// the first changed line number in the new file.
+pub fn generate_diff_string(old: &str, new: &str, context: usize) -> (String, Option<usize>) {
+    display_diff(&LineDiff::new(old, new), old, new, context)
 }
 
-/// Standard unified patch with file headers.
-pub fn generate_unified_patch(path: &str, old: &str, new: &str) -> String {
-    unified_patch(&LineDiff::new(old, new), path)
+/// Standard unified patch with file headers and `context` lines around each change.
+pub fn generate_unified_patch(path: &str, old: &str, new: &str, context: usize) -> String {
+    unified_patch(&LineDiff::new(old, new), path, context)
 }
 
-fn display_diff(lines: &LineDiff, old: &str, new: &str) -> (String, Option<usize>) {
+fn display_diff(lines: &LineDiff, old: &str, new: &str, context: usize) -> (String, Option<usize>) {
     let width = old.split('\n').count().max(new.split('\n').count()).to_string().len();
     let mut out = String::new();
     let (mut old_num, mut new_num) = (1usize, 1usize);
@@ -86,10 +87,10 @@ fn display_diff(lines: &LineDiff, old: &str, new: &str) -> (String, Option<usize
         let next_is_change = lines.changes.get(i + 1).is_some_and(|next| next.kind != ChangeKind::Equal);
         let n = text.len();
         let shown: &[(usize, usize)] = match (last_was_change, next_is_change) {
-            (true, true) if n <= CONTEXT * 2 => &[(0, n)],
-            (true, true) => &[(0, CONTEXT), (n - CONTEXT, n)],
-            (true, false) => &[(0, CONTEXT.min(n))],
-            (false, true) => &[(n.saturating_sub(CONTEXT), n)],
+            (true, true) if n <= context.saturating_mul(2) => &[(0, n)],
+            (true, true) => &[(0, context), (n - context, n)],
+            (true, false) => &[(0, context.min(n))],
+            (false, true) => &[(n.saturating_sub(context), n)],
             (false, false) => &[],
         };
         let mut cursor = 0;
@@ -121,7 +122,7 @@ fn display_diff(lines: &LineDiff, old: &str, new: &str) -> (String, Option<usize
 
 /// jsdiff `structuredPatch` and `formatPatch`. The loop runs once past the last change, as jsdiff
 /// does with its empty sentinel, to close the last hunk.
-fn unified_patch(lines: &LineDiff, path: &str) -> String {
+fn unified_patch(lines: &LineDiff, path: &str, context: usize) -> String {
     let changes = &lines.changes;
     let mut out = format!("--- {path}\n+++ {path}\n");
     let mut hunk: Vec<(char, &str)> = Vec::new();
@@ -135,7 +136,7 @@ fn unified_patch(lines: &LineDiff, path: &str) -> String {
                 old_range_start = old_line;
                 new_range_start = new_line;
                 if let Some(prev) = i.checked_sub(1).map(|prev| lines.lines(&changes[prev])) {
-                    hunk = prev[prev.len().saturating_sub(CONTEXT)..].iter().map(|line| (' ', *line)).collect();
+                    hunk = prev[prev.len().saturating_sub(context)..].iter().map(|line| (' ', *line)).collect();
                     old_range_start -= hunk.len();
                     new_range_start -= hunk.len();
                 }
@@ -150,13 +151,13 @@ fn unified_patch(lines: &LineDiff, path: &str) -> String {
             continue;
         }
         if old_range_start != 0 {
-            if text.len() <= CONTEXT * 2 && i + 1 < changes.len() {
+            if text.len() <= context.saturating_mul(2) && i + 1 < changes.len() {
                 hunk.extend(text.iter().map(|line| (' ', *line)));
             } else {
-                let context = text.len().min(CONTEXT);
-                hunk.extend(text[..context].iter().map(|line| (' ', *line)));
-                let old_lines = old_line - old_range_start + context;
-                let new_lines = new_line - new_range_start + context;
+                let shown = text.len().min(context);
+                hunk.extend(text[..shown].iter().map(|line| (' ', *line)));
+                let old_lines = old_line - old_range_start + shown;
+                let new_lines = new_line - new_range_start + shown;
                 // An empty range starts at the line before it.
                 let old_start = if old_lines == 0 { old_range_start - 1 } else { old_range_start };
                 let new_start = if new_lines == 0 { new_range_start - 1 } else { new_range_start };

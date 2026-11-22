@@ -67,7 +67,12 @@ export default function (pi) {
       prompt: ca.formatSkillsForPrompt(skills.skills).includes('<description>Demo &lt;skill&gt;</description>'),
       diff: ca.generateDiffString('a\nb\n', 'a\nc\n'),
       patch: ca.generateUnifiedPatch('f.txt', 'a\n', 'b\n').includes('+b'),
-      contextLines: code(() => ca.generateDiffString('a', 'b', 2)),
+      contextLines: ((ten, changed) => [
+        ca.generateDiffString(ten, changed, 1).diff,
+        ca.generateUnifiedPatch('f.txt', ten, changed, 0),
+        ca.generateUnifiedPatch('f.txt', ten, changed, Infinity).split('\n').length,
+        code(() => ca.generateDiffString('a', 'b', -1)),
+      ])('l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n', 'l1\nl2\nl3\nl4\nX\nl6\nl7\nl8\nl9\nl10\n'),
       mime: await ca.detectSupportedImageMimeTypeFromFile(pngPath),
       png: (await ca.convertToPng(PNG, 'image/png')).mimeType,
       resized: resized && [resized.originalWidth, resized.originalHeight, resized.width, resized.height, resized.wasResized],
@@ -317,7 +322,12 @@ async fn coding_agent_utilities_run_upstream_code_and_host_operations() {
     assert_eq!(data["patch"], true);
     assert_eq!(
         data["contextLines"],
-        "ERR_PI_UNSUPPORTED: generateDiffString contextLines other than 4 is not supported in pi-rust"
+        json!([
+            "    ...\n  4 l4\n- 5 l5\n+ 5 X\n  6 l6\n    ...",
+            "--- f.txt\n+++ f.txt\n@@ -5,1 +5,1 @@\n-l5\n+X\n",
+            15,
+            "ERR_PI_UNSUPPORTED: generateDiffString with a negative or fractional contextLines is not supported in pi-rust"
+        ])
     );
     assert_eq!(data["mime"], "image/png");
     assert_eq!(data["png"], "image/png");

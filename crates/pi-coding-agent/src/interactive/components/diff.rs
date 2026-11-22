@@ -1,9 +1,8 @@
 //! Colored diffs with intra-line highlighting (upstream `components/diff.ts`). Input lines look
 //! like `+12 text`, `-12 text`, ` 12 text`, or `     ...`, as the edit tool writes them.
 
-use pi_durable::diff::ChangeKind;
+use pi_durable::diff::{ChangeKind, diff_words, leading_whitespace};
 
-use super::word_diff::{diff_words, leading_whitespace};
 use crate::theme::{ThemeColor, theme};
 
 struct DiffLine<'a> {

@@ -7,8 +7,10 @@ Upstream pi makes its edit diffs with the npm package `diff` ([jsdiff](https://g
 | pi-rust | Upstream and jsdiff |
 | --- | --- |
 | `pi_durable::diff::diff_tokens` ([mod.rs](../../crates/pi-durable/src/diff/mod.rs)) | `Diff.diff`: the greedy Myers search, its tie-breaks, and its diagonal pruning |
-| `generate_diff_string`, `generate_unified_patch`, `generate_edit_diff` ([lines.rs](../../crates/pi-durable/src/diff/lines.rs)) | Upstream `generateDiffString` and `generateUnifiedPatch`: `diffLines`, and `createTwoFilesPatch` with context 4 and `FILE_HEADERS_ONLY` |
-| `diff_words` ([word_diff.rs](../../crates/pi-coding-agent/src/interactive/components/word_diff.rs)) | `diffWords` and its whitespace cleanup, `dedupeWhitespaceInChangeObjects` |
+| `generate_diff_string`, `generate_unified_patch`, `generate_edit_diff` ([lines.rs](../../crates/pi-durable/src/diff/lines.rs)) | Upstream `generateDiffString` and `generateUnifiedPatch`: `diffLines`, and `createTwoFilesPatch` with `FILE_HEADERS_ONLY` and the context size of the caller (default 4) |
+| `diff_words` ([words.rs](../../crates/pi-durable/src/diff/words.rs)), used by the diff view | `diffWords` and its whitespace cleanup, `dedupeWhitespaceInChangeObjects` |
+
+Extensions can give `contextLines` to `generateDiffString` and `generateUnifiedPatch`. The SDK accepts a non-negative integer or `Infinity`, and throws `ERR_PI_UNSUPPORTED` for other values.
 
 ## Rules
 
@@ -18,10 +20,23 @@ Upstream pi makes its edit diffs with the npm package `diff` ([jsdiff](https://g
 
 ## When upstream changes the `diff` version
 
-1. Read the jsdiff release notes for changes to `diffLines`, `diffWords`, `structuredPatch`, and `formatPatch`.
-2. Compare the port with the new version. Run upstream `generateDiffString`, `createTwoFilesPatch`, and `renderIntraLineDiff` in Node on random inputs, run the Rust functions on the same inputs, and compare the strings. The check on 2026-11-21 used jsdiff 8.0.4 and found no differences in 7,354 line pairs and 46,349 word pairs.
-3. Copy the new results into the expected values in [tests.rs](../../crates/pi-durable/src/diff/tests.rs) and in the tests of `word_diff.rs`.
+1. Read the jsdiff release notes for changes to `diffLines`, `diffWords`, `structuredPatch`, and `formatPatch`. Also look for new jsdiff functions or options that upstream starts to use.
+2. Compare the port with the new version. The comparison does not run in CI.
+
+   ```sh
+   mkdir -p /tmp/jsdiff && cd /tmp/jsdiff && npm pack diff@<version> && tar -xzf diff-<version>.tgz
+   cd <pi-rust>
+   node scripts/jsdiff-oracle.mjs <upstream pi checkout> /tmp/jsdiff/package > /tmp/jsdiff/oracle.json
+   PI_JSDIFF_ORACLE=/tmp/jsdiff/oracle.json cargo test -p pi-durable --lib --release matches_jsdiff_oracle -- --ignored
+   ```
+
+   The script runs upstream `generateDiffString`, `createTwoFilesPatch`, and `diffWords` on about 38,000 generated inputs. The test compares each result with the port. Set `SEED` to try other inputs.
+3. Copy new results into the expected values in [tests.rs](../../crates/pi-durable/src/diff/tests.rs) and in the tests of `words.rs`. If the large case changes, put the new `largeSha256` of the script output into `large_diff_matches_upstream`.
+
+The check on 2026-11-21 used jsdiff 8.0.4 and found no differences in 7,935 line cases and 30,225 word cases.
 
 ## License
 
-jsdiff uses the BSD 3-Clause license. The notice is in [LICENSE-jsdiff](../../crates/pi-durable/src/diff/LICENSE-jsdiff). `about.hbs` adds it to `THIRD-PARTY-LICENSES.md`, which goes into each release archive.
+jsdiff uses the BSD 3-Clause license, and the port is a close translation of its code, so pi-rust keeps the notice. The notice is in [LICENSE-jsdiff](../../crates/pi-durable/src/diff/LICENSE-jsdiff) and in the README license table. `about.hbs` adds it to `THIRD-PARTY-LICENSES.md`, which goes into each release archive.
+
+To do: `release.yml` copies the `LICENSE-*` file of each other ported part into the release archives. Add `crates/pi-durable/src/diff/LICENSE-jsdiff` to that `cp` line with a token that has the `workflow` scope.
