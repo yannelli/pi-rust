@@ -142,6 +142,14 @@ fn large_diff_is_a_valid_edit_script() {
 
 /// Compares the port with the output of `scripts/jsdiff-oracle.mjs`; docs/parity/jsdiff.md has the steps.
 #[test]
+fn tokens_without_a_match_are_removed_then_added() {
+    for (old, new) in (0..24).flat_map(|old| (0..24).map(move |new| (old, new))) {
+        let changes = diff_tokens(&vec![0; old], &vec![1; new], |a, b| a == b);
+        assert_eq!(changes, replace_all(old, new), "{old} old, {new} new");
+    }
+}
+
+#[test]
 #[ignore = "needs PI_JSDIFF_ORACLE, the output of scripts/jsdiff-oracle.mjs"]
 fn matches_jsdiff_oracle() {
     let path = std::env::var("PI_JSDIFF_ORACLE").expect("PI_JSDIFF_ORACLE names the oracle output");

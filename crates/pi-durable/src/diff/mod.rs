@@ -28,19 +28,44 @@ pub struct Change {
 
 const NONE: u32 = u32::MAX;
 const MIN_COMPACT_LEN: usize = 1 << 16;
+/// `old_used` of a diagonal without a path. The two path checks of the search fail for it.
+const NO_PATH: i32 = i32::MAX / 2;
+/// Positions are `i32`. jsdiff cannot hold inputs this large either.
+const MAX_TOKENS: usize = (i32::MAX / 4) as usize;
 
+const KIND_BITS: u32 = 2;
+const KIND_MASK: u32 = (1 << KIND_BITS) - 1;
+
+/// A run of tokens of one kind. `run` is the token count above the `KIND_BITS` of the kind.
 #[derive(Clone, Copy)]
 struct Component {
-    kind: ChangeKind,
-    count: u32,
+    run: u32,
     prev: u32,
 }
 
+impl Component {
+    fn kind(self) -> ChangeKind {
+        match self.run & KIND_MASK {
+            0 => ChangeKind::Equal,
+            1 => ChangeKind::Removed,
+            _ => ChangeKind::Added,
+        }
+    }
+
+    fn count(self) -> u32 {
+        self.run >> KIND_BITS
+    }
+}
+
+/// A search path. Its last run is not in the arena, so one more token of the same kind adds no component.
 #[derive(Clone, Copy)]
 struct Path {
-    old_pos: isize,
-    last: u32,
+    /// The old tokens that the path has used: jsdiff `oldPos + 1`.
+    old_used: i32,
+    last: Component,
 }
+
+const EMPTY: Path = Path { old_used: NO_PATH, last: Component { run: 0, prev: NONE } };
 
 /// Linked lists of components that search paths share, like the change objects of jsdiff.
 struct Components {
@@ -50,35 +75,34 @@ struct Components {
 }
 
 impl Components {
-    fn push(&mut self, kind: ChangeKind, count: u32, prev: u32) -> u32 {
-        self.nodes.push(Component { kind, count, prev });
+    /// jsdiff `addToPath`, and the component that `extractCommon` adds.
+    fn add(&mut self, path: &mut Path, kind: ChangeKind, count: u32) {
+        if path.last.run & KIND_MASK != kind as u32 {
+            if path.last.count() > 0 {
+                path.last.prev = self.push(path.last);
+            }
+            path.last.run = kind as u32;
+        }
+        path.last.run += count << KIND_BITS;
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn push(&mut self, component: Component) -> u32 {
+        self.nodes.push(component);
         (self.nodes.len() - 1) as u32
     }
 
-    fn get(&self, i: u32) -> Option<Component> {
-        self.nodes.get(i as usize).copied()
-    }
-
-    /// jsdiff `addToPath`.
-    fn extend(&mut self, path: Path, kind: ChangeKind) -> Path {
-        let old_pos = path.old_pos + isize::from(kind == ChangeKind::Removed);
-        let last = match self.get(path.last) {
-            Some(last) if last.kind == kind => self.push(kind, last.count + 1, last.prev),
-            _ => self.push(kind, 1, path.last),
-        };
-        Path { old_pos, last }
-    }
-
     /// Drops the components that no stored path reaches. A component only links to older ones.
-    fn compact(&mut self, paths: &mut [Option<Path>]) {
+    fn compact(&mut self, paths: &mut [Path]) {
         if self.nodes.len() < self.compact_at {
             return;
         }
         let remap = &mut self.remap;
         remap.clear();
         remap.resize(self.nodes.len(), NONE);
-        for path in paths.iter().flatten() {
-            let mut i = path.last;
+        for path in paths.iter().filter(|path| path.old_used != NO_PATH) {
+            let mut i = path.last.prev;
             while i != NONE && remap[i as usize] == NONE {
                 remap[i as usize] = 0;
                 i = self.nodes[i as usize].prev;
@@ -98,33 +122,32 @@ impl Components {
             kept += 1;
         }
         self.nodes.truncate(kept);
-        for path in paths.iter_mut().flatten() {
-            if path.last != NONE {
-                path.last = remap[path.last as usize];
-            }
+        for path in paths.iter_mut().filter(|path| path.old_used != NO_PATH && path.last.prev != NONE) {
+            path.last.prev = remap[path.last.prev as usize];
         }
         self.compact_at = MIN_COMPACT_LEN.max(kept * 4);
     }
 
-    fn changes(&self, mut last: u32) -> Vec<Change> {
+    fn changes(&self, last: Component) -> Vec<Change> {
         let mut runs = Vec::new();
-        while let Some(component) = self.get(last) {
+        let mut next = Some(last).filter(|last| last.count() > 0);
+        while let Some(component) = next {
             runs.push(component);
-            last = component.prev;
+            next = self.nodes.get(component.prev as usize).copied();
         }
         let (mut old_pos, mut new_pos) = (0, 0);
         runs.iter()
             .rev()
             .map(|run| {
-                let start = if run.kind == ChangeKind::Removed { old_pos } else { new_pos };
-                let len = run.count as usize;
-                if run.kind != ChangeKind::Added {
+                let (kind, len) = (run.kind(), run.count() as usize);
+                let start = if kind == ChangeKind::Removed { old_pos } else { new_pos };
+                if kind != ChangeKind::Added {
                     old_pos += len;
                 }
-                if run.kind != ChangeKind::Removed {
+                if kind != ChangeKind::Removed {
                     new_pos += len;
                 }
-                Change { kind: run.kind, start, len }
+                Change { kind, start, len }
             })
             .collect()
     }
@@ -132,76 +155,114 @@ impl Components {
 
 /// jsdiff `Diff.diff` on tokens: the changes that turn `old` into `new`.
 pub fn diff_tokens<T>(old: &[T], new: &[T], equals: impl Fn(&T, &T) -> bool) -> Vec<Change> {
-    let (old_len, new_len) = (old.len() as isize, new.len() as isize);
+    let changes = search(old.len(), new.len(), usize::MAX, &ByIndex(|i: usize, j: usize| equals(&old[i], &new[j])));
+    changes.unwrap_or_else(|| replace_all(old.len(), new.len()))
+}
+
+/// The tokens of a search. The search names each token by its index.
+trait Tokens {
+    fn equals(&self, old: usize, new: usize) -> bool;
+
+    /// The count of equal tokens from `old` and `new`. Each text has `max` or more tokens from there.
+    fn common_len(&self, old: usize, new: usize, max: usize) -> usize {
+        (0..max).take_while(|&i| self.equals(old + i, new + i)).count()
+    }
+}
+
+struct ByIndex<F>(F);
+
+impl<F: Fn(usize, usize) -> bool> Tokens for ByIndex<F> {
+    fn equals(&self, old: usize, new: usize) -> bool {
+        (self.0)(old, new)
+    }
+}
+
+/// The changes for tokens that have no match: jsdiff removes the old ones, then adds the new ones.
+fn replace_all(old_tokens: usize, new_tokens: usize) -> Vec<Change> {
+    [(ChangeKind::Removed, old_tokens), (ChangeKind::Added, new_tokens)]
+        .into_iter()
+        .filter(|&(_, len)| len > 0)
+        .map(|(kind, len)| Change { kind, start: 0, len })
+        .collect()
+}
+
+/// jsdiff `extractCommon`: the count of equal tokens from `old_used` and `new_used`.
+#[inline(never)]
+fn common_len(tokens: &impl Tokens, (old_used, new_used): (i32, i32), (old_len, new_len): (i32, i32)) -> i32 {
+    let max = (old_len - old_used).min(new_len - new_used);
+    tokens.common_len(old_used as usize, new_used as usize, max as usize) as i32
+}
+
+/// jsdiff `Diff.diff`. Returns `None` when the changes need more than `max_edit_length` added
+/// and removed tokens.
+fn search(old_tokens: usize, new_tokens: usize, max_edit_length: usize, tokens: &impl Tokens) -> Option<Vec<Change>> {
+    assert!(old_tokens.max(new_tokens) <= MAX_TOKENS, "too many tokens to diff");
+    let (old_len, new_len) = (old_tokens as i32, new_tokens as i32);
     let mut components = Components { nodes: Vec::new(), remap: Vec::new(), compact_at: MIN_COMPACT_LEN };
-    // Paths by diagonal `old_pos - new_pos`. They only reach `-new_len..=old_len`, so the
+    let common = common_len(tokens, (0, 0), (old_len, new_len));
+    let mut first = Path { old_used: common, ..EMPTY };
+    if common > 0 {
+        components.add(&mut first, ChangeKind::Equal, common as u32);
+    }
+    if common >= old_len && common >= new_len {
+        return Some(components.changes(first.last));
+    }
+    // Paths by diagonal `old_used - new_used`. They only reach `-new_len..=old_len`, so the
     // search skips the diagonals past those bounds, where jsdiff finds no path.
     let offset = new_len + 2;
-    let mut best: Vec<Option<Path>> = vec![None; old.len() + new.len() + 5];
-    // jsdiff `extractCommon`: follow the diagonal while the tokens match.
-    let extract_common = |components: &mut Components, path: &mut Path, diagonal: isize| {
-        let start = path.old_pos;
-        let mut old_pos = start;
-        let mut new_pos = old_pos - diagonal;
-        while new_pos + 1 < new_len
-            && old_pos + 1 < old_len
-            && equals(&old[(old_pos + 1) as usize], &new[(new_pos + 1) as usize])
-        {
-            old_pos += 1;
-            new_pos += 1;
-        }
-        if old_pos > start {
-            path.last = components.push(ChangeKind::Equal, (old_pos - start) as u32, path.last);
-        }
-        path.old_pos = old_pos;
-        new_pos
-    };
-
-    let mut first = Path { old_pos: -1, last: NONE };
-    let new_pos = extract_common(&mut components, &mut first, 0);
-    if first.old_pos + 1 >= old_len && new_pos + 1 >= new_len {
-        return components.changes(first.last);
-    }
-    best[offset as usize] = Some(first);
-    let (mut min_diagonal, mut max_diagonal) = (isize::MIN, isize::MAX);
-    for edit_length in 1..=old_len + new_len {
+    let mut best: Vec<Path> = vec![EMPTY; old_tokens + new_tokens + 5];
+    best[offset as usize] = first;
+    let (mut min_diagonal, mut max_diagonal) = (i32::MIN, i32::MAX);
+    let last_edit_length = (old_len + new_len).min(i32::try_from(max_edit_length).unwrap_or(i32::MAX));
+    for edit_length in 1..=last_edit_length {
         let mut diagonal = min_diagonal.max(-edit_length);
         if diagonal < -new_len - 1 {
             diagonal += (-new_len - diagonal) / 2 * 2;
         }
-        while diagonal <= max_diagonal.min(edit_length).min(old_len + 1) {
+        let mut last_diagonal = max_diagonal.min(edit_length).min(old_len + 1);
+        while diagonal <= last_diagonal {
             let i = (diagonal + offset) as usize;
-            let remove_path = best[i - 1].take().filter(|path| path.old_pos + 1 < old_len);
-            let add_path = best[i + 1].filter(|path| (0..new_len).contains(&(path.old_pos - diagonal)));
-            let mut path = match (remove_path, add_path) {
-                (Some(remove), Some(add)) if remove.old_pos < add.old_pos => components.extend(add, ChangeKind::Added),
-                (Some(remove), _) => components.extend(remove, ChangeKind::Removed),
-                (None, Some(add)) => components.extend(add, ChangeKind::Added),
-                (None, None) => {
-                    best[i] = None;
-                    diagonal += 2;
-                    continue;
-                }
+            let (remove, add) = (best[i - 1], best[i + 1]);
+            best[i - 1].old_used = NO_PATH;
+            let can_remove = remove.old_used < old_len;
+            // The add path is on the diagonal above, so it has used `old_used - diagonal - 1` new tokens.
+            let can_add = add.old_used - diagonal <= new_len;
+            let (mut path, kind) = if can_add && (!can_remove || remove.old_used < add.old_used) {
+                (add, ChangeKind::Added)
+            } else if can_remove {
+                (Path { old_used: remove.old_used + 1, ..remove }, ChangeKind::Removed)
+            } else {
+                best[i].old_used = NO_PATH;
+                diagonal += 2;
+                continue;
             };
-            let new_pos = extract_common(&mut components, &mut path, diagonal);
-            if path.old_pos + 1 >= old_len && new_pos + 1 >= new_len {
-                return components.changes(path.last);
+            components.add(&mut path, kind, 1);
+            let mut new_used = path.old_used - diagonal;
+            // Most paths stop at once, so the loop that follows a match is not in this loop.
+            if path.old_used < old_len && new_used < new_len && tokens.equals(path.old_used as usize, new_used as usize)
+            {
+                let common = 1 + common_len(tokens, (path.old_used + 1, new_used + 1), (old_len, new_len));
+                components.add(&mut path, ChangeKind::Equal, common as u32);
+                path.old_used += common;
+                new_used += common;
             }
-            best[i] = Some(path);
-            if path.old_pos + 1 >= old_len {
-                max_diagonal = max_diagonal.min(diagonal - 1);
-            }
-            if new_pos + 1 >= new_len {
-                min_diagonal = min_diagonal.max(diagonal + 1);
+            best[i] = path;
+            if path.old_used >= old_len || new_used >= new_len {
+                if path.old_used >= old_len && new_used >= new_len {
+                    return Some(components.changes(path.last));
+                }
+                // jsdiff stops the round at a path that has used all old tokens.
+                if path.old_used >= old_len {
+                    max_diagonal = max_diagonal.min(diagonal - 1);
+                    last_diagonal = last_diagonal.min(diagonal - 1);
+                }
+                if new_used >= new_len {
+                    min_diagonal = min_diagonal.max(diagonal + 1);
+                }
             }
             diagonal += 2;
         }
         components.compact(&mut best);
     }
-    // Not reached: a path reaches the end within `old_len + new_len` edits.
-    [(ChangeKind::Removed, old.len()), (ChangeKind::Added, new.len())]
-        .into_iter()
-        .filter(|&(_, len)| len > 0)
-        .map(|(kind, len)| Change { kind, start: 0, len })
-        .collect()
+    None
 }
