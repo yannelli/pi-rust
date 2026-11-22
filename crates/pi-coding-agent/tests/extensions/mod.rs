@@ -11,6 +11,7 @@ mod exec;
 pub(crate) mod harness;
 mod hook_events;
 mod host;
+mod load_contracts;
 mod loading;
 mod mcp_call;
 mod mcp_elicitation;
