@@ -31,7 +31,7 @@ const NONE: u32 = u32::MAX;
 const MIN_COMPACT_LEN: usize = 1 << 16;
 /// `old_used` of a diagonal without a path. The two path checks of the search fail for it.
 const NO_PATH: i32 = i32::MAX / 2;
-/// Positions are `i32`. jsdiff cannot hold inputs this large either.
+/// Positions are `i32`. Larger inputs get `replace_all`; jsdiff cannot hold them either.
 const MAX_TOKENS: usize = (i32::MAX / 4) as usize;
 
 const KIND_BITS: u32 = 2;
@@ -195,9 +195,11 @@ fn common_len(tokens: &impl Tokens, (old_used, new_used): (i32, i32), (old_len, 
 }
 
 /// jsdiff `Diff.diff`. Returns `None` when the changes need more than `max_edit_length` added
-/// and removed tokens.
+/// and removed tokens, or when a text has more than `MAX_TOKENS` tokens.
 fn search(old_tokens: usize, new_tokens: usize, max_edit_length: usize, tokens: &impl Tokens) -> Option<Vec<Change>> {
-    assert!(old_tokens.max(new_tokens) <= MAX_TOKENS, "too many tokens to diff");
+    if old_tokens.max(new_tokens) > MAX_TOKENS {
+        return None;
+    }
     let (old_len, new_len) = (old_tokens as i32, new_tokens as i32);
     let mut components = Components { nodes: Vec::new(), remap: Vec::new(), compact_at: MIN_COMPACT_LEN };
     let common = common_len(tokens, (0, 0), (old_len, new_len));

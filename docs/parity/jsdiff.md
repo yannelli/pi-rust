@@ -7,6 +7,7 @@ Upstream pi makes its edit diffs with the npm package `diff` ([jsdiff](https://g
 | pi-rust | Upstream and jsdiff |
 | --- | --- |
 | `pi_durable::diff::diff_tokens` ([mod.rs](../../crates/pi-durable/src/diff/mod.rs)) | `Diff.diff`: the greedy Myers search, its tie-breaks, and its diagonal pruning |
+| `line_changes` ([line_tokens.rs](../../crates/pi-durable/src/diff/line_tokens.rs)) | `diffLines`: the line tokens and the search on them |
 | `generate_diff_string`, `generate_unified_patch`, `generate_edit_diff` ([lines.rs](../../crates/pi-durable/src/diff/lines.rs)) | Upstream `generateDiffString` and `generateUnifiedPatch`: `diffLines`, and `createTwoFilesPatch` with `FILE_HEADERS_ONLY` and the context size of the caller (default 4) |
 | `diff_words` ([words.rs](../../crates/pi-durable/src/diff/words.rs)), used by the diff view | `diffWords` and its whitespace cleanup, `dedupeWhitespaceInChangeObjects` |
 
@@ -17,6 +18,7 @@ Extensions can give `contextLines` to `generateDiffString` and `generateUnifiedP
 - Word diffs use JavaScript `\s` for whitespace (`is_js_whitespace`). Rust `char::is_whitespace` gives different results for U+0085 and U+FEFF.
 - Do not remove the common suffix before the search. jsdiff does not, and the result changes which of the repeated lines the diff marks.
 - jsdiff keeps each search path as a linked list of change objects and lets the garbage collector free them. The port keeps the lists in an arena and compacts the arena when it gets large.
+- The line search skips the common prefix, as the first jsdiff `extractCommon` does. It then compares line bytes for up to `16 + 2 * isqrt(lines)` edits. A longer search starts again on line ids from a `HashMap` with the std hasher, which has a random key. When no line is in both texts, jsdiff removes all old lines and then adds all new lines, and the port gives that result without a search.
 
 ## When upstream changes the `diff` version
 

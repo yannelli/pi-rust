@@ -1,7 +1,6 @@
 //! The line tokens of jsdiff `diffLines` and the search for their changes.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
 
 use super::{ByIndex, Change, ChangeKind, Tokens, replace_all, search};
 
@@ -86,41 +85,11 @@ impl Tokens for ByBytes<'_, '_> {
     }
 }
 
-/// A fast hash for the line ids: a multiply and a rotate for each 8 bytes.
-#[derive(Default)]
-struct LineHasher(u64);
-
-impl Hasher for LineHasher {
-    fn finish(&self) -> u64 {
-        self.0 ^ (self.0 >> 32)
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        let mut chunks = bytes.chunks_exact(8);
-        for chunk in chunks.by_ref() {
-            self.write_u64(u64::from_le_bytes(chunk.try_into().unwrap_or_default()));
-        }
-        let mut tail = [0; 8];
-        tail[..chunks.remainder().len()].copy_from_slice(chunks.remainder());
-        self.write_u64(u64::from_le_bytes(tail));
-    }
-
-    fn write_u64(&mut self, word: u64) {
-        self.0 = (self.0.rotate_left(26) ^ word).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    }
-
-    fn write_usize(&mut self, word: usize) {
-        self.write_u64(word as u64);
-    }
-}
-
 /// An id for each line from `from`, the same for lines with equal bytes, and the count of ids
 /// of `old`. The ids of `old` come first, so a line of `new` with a smaller id is also in `old`.
 fn intern(old: &Lines, new: &Lines, from: usize) -> (Vec<u32>, Vec<u32>, u32) {
-    let mut ids = HashMap::with_capacity_and_hasher(
-        old.len() + new.len() - 2 * from,
-        BuildHasherDefault::<LineHasher>::default(),
-    );
+    // The std hasher has a random key, so lines from a file cannot be made to collide.
+    let mut ids = HashMap::with_capacity(old.len() + new.len() - 2 * from);
     let mut id_of = |line| {
         let next = ids.len() as u32;
         *ids.entry(line).or_insert(next)
