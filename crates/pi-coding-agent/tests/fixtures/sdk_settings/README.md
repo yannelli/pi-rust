@@ -1,6 +1,6 @@
 # SDK `SettingsManager` oracle fixture
 
-Created 2026-11-01. Last updated 2026-11-01.
+Created 2026-11-01. Last updated 2026-11-22.
 
 `golden.json` is the output of the authentic upstream `SettingsManager` (earendil-works/pi `35dfa757378bd7a8570670e99c2687bdd1039a06`), run on Node v22.23.3 with its lock-pinned packages. It holds 609 cases that call all 139 public members, each in at least 2 cases.
 
@@ -18,7 +18,19 @@ Created 2026-11-01. Last updated 2026-11-01.
   The 292 package files are not copied; `data/packages-manifest.json` lists each one with its sha256.
 
 ## Replay
-`replay.ts` is the case loop of `oracle/run.mjs` as a pi extension command. It imports the same `data/` inputs and `oracle/harness.mjs`, and runs them against pi-rust's SDK `SettingsManager`. `tests/sdk_settings_replay.rs` compares its output with `golden.json`. Every value and key order of all 609 cases must match, with no case skipped or allowed to differ.
+`replay.ts` is the case loop of `oracle/run.mjs` as a pi extension command. It imports the same `data/` inputs and `oracle/harness.mjs`, and runs them against pi-rust's SDK `SettingsManager`. `tests/sdk_settings_replay.rs` compares its output with `golden.json`. Every value and key order of all 609 cases must match, with no case skipped. The only exceptions are the intended pi-rust differences in `DIVERGENCES`.
+
+## Intended differences
+`DIVERGENCES` in `tests/sdk_settings_replay.rs` lists the steps where pi-rust returns a different value on purpose. Each entry names the case id, the step index and member, the value upstream returned, the value pi-rust returns, and the reason. The test replaces the recorded value with pi-rust's value in its in-memory copy of the golden before it compares. `golden.json` itself stays unchanged.
+
+The test fails when an entry is stale: the case or step no longer exists, the step calls another member, or the golden no longer holds the upstream value. `every_divergence_matches_the_golden` checks this without running the replay.
+
+| Case | Step | Upstream | pi-rust | Reason |
+| --- | --- | --- | --- | --- |
+| `getter/getEnableInstallTelemetry/empty` | 0, `getEnableInstallTelemetry` | `true` | `false` | Install telemetry is off unless the user turns it on. |
+| `getter/getEnableInstallTelemetry/invalid` | 0, `getEnableInstallTelemetry` | `true` | `false` | Install telemetry is off unless the user turns it on. |
+
+Add an entry only for a difference that the README section "Differences from upstream pi" records.
 
 ## Regenerate
 Do not edit `golden.json`. To regenerate it, run `oracle/prepare_run.py` and `oracle/run.mjs` as `oracle/README.md` describes, then write the compact copy and its hashes here.

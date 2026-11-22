@@ -103,7 +103,8 @@ pub(super) fn getter(
         "getNpmCommand" if truthy(v(&["npmCommand"])) => array_copy(v(&["npmCommand"]))?,
         "getNpmCommand" => undefined(),
         "getCollapseChangelog" => or(v(&["collapseChangelog"]), json!(false)),
-        "getEnableInstallTelemetry" => or(v(&["enableInstallTelemetry"]), json!(true)),
+        // pi-rust: install telemetry is off unless turned on; upstream defaults to true.
+        "getEnableInstallTelemetry" => or(v(&["enableInstallTelemetry"]), json!(false)),
         "getEnableAnalytics" => or(v(&["enableAnalytics"]), json!(false)),
         "getTrackingId" => read(v(&["trackingId"])),
         "getPackages" => array_copy(v(&["packages"]))?,
