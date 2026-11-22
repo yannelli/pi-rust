@@ -22,20 +22,20 @@ pub const MODEL_REFRESH_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug, Default)]
 pub struct CatalogConfig {
-    /// pi.dev by default.
+    /// pi-rust.com by default.
     pub catalog_base_url: Option<String>,
     /// Generation time of the bundled catalog; an older remote overlay is ignored.
     pub local_generated_at: Option<i64>,
     /// `models.json` text, for its Radius providers and provider base URLs.
     pub models_json: Option<String>,
-    /// HTTP client of the pi.dev overlays; the shared client by default.
+    /// HTTP client of the catalog overlays; the shared client by default.
     pub client: Option<reqwest::Client>,
     /// HTTP client of account model lists, which must not follow redirects; by default
     /// `pi_ai::model_lists::list_client`.
     pub list_client: Option<reqwest::Client>,
 }
 
-/// The pi.dev overlay for every bundled provider except Radius, narrowed to the account's models
+/// The catalog overlay for every bundled provider except Radius, narrowed to the account's models
 /// where the provider lists them, the Radius gateway catalogs (built-in and `models.json`), and
 /// the llama.cpp router.
 pub fn builtin_catalogs(builtin: &[Model], config: &CatalogConfig) -> Vec<Arc<dyn DynamicCatalog>> {

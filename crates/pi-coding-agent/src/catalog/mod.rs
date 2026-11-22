@@ -1,4 +1,4 @@
-//! Dynamic model catalogs: the pi.dev overlay of bundled providers, account model lists, Radius
+//! Dynamic model catalogs: the pi-rust.com overlay of bundled providers, account model lists, Radius
 //! gateway catalogs, llama.cpp, the `models-store.json` offline cache, and `pi update --models`.
 
 pub mod personalized;

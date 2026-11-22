@@ -1,6 +1,7 @@
-//! The pi.dev catalog overlay for built-in providers: newer models are fetched from
+//! The model catalog overlay for built-in providers: newer models are fetched from
 //! `/api/models/providers/<id>`, cached in `models-store.json` with their `ETag`, and merged
-//! over the bundled list (upstream `core/remote-catalog-provider.ts`).
+//! over the bundled list (upstream `core/remote-catalog-provider.ts`). pi-rust.com serves the
+//! catalog for pi-rust releases; upstream uses pi.dev.
 
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -14,7 +15,7 @@ use super::refresh::{DynamicCatalog, Persist, RefreshContext};
 use super::store::{KNOWN_MODEL_TYPES, ModelsStoreEntry, model_type};
 use crate::platform::http::{FetchRetryOptions, VERSION, fetch_with_retry, pi_user_agent};
 
-pub const DEFAULT_CATALOG_BASE_URL: &str = "https://pi.dev";
+pub const DEFAULT_CATALOG_BASE_URL: &str = "https://pi-rust.com";
 /// Stored catalogs younger than this are not fetched again unless forced.
 pub const REMOTE_CATALOG_REFRESH_INTERVAL_MS: i64 = 4 * 60 * 60 * 1000;
 const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(4_000);
@@ -65,7 +66,7 @@ pub fn parse_catalog(provider_id: &str, value: &Value) -> Result<Vec<Model>, Str
     Ok(models.collect())
 }
 
-/// Whether a pi.dev catalog is newer than the model data bundled with pi.
+/// Whether a served catalog is newer than the model data bundled with pi.
 pub fn is_newer(last_modified: Option<i64>, local_generated_at: Option<i64>) -> bool {
     match local_generated_at {
         None => true,
@@ -154,7 +155,7 @@ pub(super) async fn read_catalog(provider_id: &str, response: reqwest::Response)
     Ok(ModelsStoreEntry { models, checked_at: None, last_modified, etag, pi_version: None })
 }
 
-/// The pi.dev overlay of one built-in provider.
+/// The catalog overlay of one built-in provider.
 pub struct RemoteCatalogOverlay {
     provider_id: String,
     base_url: String,

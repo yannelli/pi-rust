@@ -108,7 +108,7 @@ async fn pi_rust_lists_wait_for_the_interval_unless_forced() {
     let server = TestServer::start(|_| TestReply::status(404, "")).await;
     let seen = Arc::default();
     let provider = catalog(&server, keep(&["static"], &seen)).with_interval(Some(REMOTE_CATALOG_REFRESH_INTERVAL_MS));
-    // An entry with pi.dev validators came from the plain overlay, so it is refreshed at once.
+    // An entry with catalog server validators came from the plain overlay, so it is refreshed at once.
     let overlay_entry =
         ModelsStoreEntry { checked_at: Some(pi_ai::now_ms()), last_modified: Some(1), ..ModelsStoreEntry::default() };
     let publisher =
