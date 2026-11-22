@@ -26,7 +26,8 @@ void pi_embedded_command(PiEmbedded *handle, const char *id, const char *method,
 /* Answer a core request. A non-NULL `error` rejects it; otherwise `result_json` is its value. */
 void pi_embedded_receive(PiEmbedded *handle, const char *id, const char *result_json, const char *error);
 
-/* Stop the runtime and release the handle. Do not call it from inside a callback. */
+/* Stop the runtime and release the handle. It waits for running callbacks to return, so the
+ * host may release `context` afterwards. Do not call it from inside a callback. */
 void pi_embedded_free(PiEmbedded *handle);
 
 #ifdef __cplusplus

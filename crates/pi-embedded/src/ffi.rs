@@ -113,7 +113,8 @@ pub unsafe extern "C" fn pi_embedded_receive(
     }
 }
 
-/// Stop the runtime and release the handle. Do not call it from a host callback.
+/// Stop the runtime and release the handle. Do not call it from a host callback: it waits for
+/// running callbacks to return, so the host may release `context` once it returns.
 /// # Safety
 /// `handle` comes from [`pi_embedded_new`] and is not used afterwards.
 #[unsafe(no_mangle)]
@@ -123,7 +124,7 @@ pub unsafe extern "C" fn pi_embedded_free(handle: *mut PiEmbedded) {
     }
     // SAFETY: the pointer came from `Box::into_raw` in `pi_embedded_new` and is freed once.
     let mut handle = unsafe { Box::from_raw(handle) };
-    if let Some(runtime) = handle.runtime.take() {
-        runtime.shutdown_background();
-    }
+    // Dropping the runtime joins its worker threads; `shutdown_background` would let a callback
+    // still run after the host freed `context`.
+    drop(handle.runtime.take());
 }
