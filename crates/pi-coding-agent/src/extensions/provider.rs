@@ -320,14 +320,15 @@ impl ExtensionRunner {
             runtime.builtin_oauth(id).ok_or_else(|| format!("Provider {name}: no built-in OAuth login \"{id}\""))
         });
         let builtin = builtin.transpose()?;
-        if config["hasStreamSimple"].as_bool() == Some(true) {
-            let api = config["api"]
-                .as_str()
-                .ok_or(format!("Provider {name}: \"api\" is required when registering streamSimple."))?;
-            let target = StreamTarget::Provider(name.to_string());
-            let provider = JsApiProvider { runner: callbacks.weak(), group, target };
-            callbacks.install_api(api, Arc::new(provider), Some((group, name)));
-        }
+        let stream_api = if config["hasStreamSimple"].as_bool() == Some(true) {
+            Some(
+                config["api"]
+                    .as_str()
+                    .ok_or(format!("Provider {name}: \"api\" is required when registering streamSimple."))?,
+            )
+        } else {
+            None
+        };
         let mut stored = config.clone();
         if let Some(object) = stored.as_object_mut() {
             for key in [
@@ -343,6 +344,11 @@ impl ExtensionRunner {
             }
         }
         runtime.register_extension_provider(name, stored)?;
+        if let Some(api) = stream_api {
+            let target = StreamTarget::Provider(name.to_string());
+            let provider = JsApiProvider { runner: callbacks.weak(), group, target };
+            callbacks.install_api(api, Arc::new(provider), Some((group, name)));
+        }
         let hooks = super::provider_hooks::JsProviderHooks::from_config(callbacks.weak(), group, name, &config);
         runtime.register_extension_hooks(name, hooks.map(|hooks| Arc::new(hooks) as _));
         if let Some(oauth) = config["oauth"].as_object() {

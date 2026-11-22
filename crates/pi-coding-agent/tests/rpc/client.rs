@@ -24,6 +24,34 @@ fn client(root: &Path, args: &[&str]) -> RpcClient {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn explicit_local_and_cached_npm_packages_load_and_reload_offline() {
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    let local = root.path().join("work/pkg");
+    // The temporary npm prefix uses the first eight hex digits of SHA-256("npm-").
+    let cached = root.path().join("agent/tmp/extensions/npm/f35b2129/node_modules/@test/cached");
+    for (package, command) in [(&local, "local-check"), (&cached, "cached-check")] {
+        std::fs::create_dir_all(package.join("dist")).unwrap();
+        let entry = format!(r#"export default pi => pi.registerCommand("{command}", {{ handler() {{}} }});"#);
+        std::fs::write(package.join("dist/entry.ts"), entry).unwrap();
+        std::fs::write(package.join("package.json"), r#"{"version":"1.0.0","pi":{"extensions":["./dist/*.ts"]}}"#)
+            .unwrap();
+    }
+    let client = client(root.path(), &["--no-extensions", "-e", "npm:@test/cached@1.0.0", "-e", "./pkg"]);
+    client.start().await.unwrap();
+    let commands = client.get_commands().await.unwrap();
+    let names: Vec<_> = commands.iter().map(|item| item.name.as_str()).collect();
+    assert!(names.windows(2).any(|pair| pair == ["cached-check", "local-check"]), "{names:?}");
+
+    std::fs::write(cached.join("package.json"), r#"{"version":"1.0.0","pi":{"extensions":[]}}"#).unwrap();
+    assert_eq!(client.prompt("/reload", Vec::new(), None).await.unwrap(), PromptDisposition::Handled);
+    let commands = client.get_commands().await.unwrap();
+    assert!(commands.iter().any(|item| item.name == "local-check"));
+    assert!(!commands.iter().any(|item| item.name == "cached-check"));
+    client.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn drives_prompts_bash_and_session_commands() {
     let root = tempfile::tempdir().unwrap();
     let (url, _) = mock_server(vec![text_body("test123"), text_body("second")]).await;

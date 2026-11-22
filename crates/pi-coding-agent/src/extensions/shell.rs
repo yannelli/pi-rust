@@ -8,7 +8,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use pi_agent::{AgentToolResult, ToolUpdateCallback};
+use pi_agent::{AgentToolResult, ToolContext, ToolUpdateCallback};
 use pi_js::{HostValue, JsError};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -18,9 +18,12 @@ use super::ops_async::js_update_callback;
 use super::runner::ExtensionRunner;
 use crate::agent_session::{BashResult, lock};
 use crate::tools::{
-    BashToolOptions, LocalShellOperations, ShellDataCallback, ShellExecError, ShellExecOptions, ShellOperations,
-    ShellSpawnContext, ToolsOptions,
+    BashToolOptions, EditToolOptions, LocalShellOperations, ShellDataCallback, ShellExecError, ShellExecOptions,
+    ShellOperations, ShellSpawnContext, ToolsOptions, WriteToolOptions,
 };
+
+mod file_operations;
+use file_operations::JsFileOperations;
 
 /// Forward output chunks to the JavaScript callback `key`, in order.
 fn data_forwarder(runner: &Arc<ExtensionRunner>, key: u64) -> ShellDataCallback {
@@ -125,14 +128,42 @@ pub(crate) async fn builtin_execute(runner: &Arc<ExtensionRunner>, args: &Args) 
         tools_options.powershell.spawn_hook = bash.spawn_hook.clone();
     }
     tools_options.bash = bash;
+    if name == "read" {
+        if let Some(resize) = options["autoResizeImages"].as_bool() {
+            tools_options.read.auto_resize_images = resize;
+        }
+        tools_options.read.resize_options = serde_json::from_value(options["resizeOptions"].clone()).map_err(error)?;
+    }
+    let file_operations = args.0.get(5).and_then(HostValue::as_js_ref);
+    if let Some(callback) = file_operations {
+        let operations = Arc::new(JsFileOperations(callback.clone()));
+        match name.as_str() {
+            "read" => tools_options.read.operations = Some(operations),
+            // A remote write must not enter the host's local undo history.
+            "write" => tools_options.write = WriteToolOptions::with_operations(operations),
+            "edit" => tools_options.edit = EditToolOptions::with_operations(operations),
+            _ => return Err(error(format!("Unexpected file operations for {name}"))),
+        }
+    }
     let tool = crate::tools::create_tool_with_options(&name, Path::new(&cwd), &tools_options)
         .ok_or_else(|| error(format!("Unknown tool: {name}")))?;
     let cancel = runner.token(options["signal"].as_u64());
     let on_update: ToolUpdateCallback =
         js_update_callback(runner, options["updateKey"].as_u64()).unwrap_or_else(|| Arc::new(|_: AgentToolResult| {}));
     let params = tool.prepare_arguments(params).map_err(|failure| error(format!("{failure:#}")))?;
-    let result =
-        tool.execute(&call_id, params, cancel, on_update).await.map_err(|failure| error(format!("{failure:#}")))?;
+    let model: Option<pi_ai::Model> = serde_json::from_value(options["model"].clone()).map_err(error)?;
+    let context = ToolContext::new(call_id).with_model(model.map(Arc::new));
+    let execute = tool.execute_with_context(&context, params, cancel.clone(), on_update);
+    let result = if name == "read" && file_operations.is_some() {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(error("Operation aborted")),
+            result = execute => result,
+        }
+    } else {
+        execute.await
+    };
+    let result = result.map_err(|failure| error(format!("{failure:#}")))?;
     Ok(json!(result))
 }
 

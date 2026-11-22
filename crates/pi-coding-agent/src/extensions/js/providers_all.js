@@ -1,6 +1,7 @@
 // `@earendil-works/pi-ai/providers/all`: upstream's catalog reads and provider factories over the
 // Rust catalog. Streams, classifiers, images, API key auth, and OAuth flows run in Rust.
-import { call, callAsync, optional, registerCallback, releaseCallback, signalId } from "./bridge.js";
+import { call, callAsync, optional } from "./bridge.js";
+import { rustOAuth, withoutNulls } from "./provider_oauth.js";
 import { BUILTIN_PROVIDERS } from "./builtin_providers.js";
 import { rustStream, streamOptionsJson } from "./stream.js";
 import { envApiKeyAuth } from "../pi-ai/src/auth/helpers.ts";
@@ -36,12 +37,6 @@ export function getBuiltinModelDataGeneratedAt() {
 
 export function getAllBuiltinModels(provider) {
 	return [...getBuiltinModels(provider), ...getBuiltinImageModels(provider), ...getBuiltinClassifierModels(provider)];
-}
-
-/** JSON `null` fields dropped, as upstream leaves optional fields out. */
-function withoutNulls(value) {
-	if (!value || typeof value !== "object") return optional(value);
-	return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== null));
 }
 
 const rustStreams = (api) => {
@@ -96,33 +91,6 @@ function rustApiKeyAuth(provider, name) {
 			signal?.throwIfAborted();
 			return result ? withoutNulls({ ...result, auth: withoutNulls(result.auth) }) : undefined;
 		},
-	};
-}
-
-const withoutType = ({ type: _type, ...credential }) => credential;
-
-/** The Rust OAuth flow of `target` (`{ provider, name?, gateway? }`) with upstream's `OAuthAuth` shape. */
-function rustOAuth(target, info) {
-	return {
-		name: info.name,
-		isSubscription: info.isSubscription,
-		loginLabel: info.loginLabel,
-		async login(interaction, options) {
-			const key = registerCallback((method, payload) =>
-				method === "prompt" ? interaction.prompt(withoutNulls(payload)) : interaction.notify(withoutNulls(payload)),
-			);
-			try {
-				const loginOptions = { agentName: options?.agentName, signal: signalId(interaction.signal) };
-				return { type: "oauth", ...(await callAsync("ai.oauth", "login", target, key, loginOptions)) };
-			} finally {
-				releaseCallback(key);
-			}
-		},
-		async refresh(credential, signal) {
-			const refreshed = await callAsync("ai.oauth", "refresh", target, withoutType(credential), signalId(signal) ?? null);
-			return { type: "oauth", ...refreshed };
-		},
-		toAuth: async (credential) => withoutNulls(await callAsync("ai.oauth", "toAuth", target, withoutType(credential))),
 	};
 }
 

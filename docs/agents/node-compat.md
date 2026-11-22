@@ -27,7 +27,7 @@ The Node backend runs extensions on a real `node` process in place of QuickJS. U
 | Settings | `"extensionRuntime": "quickjs"`, `"node"`, or `"auto"` in project or global `settings.json` |
 
 - The order is CLI, then environment, then project settings, then global settings. The default is `quickjs`.
-- `auto` uses Node when a loaded extension package sets `package.json` `pi.runtime: "node"`, or ships a `.node` file within 4 directory levels of its root. Otherwise `auto` uses QuickJS.
+- `auto` uses Node when a loaded package requests `pi.runtime: "node"` or pi finds a `.node` addon. For each extension, pi searches its directory and follows installed `dependencies` and `optionalDependencies` through the nearest `node_modules` directories. This includes packages npm places higher in the installation tree. The search covers four directory levels per package and up to 20,000 directory entries and dependency lookups per extension. Otherwise `auto` uses QuickJS.
 - pi finds `node` in `PI_NODE_PATH`, then on `PATH`. The minimum version is Node 22.
 - If Node is missing, too old, or does not start, pi shows one warning and uses QuickJS.
 - The code that selects the backend is in `crates/pi-coding-agent/src/extensions/backend.rs`.

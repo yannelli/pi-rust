@@ -11,7 +11,8 @@ use super::paths::{absolute, file_kind, home_dir, is_local_path, sorted_entries}
 use super::prompts::{LoadPromptTemplatesOptions, PromptTemplate, load_prompt_templates};
 use super::skills::{LoadSkillsOptions, Skill, load_skills};
 use super::source_info::{
-    BUILTIN_PATH_PREFIX, PathMetadata, ResolvedPaths, ResolvedResource, SourceInfo, SourceOrigin, SourceScope,
+    BUILTIN_PATH_PREFIX, NATIVE_PATH_PREFIX, PathMetadata, ResolvedPaths, ResolvedResource, SourceInfo, SourceOrigin,
+    SourceScope,
 };
 use super::sources::{SourceLookup, merge_paths, resolve_extension_sources, resolve_resource_path};
 use super::{CollisionResourceType, ResourceDiagnostic};
@@ -28,7 +29,7 @@ pub struct ResourceLoaderOptions {
     pub project_settings: ResourceSettings,
     /// Resources of `packages` settings, resolved by the package manager.
     pub package_resources: ResolvedPaths,
-    /// `-e` sources; package sources among them arrive resolved in `extension_source_resources`.
+    /// `-e` sources; managed packages among them arrive resolved in `extension_source_resources`.
     pub extension_sources: Vec<String>,
     pub extension_source_resources: ResolvedPaths,
     /// `--skill`, `--prompt-template`, and `--theme` paths.
@@ -230,6 +231,11 @@ impl ResourceLoader {
             resolve_extension_sources(&options.extension_sources, &options.cwd, &options.extension_source_resources);
         let mut lookup = SourceLookup::new(&options.cwd, &options.agent_dir);
         self.extra = Default::default();
+        // A native ID needs the manifest of the CLI package that supplied it.
+        for resource in cli.extensions.iter().filter(|item| item.path.to_string_lossy().starts_with(NATIVE_PATH_PREFIX))
+        {
+            lookup.record(&resource.path, &resource.metadata);
+        }
         for list in [&resolved.extensions, &resolved.skills, &resolved.prompts, &resolved.themes] {
             list.iter().for_each(|resource| lookup.record(&resource.path, &resource.metadata));
         }

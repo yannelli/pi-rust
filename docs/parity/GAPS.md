@@ -69,6 +69,8 @@ The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-
 - `process.dlopen` and native `.node` addons load.
 - V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
 
+Chat and AgentFS in the published package audit require native npm addons. Run them with Node 22 or later and `--extension-runtime auto`. [Package versions and checks](extension-packages.md)
+
 ## Extension module exports
 
 Section 8 of the parity report compares the runtime exports of each module in upstream `virtual-modules.ts` with the bundled module. Run `cargo xtask parity --upstream <checkout>` to get the current list. On 2026-10-31 the report found no missing exports.

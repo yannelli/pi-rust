@@ -436,7 +436,7 @@ impl AgentSession {
     pub fn reload(&self) {
         let previous_defaults = self.current_default_tools();
         self.settings().reload();
-        self.reload_with_packages(None, &previous_defaults);
+        self.reload_with_options(self.reload_options(), &previous_defaults);
     }
 
     /// [`Self::reload`] that resolves the `packages` settings again, installing missing ones
@@ -444,27 +444,31 @@ impl AgentSession {
     pub async fn reload_resources(&self) -> Vec<super::RuntimeDiagnostic> {
         let previous_defaults = self.current_default_tools();
         self.settings().reload();
-        let (cwd, agent_dir, settings) = {
-            let services = self.services();
-            (services.cwd.clone(), services.agent_dir.clone(), services.settings.clone())
-        };
-        let (packages, diagnostics) = super::services::package_resources(&cwd, &agent_dir, &settings).await;
-        self.reload_with_packages(Some(packages), &previous_defaults);
+        let mut options = self.reload_options();
+        let diagnostics = super::services::resolve_loader_packages(&mut options, self.settings()).await;
+        self.reload_with_options(options, &previous_defaults);
         diagnostics
     }
 
-    fn reload_with_packages(&self, packages: Option<crate::resources::ResolvedPaths>, previous_defaults: &[String]) {
+    fn reload_options(&self) -> crate::resources::ResourceLoaderOptions {
+        let services = self.services();
+        let loader = services.resources();
+        let mut options = super::services::resource_loader_options(
+            &services.cwd,
+            &services.agent_dir,
+            services.settings.as_ref(),
+            &resource_options_of(&loader.options),
+        );
+        options.package_resources = loader.options.package_resources.clone();
+        options.extension_source_resources = loader.options.extension_source_resources.clone();
+        options
+    }
+
+    fn reload_with_options(&self, options: crate::resources::ResourceLoaderOptions, previous_defaults: &[String]) {
         self.sync_queue_modes();
         {
             let services = self.services();
             let mut loader = services.resources();
-            let mut options = super::services::resource_loader_options(
-                &services.cwd,
-                &services.agent_dir,
-                services.settings.as_ref(),
-                &resource_options_of(&loader.options),
-            );
-            options.package_resources = packages.unwrap_or_else(|| loader.options.package_resources.clone());
             loader.options = options;
             loader.reload();
         }

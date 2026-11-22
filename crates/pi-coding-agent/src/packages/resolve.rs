@@ -9,7 +9,7 @@ use super::glob::expand_package_glob;
 use super::manifest::{NATIVE_MANIFEST_ENTRY, native_commands, read_pi_manifest};
 use super::npm::installed_npm_matches;
 use super::settings_ops::package_source_text;
-use super::source::{LocalSource, ParsedSource, parse_source};
+use super::source::{ParsedSource, parse_source};
 use super::{MissingSourceAction, MissingSourceHandler, PackageInstallFailure, PackageManager};
 use crate::resources::discovery::{
     LocalResourceOptions, ResourceAccumulator, collect_resource_files, resolve_local_resources,
@@ -302,6 +302,13 @@ impl PackageManager {
         on_missing: Option<&MissingSourceHandler>,
     ) -> anyhow::Result<bool> {
         if self.is_offline() {
+            if scope == SourceScope::Temporary {
+                self.record_install_failure(
+                    source,
+                    scope,
+                    &anyhow::anyhow!("no matching cached package in offline mode"),
+                );
+            }
             return Ok(false);
         }
         if let Some(handler) = on_missing {
@@ -363,7 +370,7 @@ impl PackageManager {
                 }
                 ParsedSource::Local(local) => {
                     let base = self.base_dir_for_scope(resolved_scope)?;
-                    resolve_local_package(acc, local, filter, metadata, &base);
+                    resolve_local_package(acc, &local.path, filter, metadata, &base);
                     continue;
                 }
                 ParsedSource::Npm(npm) => {
@@ -410,14 +417,14 @@ impl PackageManager {
 
 /// A local file loads as one extension; a directory follows package discovery, and a
 /// directory without resources loads as one extension.
-fn resolve_local_package(
+pub(crate) fn resolve_local_package(
     acc: &mut ResourceAccumulator,
-    source: &LocalSource,
+    source: &str,
     filter: Option<&PackageFilter>,
     mut metadata: PathMetadata,
     base: &Path,
 ) {
-    let resolved = crate::resources::paths::resolve_path(&source.path, base);
+    let resolved = crate::resources::paths::resolve_path(source, base);
     match file_kind(&resolved) {
         Some((true, _)) => {
             metadata.base_dir = resolved.parent().map(Path::to_path_buf);
