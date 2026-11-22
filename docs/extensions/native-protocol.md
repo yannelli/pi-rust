@@ -105,6 +105,7 @@ Params:
 - `toolResultExpander`
 - `providerAuth`: the `before_provider_auth` event. See [pi-rust events](#pi-rust-events).
 - `contextEvents`: see [Events](#events).
+- `compactionInstructions`: a `session_before_compact` result can have `customInstructions`. See [Events](#events).
 
 Older hosts send no `features`. Treat a missing list as empty.
 
@@ -189,7 +190,7 @@ When pi does not send `context`, a handler can ask for it with `event.context` a
 | --- | --- |
 | `tool_call` | `{ block, reason }` |
 | `input` | `{ action: "transform", text }` |
-| `session_before_compact` | `{ compaction }` or `{ cancel: true }` |
+| `session_before_compact` | `{ compaction }`, `{ customInstructions }` (pi-rust only), or `{ cancel: true }` |
 | `message_end` | `{ message }` |
 | `context` | `{ messages }` |
 | `agent_before_settle` | `{ entries, continue }` |
@@ -206,6 +207,8 @@ How each event uses a patch:
 | All other events, including `message_display`, `input`, `turn_end`, `agent_before_settle`, `cache_warming_decision`, `resources_discover`, `user_bash`, `project_trust`, `mcp_elicitation`, `mcp_elicitation_result`, and `session_before_*` | pi reads only `result`; a patch has no effect. |
 
 pi builds no result for `before_agent_start`: a built `systemPrompt` would replace the whole system prompt.
+
+A `session_before_compact` result with `customInstructions` and no `compaction` sets the instructions of pi's summary for that compaction. The text replaces `event.customInstructions` (the text of `/compact <text>`), so add to that text to keep it. When several handlers return a result, pi uses the last one. A result with `customInstructions` and no `compaction` keeps the `compaction` of an earlier result.
 
 A `resources_discover` result can also have `contextEntries` (pi-rust only): entries such as agent configs that pi lists in the system prompt or defers to `tool_search`. See [Deferred context](../../crates/pi-coding-agent/docs/deferred-context.md#extension-api-context-entries).
 

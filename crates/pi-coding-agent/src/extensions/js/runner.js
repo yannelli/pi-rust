@@ -23,6 +23,11 @@ function restoreSystemMessages(current, visible, returned) {
 
 const SESSION_BEFORE = new Set(["session_before_switch", "session_before_fork", "session_before_compact", "session_before_tree"]);
 
+/** pi-rust: a `session_before_compact` result with only `customInstructions` keeps an earlier handler's compaction. */
+function keepsCompaction(type, earlier, later) {
+	return type === "session_before_compact" && earlier?.compaction !== undefined && later.compaction === undefined && later.customInstructions !== undefined;
+}
+
 function isUserBashResult(value) {
 	if (typeof value !== "object" || value === null) return false;
 	const hasOperations = value.operations !== undefined;
@@ -156,7 +161,7 @@ export class Runner {
 				try {
 					const handlerResult = await handler(event, ctx);
 					if (SESSION_BEFORE.has(event.type) && handlerResult) {
-						result = handlerResult;
+						result = keepsCompaction(event.type, result, handlerResult) ? { ...handlerResult, compaction: result.compaction } : handlerResult;
 						if (result.cancel) return result;
 					}
 				} catch (error) {

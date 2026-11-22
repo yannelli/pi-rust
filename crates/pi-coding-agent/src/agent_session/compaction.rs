@@ -17,6 +17,13 @@ use crate::compaction::{
 use crate::session::NewCompaction;
 use crate::virtual_models::is_virtual_model;
 
+/// What `session_before_compact` handlers decided.
+enum BeforeCompact {
+    /// pi writes the summary, with the instructions a handler set in place of the caller's.
+    Summarize(Option<String>),
+    Supplied(Box<CompactionResult>),
+}
+
 /// Upstream `CompactionPreparation` JSON.
 fn preparation_json(preparation: &CompactionPreparation) -> serde_json::Value {
     let ops = &preparation.file_ops;
@@ -126,10 +133,11 @@ impl AgentSession {
         from_extension: &mut bool,
     ) -> anyhow::Result<CompactionResult> {
         let hooked = self.before_compact(preparation, instructions, reason, will_retry, &cancel).await?;
-        *from_extension = hooked.is_some();
+        *from_extension = matches!(hooked, BeforeCompact::Supplied(_));
         let mut result = match hooked {
-            Some(result) => result,
-            None => {
+            BeforeCompact::Supplied(result) => *result,
+            BeforeCompact::Summarize(replaced) => {
+                let instructions = replaced.as_deref().or(instructions);
                 let (model, options) =
                     self.summarization_options(model, cancel.clone(), SummarizationSource::Compaction(reason)).await?;
                 summarize_compaction(preparation, &model, instructions, &options).await?
@@ -166,7 +174,8 @@ impl AgentSession {
         Ok(result)
     }
 
-    /// `session_before_compact`: an error when a handler cancelled, a compaction one supplied.
+    /// `session_before_compact`: an error when a handler cancelled, else a compaction one supplied
+    /// or the `customInstructions` (pi-rust only) one set.
     async fn before_compact(
         &self,
         preparation: &CompactionPreparation,
@@ -174,10 +183,10 @@ impl AgentSession {
         reason: CompactionReason,
         will_retry: bool,
         cancel: &CancellationToken,
-    ) -> anyhow::Result<Option<CompactionResult>> {
+    ) -> anyhow::Result<BeforeCompact> {
         let Some(runner) = self.extension_runner().filter(|runner| runner.has_handlers("session_before_compact"))
         else {
-            return Ok(None);
+            return Ok(BeforeCompact::Summarize(None));
         };
         let branch: Vec<serde_json::Value> = {
             let session = self.session_manager();
@@ -200,15 +209,17 @@ impl AgentSession {
             anyhow::bail!("Compaction cancelled");
         }
         let compaction = &result["compaction"];
-        let Some(summary) = compaction["summary"].as_str() else { return Ok(None) };
-        Ok(Some(CompactionResult {
+        let Some(summary) = compaction["summary"].as_str() else {
+            return Ok(BeforeCompact::Summarize(result["customInstructions"].as_str().map(str::to_string)));
+        };
+        Ok(BeforeCompact::Supplied(Box::new(CompactionResult {
             summary: summary.to_string(),
             first_kept_entry_id: compaction["firstKeptEntryId"].as_str().unwrap_or_default().to_string(),
             tokens_before: compaction["tokensBefore"].as_u64().unwrap_or(preparation.tokens_before),
             estimated_tokens_after: None,
             usage: serde_json::from_value(compaction["usage"].clone()).unwrap_or_default(),
             details: compaction.get("details").filter(|details| !details.is_null()).cloned(),
-        }))
+        })))
     }
 
     /// `session_compact_failed` for extensions.
