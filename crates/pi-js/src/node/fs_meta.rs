@@ -59,12 +59,38 @@ fn fchmod(file: &File, mode: u32) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         file.set_permissions(fs::Permissions::from_mode(mode))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let file = attribute_handle(file)?;
+        let mut permissions = file.metadata()?.permissions();
+        permissions.set_readonly(mode & 0o200 == 0);
+        file.set_permissions(permissions)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let mut permissions = file.metadata()?.permissions();
         permissions.set_readonly(mode & 0o200 == 0);
         file.set_permissions(permissions)
     }
+}
+
+/// A second handle with attribute access, as libuv opens for `fchmod`: a descriptor opened
+/// read-only or write-only lacks one of the rights.
+#[cfg(windows)]
+fn attribute_handle(file: &File) -> io::Result<File> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_ATTRIBUTES, ReOpenFile,
+    };
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    // SAFETY: `file` keeps its handle open for the duration of the call.
+    let handle = unsafe { ReOpenFile(file.as_raw_handle(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES, share, 0) };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: ReOpenFile returned a new handle that nothing else owns.
+    Ok(unsafe { File::from_raw_handle(handle) })
 }
 
 fn fchown(file: &File, uid: u32, gid: u32) -> io::Result<()> {

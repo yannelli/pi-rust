@@ -209,6 +209,28 @@ async fn fs_fd_metadata_and_lutimes_match_node() {
     assert_same_keys(&actual, &serde_json::from_str(FS_META_EXPECTED).unwrap());
 }
 
+// libuv reopens the handle for attribute access, so a read-only descriptor can change the mode.
+#[tokio::test]
+async fn fchmod_changes_the_mode_through_a_read_only_descriptor() {
+    const SCRIPT: &str = r#"
+const fs = require("fs");
+fs.writeFileSync("ro.txt", "x");
+const fd = fs.openSync("ro.txt", "r");
+fs.fchmodSync(fd, 0o444);
+const readOnly = (fs.statSync("ro.txt").mode & 0o777).toString(8);
+await new Promise((resolve, reject) => fs.fchmod(fd, 0o600, (error) => error ? reject(error) : resolve()));
+const writable = (fs.statSync("ro.txt").mode & 0o777).toString(8);
+const text = fs.readFileSync(fd, "utf8");
+fs.closeSync(fd);
+fs.writeFileSync("ro.txt", "y");
+return [readOnly, writable, text, fs.readFileSync("ro.txt", "utf8")];
+"#;
+    let (_dir, root) = tempdir();
+    let (runtime, _capture) = runtime(&root);
+    let writable = if cfg!(windows) { "666" } else { "600" };
+    assert_eq!(run_cjs(&runtime, &root, SCRIPT).await, serde_json::json!(["444", writable, "x", "y"]));
+}
+
 // statfs, openAsBlob, and FileHandle.readableWebStream. Expected values come from Node 22.
 const FS_STATFS_SCRIPT: &str = r##"
 const fs = require("fs");
