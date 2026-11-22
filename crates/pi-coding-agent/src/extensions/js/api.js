@@ -125,6 +125,7 @@ export function createRuntime(onChange) {
 		staleMessage: undefined,
 		flagValues: new Map(),
 		pendingProviders: [],
+		pendingNativeProviders: [],
 		pendingVirtualModels: [],
 		providers: new Map(),
 		virtualModels: new Map(),
@@ -173,9 +174,24 @@ export function createRuntime(onChange) {
 				});
 			}
 		},
+		/** Upstream `registerNativeProvider`: reported as unsupported where a registration error shows. */
+		registerNativeProvider(provider, extensionPath) {
+			const pending = { id: provider?.id, extensionPath };
+			if (runtime.modelsBound) runtime.rejectNativeProvider(pending);
+			else runtime.pendingNativeProviders.push(pending);
+		},
+		rejectNativeProvider({ id, extensionPath }) {
+			const error =
+				typeof id === "string" && id.trim()
+					? `Provider ${id}: registering a provider object is not supported in pi-rust. ` +
+						`Use pi.registerProvider("${id}", { api, baseUrl, models, streamSimple }).`
+					: "Provider id must not be empty.";
+			call("error", { extensionPath, event: "register_provider", error, stack: null });
+		},
 		unregisterProvider(name) {
 			runtime.providers.delete(name);
 			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending !== name);
+			runtime.pendingNativeProviders = runtime.pendingNativeProviders.filter((pending) => pending.id !== name);
 			if (runtime.modelsBound) runtime.modelCall("provider.unregister", name);
 		},
 		registerVirtualModel(definition, extensionPath) {
@@ -212,6 +228,7 @@ export function createRuntime(onChange) {
 		bindModels() {
 			runtime.modelsBound = true;
 			for (const name of runtime.pendingProviders.splice(0)) runtime.applyProvider(name);
+			for (const pending of runtime.pendingNativeProviders.splice(0)) runtime.rejectNativeProvider(pending);
 			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
 		},
 		/** Rust bound the session: actions go to it. */
@@ -444,8 +461,7 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			assertActive();
 			if (typeof providerOrName !== "string") {
 				const provider = providerOrName;
-				if (!provider?.id) throw new Error("Provider config is required when registering by name");
-				apply(() => runtime.registerProvider(provider.id, { ...provider, native: true }, extension.path));
+				apply(() => runtime.registerNativeProvider(provider, extension.path));
 				return;
 			}
 			if (!config) throw new Error("Provider config is required when registering by name");
