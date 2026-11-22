@@ -41,6 +41,8 @@ An edit result stores the numbered display diff in `details.diff` and the unifie
 
 The check on 2026-11-21 used jsdiff 8.0.4 and found no differences in 7,935 line cases and 30,225 word cases.
 
+For the large inputs, append `--large /path/to/sqlite3.c` to the oracle script command. Use the SQLite 3.46.0 amalgamation to reproduce the measured case. The script reverses eight 1,024-line blocks and edits each block in a 131,072-line extract. The other three pairs cover a 3 MiB line, mixed line endings, and embedded NUL bytes. Run the same Rust oracle test on the resulting JSON.
+
 ## License
 
 jsdiff uses the BSD 3-Clause license, and the port is a close translation of its code, so pi-rust keeps the notice. The notice is in [LICENSE-jsdiff](../../crates/pi-durable/src/diff/LICENSE-jsdiff) and in the README license table. `about.hbs` adds it to `THIRD-PARTY-LICENSES.md`, which goes into each release archive.

@@ -5,9 +5,9 @@ import { readFileSync } from "node:fs";
 import { createRequire, stripTypeScriptTypes } from "node:module";
 import { join, resolve } from "node:path";
 
-const [upstream, jsdiffDir] = process.argv.slice(2);
-if (!upstream || !jsdiffDir) {
-	console.error("usage: node scripts/jsdiff-oracle.mjs <upstream pi checkout> <jsdiff package dir>");
+const [upstream, jsdiffDir, mode, sqlitePath] = process.argv.slice(2);
+if (!upstream || !jsdiffDir || (mode !== undefined && (mode !== "--large" || !sqlitePath))) {
+	console.error("usage: node scripts/jsdiff-oracle.mjs <upstream pi checkout> <jsdiff package dir> [--large <sqlite3.c>]");
 	process.exit(2);
 }
 const Diff = createRequire(import.meta.url)(resolve(jsdiffDir));
@@ -100,8 +100,30 @@ function wordCases() {
 	return cases;
 }
 
+function largeFileCases(path) {
+	const source = readFileSync(path, "utf8").split("\n").slice(0, 131072);
+	if (source.length < 131072) throw Error("--large needs a sqlite3.c with at least 131072 lines");
+	const blocks = Array.from({ length: 8 }, (_, i) => {
+		const start = 24000 + i * 1024;
+		const block = source.slice(start, start + 1024);
+		block[512] += " /* moved */";
+		return block;
+	});
+	const moved = source.slice();
+	moved.splice(24000, 8192, ...blocks.reverse().flat());
+	const long = "0123456789abcdef".repeat(196608);
+	return [
+		[long + "a\n", long + "b\n", 4],
+		[source.join("\n") + "\n", moved.join("\n") + "\n", 4],
+		["a\r\nb\nc\r\nd\n", "a\r\nb\r\nc\nd\n", 4],
+		["a\0b\n\0c\0", "a\0b\n\0d\0", 4],
+	];
+}
+
 const kind = (part) => (part.added ? "Added" : part.removed ? "Removed" : "Equal");
-const lines = lineCases().map(([old, next, context]) => {
+const inputs = lineCases();
+if (mode === "--large") inputs.push(...largeFileCases(sqlitePath));
+const lines = inputs.map(([old, next, context]) => {
 	const { diff, firstChangedLine } = generateDiffString(old, next, context);
 	return { old, new: next, context, diff, first: firstChangedLine ?? null, patch: patch(old, next, context) };
 });
