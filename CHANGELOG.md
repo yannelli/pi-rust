@@ -2,6 +2,18 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.24] - 2026-11-21
+
+### Fixed
+
+- **extensions:** keep registering provider objects that carry a string api ([a9086b1](https://github.com/yannelli/pi-rust/commit/a9086b1978d31caa7da85e8c28e338091a5c89c1))
+- **tui:** stop long markdown paragraphs from panicking or rendering blank ([3e0bc96](https://github.com/yannelli/pi-rust/commit/3e0bc967959c7ba5043291d8a7ddbb355dce4da6))
+- **extensions:** report provider objects in registerProvider as unsupported ([5ceab7c](https://github.com/yannelli/pi-rust/commit/5ceab7c18b3bbc6704e1010f3fbb0bee72a8cb4d))
+- **extensions:** give AgentSession.prototype the upstream public methods ([5ae9fb6](https://github.com/yannelli/pi-rust/commit/5ae9fb6d77c068ff25649988c2c29edea2d48d85))
+- **extensions:** re-export the default exports of typebox, typebox/compile, and typebox/value ([a27f3c5](https://github.com/yannelli/pi-rust/commit/a27f3c55d0e0ce42fbbcc949c01216d14a33cb57))
+- **extensions:** let built-in tool factories run during and after loading ([1d65288](https://github.com/yannelli/pi-rust/commit/1d652888ebd05f8b2f182c64f39620709dace0a1))
+- **pi-js:** define the File global, as Node 20 and later do ([82ba783](https://github.com/yannelli/pi-rust/commit/82ba7838e37791013748944701f5ab8ccccdb131))
+
 ## [0.12.23] - 2026-11-21
 
 ### Added
