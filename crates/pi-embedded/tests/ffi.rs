@@ -4,6 +4,7 @@
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -73,4 +74,37 @@ fn c_abi_runs_commands_and_answers_host_calls() {
     unsafe { pi_embedded_free(handle) };
     // SAFETY: reclaims the context leaked above after the bridge stopped.
     drop(unsafe { Box::from_raw(context as *mut Mutex<Sender<Call>>) });
+}
+
+/// A host whose callback keeps running after it has delivered the call.
+struct SlowHost {
+    delivered: Mutex<Sender<()>>,
+    returned: AtomicBool,
+}
+
+extern "C" fn on_slow_call(context: *mut c_void, _: *const c_char, _: *const c_char, _: *const c_char) {
+    // SAFETY: `context` is the `SlowHost` leaked by the test until the bridge is freed.
+    let host = unsafe { &*(context as *const SlowHost) };
+    let _ = host.delivered.lock().unwrap().send(());
+    std::thread::sleep(Duration::from_millis(100));
+    host.returned.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn free_waits_for_a_running_callback_before_the_host_releases_its_context() {
+    let (sender, delivered) = channel();
+    let host = Box::into_raw(Box::new(SlowHost { delivered: Mutex::new(sender), returned: AtomicBool::new(false) }));
+    let handle = pi_embedded_new(on_slow_call, on_event, host as *mut c_void);
+    assert!(!handle.is_null());
+    let (id, method, payload) = (c("c1"), c("configure"), c(r#"{"capabilities":[]}"#));
+    // SAFETY: a live handle and NUL-terminated strings.
+    unsafe { pi_embedded_command(handle, id.as_ptr(), method.as_ptr(), payload.as_ptr()) };
+    delivered.recv_timeout(Duration::from_secs(10)).expect("a command result");
+
+    // SAFETY: the handle is not used again.
+    unsafe { pi_embedded_free(handle) };
+    // SAFETY: the context is still allocated; the check comes before it is released.
+    assert!(unsafe { &*host }.returned.load(Ordering::SeqCst), "a callback ran after pi_embedded_free returned");
+    // SAFETY: no callback runs any more, so the context can be reclaimed.
+    drop(unsafe { Box::from_raw(host) });
 }
