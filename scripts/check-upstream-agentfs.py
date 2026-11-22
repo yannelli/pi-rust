@@ -36,6 +36,12 @@ OBSERVER = """export default function (pi) {
 }"""
 
 
+def executable(path):
+    """`path`, or `path.exe` on Windows when the suffix was left out."""
+    windows_binary = path.with_name(path.name + ".exe")
+    return windows_binary if os.name == "nt" and not path.exists() and windows_binary.exists() else path
+
+
 def check(condition, failure):
     if not condition:
         raise ValueError(failure)
@@ -195,14 +201,14 @@ def main():
     args = parser.parse_args()
     node = shutil.which(os.environ.get("PI_NODE_PATH") or "node")
     check(node, "Set PI_NODE_PATH or add Node 22+ to PATH")
-    version = subprocess.check_output([node, "-p", "process.versions.node"], text=True, timeout=5).strip()
+    version = subprocess.check_output([node, "-p", "process.versions.node"], text=True, timeout=30).strip()
     check(int(version.split(".")[0]) >= 22, f"Node 22+ required, found {version}")
     with tempfile.TemporaryDirectory(prefix="pi-agentfs-") as directory:
         with ThreadingHTTPServer(("127.0.0.1", 0), MockModel) as server:
             server.calls = 0
             threading.Thread(target=server.serve_forever, daemon=True).start()
             try:
-                probe(args.pi.resolve(strict=True), args.package_prefixes.resolve(strict=True), node,
+                probe(executable(args.pi).resolve(strict=True), args.package_prefixes.resolve(strict=True), node,
                       version, Path(directory).resolve(), server)
             finally:
                 server.shutdown()

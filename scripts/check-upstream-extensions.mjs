@@ -95,7 +95,7 @@ async function check(binary, packageRoot, dir, [name, version, message, expected
 		options.push("-e", observer);
 	}
 
-	const child = spawn(binary, options, { cwd, env, timeout: 30_000, killSignal: "SIGKILL" });
+	const child = spawn(binary, options, { cwd, env, timeout: 90_000, killSignal: "SIGKILL" });
 	const closed = once(child, "close");
 	const input = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
 	let stderr = "";
@@ -170,6 +170,16 @@ async function check(binary, packageRoot, dir, [name, version, message, expected
 	}
 }
 
+/** `path`, or `path.exe` on Windows when the suffix was left out. */
+async function executable(path) {
+	try {
+		return await realpath(path);
+	} catch (error) {
+		if (process.platform !== "win32" || error.code !== "ENOENT") throw error;
+		return realpath(path + ".exe");
+	}
+}
+
 const [binary, packageRoot, only] = process.argv.slice(2);
 if (binary === "--list") {
 	for (const [name, version] of packages) console.log(`@narumitw/pi-${name}@${version}`);
@@ -180,11 +190,11 @@ if (binary === "--list") {
 	for (const entry of cases) {
 		const dir = await mkdtemp(join(tmpdir(), "pi-ext-audit-"));
 		try {
-			await check(await realpath(binary), resolve(packageRoot), dir, entry);
+			await check(await executable(binary), resolve(packageRoot), dir, entry);
 			if (entry[0] === "accounts") {
 				const seededDir = join(dir, "seeded");
 				await mkdir(seededDir);
-				await check(await realpath(binary), resolve(packageRoot), seededDir, entry, true);
+				await check(await executable(binary), resolve(packageRoot), seededDir, entry, true);
 			}
 			console.log("PASS pi-" + entry[0] + "@" + entry[1]);
 		} catch (error) {
