@@ -10,8 +10,8 @@ use pi_ai::auth::{AuthOverrides, Credential, ModelAuth, ProviderEnv};
 use pi_ai::http::{HttpSettings, configure_http};
 use pi_ai::identity::opencode_session_header;
 use pi_ai::{
-    ClientIdentity, Model, StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, UserAgentMode, error_stream,
-    event_channel, pi_attribution,
+    ClientIdentity, Model, StopReason, StreamOptions, ThinkingBudgets, ThinkingLevel, UPSTREAM_PI_VERSION,
+    UserAgentMode, detailed_user_agent, error_stream, event_channel, pi_attribution, pi_rust_attribution,
 };
 
 use super::model_runtime::ModelRuntime;
@@ -20,6 +20,7 @@ use crate::app::{format_no_api_key_found_message, oauth_failed_message};
 use crate::platform::VERSION;
 use crate::platform::telemetry::install_telemetry_enabled;
 use crate::settings::SettingsManager;
+use crate::settings::schema::ProviderIdentity;
 use crate::virtual_models::{ModelRouteReason, is_virtual_model};
 
 /// Auth for one request: the model with its resolved base URL, plus key, headers, and env.
@@ -89,13 +90,22 @@ pub async fn request_auth_as(
 #[path = "auth_kimi_tests.rs"]
 mod kimi_tests;
 
-/// How pi's requests identify it to providers (upstream `getClientIdentity`): a detailed
-/// `User-Agent` with pi's version, and attribution to pi-rust while install telemetry is enabled.
+/// How pi's requests identify it to providers (upstream `getClientIdentity`), chosen by the
+/// `providerIdentity` setting: a detailed `User-Agent` of pi at the upstream parity version or of
+/// pi-rust at its own version. Requests are attributed to that app only while install telemetry is on.
 pub fn client_identity(settings: &SettingsManager) -> ClientIdentity {
-    ClientIdentity {
-        user_agent: Some(UserAgentMode::Detailed),
-        version: Some(VERSION.to_string()),
-        attribution: Some(install_telemetry_enabled(settings).then(pi_attribution)),
+    let attributed = install_telemetry_enabled(settings);
+    match settings.provider_identity() {
+        ProviderIdentity::Pi => ClientIdentity {
+            user_agent: Some(UserAgentMode::Detailed),
+            version: Some(UPSTREAM_PI_VERSION.to_string()),
+            attribution: Some(attributed.then(pi_attribution)),
+        },
+        ProviderIdentity::PiRust => ClientIdentity {
+            user_agent: Some(UserAgentMode::Custom(detailed_user_agent("pi-rust", VERSION))),
+            version: Some(VERSION.to_string()),
+            attribution: Some(attributed.then(pi_rust_attribution)),
+        },
     }
 }
 
@@ -246,8 +256,12 @@ mod request_settings_tests {
     }
 
     fn captured(model: &Model, telemetry: bool, configured: &[(&str, &str)]) -> StreamOptions {
+        captured_with(model, json!({"enableInstallTelemetry": telemetry}), configured)
+    }
+
+    fn captured_with(model: &Model, settings: serde_json::Value, configured: &[(&str, &str)]) -> StreamOptions {
         let auth = ModelAuth { api_key: Some("test-api-key".into()), headers: headers(configured), base_url: None };
-        let settings = SettingsManager::in_memory(json!({"enableInstallTelemetry": telemetry}));
+        let settings = SettingsManager::in_memory(settings);
         let mut options = StreamOptions { session_id: Some("s-1".into()), ..Default::default() };
         apply_request_settings(&mut options, &RequestAuth { model: model.clone(), auth, env: None }, &settings);
         options
@@ -282,16 +296,45 @@ mod request_settings_tests {
         let identity = captured(&openrouter, true, &[]).identity;
         let expected = ClientIdentity {
             user_agent: Some(UserAgentMode::Detailed),
-            version: Some(VERSION.into()),
+            version: Some(UPSTREAM_PI_VERSION.into()),
             attribution: Some(Some(pi_attribution())),
         };
         assert_eq!(identity.as_ref(), Some(&expected));
         let names: Vec<_> = attribution_headers(&openrouter, identity.as_ref()).into_iter().map(|h| h.0).collect();
         assert_eq!(names, ["HTTP-Referer", "X-OpenRouter-Title", "X-OpenRouter-Categories"]);
+        let user_agent = pi_ai::format_user_agent(identity.as_ref());
+        assert_eq!(user_agent, detailed_user_agent("pi", UPSTREAM_PI_VERSION));
         let nim = model("nvidia", "https://integrate.api.nvidia.com/v1");
         let off = captured(&nim, false, &[]).identity;
         assert_eq!(off, Some(ClientIdentity { attribution: Some(None), ..expected }));
         assert!(attribution_headers(&nim, off.as_ref()).is_empty());
+    }
+
+    #[test]
+    fn identifies_pi_rust_when_chosen_and_attributes_it_only_while_telemetry_is_enabled() {
+        if std::env::var("PI_TELEMETRY").is_ok() {
+            return;
+        }
+        let openrouter = model("openrouter", "https://openrouter.ai/api/v1");
+        let settings = |telemetry| json!({"providerIdentity": "pi-rust", "enableInstallTelemetry": telemetry});
+        let identity = captured_with(&openrouter, settings(true), &[]).identity;
+        let user_agent = detailed_user_agent("pi-rust", VERSION);
+        let expected = ClientIdentity {
+            user_agent: Some(UserAgentMode::Custom(user_agent.clone())),
+            version: Some(VERSION.into()),
+            attribution: Some(Some(pi_rust_attribution())),
+        };
+        assert_eq!(identity.as_ref(), Some(&expected));
+        assert_eq!(pi_ai::format_user_agent(identity.as_ref()), user_agent);
+        assert!(user_agent.starts_with(&format!("pi-rust/{VERSION} (")), "{user_agent}");
+        let headers = attribution_headers(&openrouter, identity.as_ref());
+        assert!(headers.contains(&("HTTP-Referer", "https://pi-rust.com".into())), "{headers:?}");
+        assert!(headers.contains(&("X-OpenRouter-Title", "pi-rust".into())), "{headers:?}");
+        let off = captured_with(&openrouter, settings(false), &[]).identity;
+        assert_eq!(off, Some(ClientIdentity { attribution: Some(None), ..expected }));
+        assert!(attribution_headers(&openrouter, off.as_ref()).is_empty());
+        let unset = captured_with(&openrouter, json!({"providerIdentity": "pi-rust"}), &[]).identity;
+        assert!(attribution_headers(&openrouter, unset.as_ref()).is_empty());
     }
 
     #[test]

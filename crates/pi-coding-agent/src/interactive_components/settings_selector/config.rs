@@ -13,7 +13,7 @@ use crate::settings::defaults::{
 };
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
-    SessionShareDestination, TreeFilterMode, TuiMode,
+    ProviderIdentity, SessionShareDestination, TreeFilterMode, TuiMode,
 };
 use crate::settings::{ProviderRetryConfig, QuietStartup, RetryConfig};
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
@@ -108,6 +108,7 @@ pub struct SettingsConfig {
     pub show_cache_miss_notices: bool,
     pub collapse_changelog: bool,
     pub enable_install_telemetry: bool,
+    pub provider_identity: ProviderIdentity,
     pub double_escape_action: DoubleEscapeAction,
     pub tree_filter_mode: TreeFilterMode,
     pub show_hardware_cursor: bool,
@@ -171,6 +172,7 @@ impl Default for SettingsConfig {
             show_cache_miss_notices: false,
             collapse_changelog: false,
             enable_install_telemetry: false,
+            provider_identity: ProviderIdentity::Pi,
             double_escape_action: DoubleEscapeAction::Tree,
             tree_filter_mode: TreeFilterMode::Default,
             show_hardware_cursor: false,
@@ -238,6 +240,7 @@ pub struct SettingsCallbacks {
     pub on_show_cache_miss_notices_change: OnChange<bool>,
     pub on_collapse_changelog_change: OnChange<bool>,
     pub on_enable_install_telemetry_change: OnChange<bool>,
+    pub on_provider_identity_change: OnChange<ProviderIdentity>,
     pub on_double_escape_action_change: OnChange<DoubleEscapeAction>,
     pub on_tree_filter_mode_change: OnChange<TreeFilterMode>,
     pub on_show_hardware_cursor_change: OnChange<bool>,
@@ -296,6 +299,7 @@ impl Default for SettingsCallbacks {
             on_show_cache_miss_notices_change: ignore(),
             on_collapse_changelog_change: ignore(),
             on_enable_install_telemetry_change: ignore(),
+            on_provider_identity_change: ignore(),
             on_double_escape_action_change: ignore(),
             on_tree_filter_mode_change: ignore(),
             on_show_hardware_cursor_change: ignore(),

@@ -110,6 +110,7 @@ impl InteractiveMode {
             show_cache_miss_notices: settings.show_cache_miss_notices(),
             collapse_changelog: settings.collapse_changelog(),
             enable_install_telemetry: settings.enable_install_telemetry(),
+            provider_identity: settings.provider_identity(),
             double_escape_action: settings.double_escape_action(),
             tree_filter_mode: settings.tree_filter_mode(),
             show_hardware_cursor: settings.show_hardware_cursor(),
@@ -277,6 +278,7 @@ impl InteractiveMode {
             on_enable_install_telemetry_change: on!(weak, |mode, enabled| {
                 mode.settings().set_enable_install_telemetry(enabled)
             }),
+            on_provider_identity_change: on!(weak, |mode, identity| mode.settings().set_provider_identity(identity)),
             on_double_escape_action_change: on!(weak, |mode, action| mode.settings().set_double_escape_action(action)),
             on_tree_filter_mode_change: on!(weak, |mode, filter| mode.settings().set_tree_filter_mode(filter)),
             on_show_hardware_cursor_change: on!(weak, |mode, enabled| {

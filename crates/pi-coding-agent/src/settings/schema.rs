@@ -301,6 +301,17 @@ pub enum SessionShareDestination {
     Radius,
 }
 
+/// `providerIdentity` (pi-rust extension): how model provider requests identify the client.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderIdentity {
+    /// Upstream pi at the version this port has parity with, attributed to pi.dev.
+    #[default]
+    Pi,
+    /// pi-rust at its own version, attributed to pi-rust.com.
+    PiRust,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheWarmingMode {
@@ -429,6 +440,8 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_install_telemetry: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_identity: Option<ProviderIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_analytics: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tracking_id: Option<String>,
@@ -545,6 +558,7 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "npmCommand",
     "collapseChangelog",
     "enableInstallTelemetry",
+    "providerIdentity",
     "enableAnalytics",
     "trackingId",
     "packages",
