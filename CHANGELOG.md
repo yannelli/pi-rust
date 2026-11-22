@@ -2,6 +2,16 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.22] - 2026-11-21
+
+### Added
+
+- **extensions:** let session_before_compact set customInstructions ([cc19fa4](https://github.com/yannelli/pi-rust/commit/cc19fa4a38332c7eb576a36b83916d4a324ddb8d))
+
+### Fixed
+
+- **extensions:** keep an earlier compaction under an instructions-only session_before_compact result ([2b88685](https://github.com/yannelli/pi-rust/commit/2b886857399ada77c067caf0b42b12c096fd3326))
+
 ## [0.12.21] - 2026-11-20
 
 ### Changed
