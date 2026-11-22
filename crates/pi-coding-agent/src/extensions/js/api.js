@@ -183,7 +183,7 @@ export function createRuntime(onChange) {
 		rejectNativeProvider({ id, extensionPath }) {
 			const error =
 				typeof id === "string" && id.trim()
-					? `Provider ${id}: registering a provider object is not supported in pi-rust. ` +
+					? `Provider ${id}: registering a Provider object with getModels() is not supported in pi-rust. ` +
 						`Use pi.registerProvider("${id}", { api, baseUrl, models, streamSimple }).`
 					: "Provider id must not be empty.";
 			call("error", { extensionPath, event: "register_provider", error, stack: null });
@@ -461,7 +461,14 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			assertActive();
 			if (typeof providerOrName !== "string") {
 				const provider = providerOrName;
-				apply(() => runtime.registerNativeProvider(provider, extension.path));
+				// An upstream `Provider` lists its models with `getModels()`; an object with a string `api`
+				// is a provider config, which pi-rust registers under its `id`.
+				if (typeof provider?.getModels === "function" && typeof provider.api !== "string") {
+					apply(() => runtime.registerNativeProvider(provider, extension.path));
+					return;
+				}
+				if (!provider?.id) throw new Error("Provider config is required when registering by name");
+				apply(() => runtime.registerProvider(provider.id, { ...provider, native: true }, extension.path));
 				return;
 			}
 			if (!config) throw new Error("Provider config is required when registering by name");
