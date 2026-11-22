@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::edit_diff::{
-    Edit, apply_edits_to_normalized_content, detect_line_ending, generate_diff_string, generate_unified_patch,
-    normalize_to_lf, restore_line_endings,
+    Edit, EditDiff, apply_edits_to_normalized_content, detect_line_ending, generate_edit_diff, normalize_to_lf,
+    restore_line_endings,
 };
 use super::file_changes::{SharedFileChangeRecorder, write_recorded};
 use super::mutation_queue::with_file_mutation_queue;
@@ -177,8 +177,7 @@ impl AgentTool for EditTool {
                 .map_err(|e| anyhow!("Could not write file: {path}. {e}"))?;
             check_aborted(&cancel)?;
 
-            let (diff, first_changed_line) = generate_diff_string(&base, &new_content);
-            let patch = generate_unified_patch(path, &base, &new_content);
+            let EditDiff { diff, first_changed_line, patch } = generate_edit_diff(path, &base, &new_content);
             let mut details = json!({ "diff": diff, "patch": patch });
             if let Some(line) = first_changed_line {
                 details["firstChangedLine"] = json!(line);

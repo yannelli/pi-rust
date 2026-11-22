@@ -311,6 +311,7 @@ These parts come from other projects. Each release archive includes their licens
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
 | Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
 | Settings JSON error messages | [V8](https://github.com/v8/v8), BSD 3-Clause | [`LICENSE-v8-settings`](crates/pi-coding-agent/src/settings/LICENSE-v8) |
+| Edit diffs and the word highlights of the diff view | [jsdiff](https://github.com/kpdecker/jsdiff) 8.0.4 by Kevin Decker, BSD 3-Clause | [`LICENSE-jsdiff`](crates/pi-durable/src/diff/LICENSE-jsdiff) |
 | File locks and exit cleanup for `ProjectTrustStore` | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) 4.1.2 and [signal-exit](https://github.com/tapjs/signal-exit) 3.0.7 | [`LICENSE-proper-lockfile`](crates/pi-coding-agent/src/extensions/js/LICENSE-proper-lockfile), [`LICENSE-signal-exit`](crates/pi-coding-agent/src/extensions/js/LICENSE-signal-exit) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.

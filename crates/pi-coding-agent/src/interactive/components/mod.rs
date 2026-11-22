@@ -14,6 +14,7 @@ pub mod summaries;
 pub mod themed_text;
 pub mod tool_execution;
 pub mod visual_truncate;
+mod word_diff;
 
 use pi_tui::ComponentRef;
 use pi_tui::components::markdown::MarkdownTheme;

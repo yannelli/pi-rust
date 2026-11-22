@@ -21,6 +21,7 @@
 | Task | Read |
 | --- | --- |
 | Find gaps, port upstream commits | [docs/parity/README.md](docs/parity/README.md) |
+| Change edit diffs, patches, or word highlights | [docs/parity/jsdiff.md](docs/parity/jsdiff.md) |
 | Close a Node API gap in the extension runtime | [docs/agents/node-compat.md](docs/agents/node-compat.md) |
 | Diagnose a CI failure or a flaky test | [docs/agents/ci-triage.md](docs/agents/ci-triage.md) |
 | Ship a change | [docs/agents/release.md](docs/agents/release.md) |
