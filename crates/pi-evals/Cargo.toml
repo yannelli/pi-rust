@@ -22,7 +22,7 @@ anyhow.workspace = true
 futures.workspace = true
 pi-ai.workspace = true
 pi-coding-agent = { path = "../pi-coding-agent" }
-pi-tui = { path = "../pi-tui" }
+pi-tui = { path = "../pi-tui", features = ["testing"] }
 regex = "1"
 ring.workspace = true
 serde.workspace = true
