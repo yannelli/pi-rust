@@ -62,7 +62,7 @@ PI_EXTENSION_RUNTIME=node cargo test -p pi-coding-agent --test integration --no-
 cargo test -p pi-js --test integration -- node_backend:: node_backend_modules:: node_backend_transport::
 ```
 
-The pi-js Node tests skip with a message when no Node 22 or later is found. Set `PI_NODE_PATH` to test one Node version, for example Node 22.14 for the `module.register` path.
+The pi-js Node tests skip with a message when no Node 22 or later is found. Set `PI_NODE_PATH` to test one Node version, for example Node 22.14 for the `module.register` path. CI runs them on Node 22. Node 22 (libuv 1.51) and pi-js truncate `fs.utimes` times to microseconds, and Node 24 (libuv 1.52.1) keeps nanoseconds. Thus `node_fs::file_and_directory_timestamps_match_real_node` compares whole microseconds when the control is Node 23 or later.
 
 ## Close a gap
 
