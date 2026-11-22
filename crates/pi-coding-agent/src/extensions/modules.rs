@@ -81,6 +81,12 @@ fn reexport(key: &str) -> VirtualModule {
     VirtualModule::Source(format!("export * from \"{}\";\n", path(key)))
 }
 
+/// `reexport` plus the default export, for modules that have one (TypeBox `Type`, `Compile`, `Value`).
+fn reexport_with_default(key: &str) -> VirtualModule {
+    let target = path(key);
+    VirtualModule::Source(format!("export * from \"{target}\";\nexport {{ default }} from \"{target}\";\n"))
+}
+
 /// The module Rust imports to create the host object.
 pub(crate) fn host_specifier() -> String {
     path("host/host.js")
@@ -100,9 +106,9 @@ pub(crate) fn source_files() -> Vec<(PathBuf, String)> {
 /// Modules for the canonical names; [`pi_js::VIRTUAL_MODULE_ALIASES`] maps the others to these.
 pub(crate) fn virtual_modules() -> VirtualModules {
     let mut modules = VirtualModules::new();
-    modules.insert("typebox", reexport("typebox/build/index.mjs"));
-    modules.insert("typebox/compile", reexport("typebox/build/compile/index.mjs"));
-    modules.insert("typebox/value", reexport("typebox/build/value/index.mjs"));
+    modules.insert("typebox", reexport_with_default("typebox/build/index.mjs"));
+    modules.insert("typebox/compile", reexport_with_default("typebox/build/compile/index.mjs"));
+    modules.insert("typebox/value", reexport_with_default("typebox/build/value/index.mjs"));
     modules.insert("@earendil-works/pi-tui", reexport("pi-tui/src/index.ts"));
     modules.insert("@earendil-works/pi-ai/compat", reexport("host/ai.js"));
     modules.insert("@earendil-works/pi-ai/models", reexport("host/models.js"));
