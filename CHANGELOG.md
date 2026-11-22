@@ -2,6 +2,55 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.26] - 2026-11-22
+
+### Changed
+
+- **tui:** build vt100 only for tests behind a testing feature ([fe1b431](https://github.com/yannelli/pi-rust/commit/fe1b4312df5f725665a0b17cd0e3827d00921609))
+
+### Fixed
+
+- **js:** move node:crypto RSA to rsa 0.10 and match Node 22 RSA errors ([a2c5da9](https://github.com/yannelli/pi-rust/commit/a2c5da9df62868b7e5b7acfeaa678587d8ca3c9c))
+
+## [0.12.25] - 2026-11-22
+
+### Added
+
+- **extensions:** let generateDiffString and generateUnifiedPatch take contextLines ([9d8a2ec](https://github.com/yannelli/pi-rust/commit/9d8a2ec9fe0cc0857ce4796e7902570f57b080b3))
+
+### Changed
+
+- **diff:** write diff and patch lines without the format machinery ([56bd35e](https://github.com/yannelli/pi-rust/commit/56bd35e81797a874a88ee3f36fc71856245c3a73))
+- **diff:** find line changes on byte offsets and line ids ([e6b7698](https://github.com/yannelli/pi-rust/commit/e6b76980cf44a3437444c70667baf85434fdb76a))
+- **diff:** keep the last run of a search path out of the arena ([3876d3d](https://github.com/yannelli/pi-rust/commit/3876d3d57cc1e9e176f6c5f97f573bec4042741e))
+- **diff:** tokenize words in one pass ([a69d523](https://github.com/yannelli/pi-rust/commit/a69d52316b895f25ff4ce252f5502557b950dffb))
+- **diff:** take the line-number width from the line tokens ([6d0afde](https://github.com/yannelli/pi-rust/commit/6d0afde0d71a827e06fbefb3be8e10cae6146499))
+
+### Fixed
+
+- **diff:** report upstream jsdiff version changes ([3f85d1b](https://github.com/yannelli/pi-rust/commit/3f85d1bb981a48ba1f476fe3949dc03465e6c832))
+- **diff:** run edit diffs and live previews off the caller thread ([887c7d9](https://github.com/yannelli/pi-rust/commit/887c7d9f8adb30333412dace656fdb5216cb0929))
+- **diff:** hash line ids with the std hasher and fall back on huge inputs ([d2eb952](https://github.com/yannelli/pi-rust/commit/d2eb952ee54628442fb68b4389b756c0cebe6fd5))
+- **edit:** replace similar with a port of jsdiff ([d592349](https://github.com/yannelli/pi-rust/commit/d592349287e273fa5c2f96ee5fbaf9ce7943458c))
+
+## [0.12.24] - 2026-11-21
+
+### Fixed
+
+- **extensions:** keep registering provider objects that carry a string api ([a9086b1](https://github.com/yannelli/pi-rust/commit/a9086b1978d31caa7da85e8c28e338091a5c89c1))
+- **tui:** stop long markdown paragraphs from panicking or rendering blank ([3e0bc96](https://github.com/yannelli/pi-rust/commit/3e0bc967959c7ba5043291d8a7ddbb355dce4da6))
+- **extensions:** report provider objects in registerProvider as unsupported ([5ceab7c](https://github.com/yannelli/pi-rust/commit/5ceab7c18b3bbc6704e1010f3fbb0bee72a8cb4d))
+- **extensions:** give AgentSession.prototype the upstream public methods ([5ae9fb6](https://github.com/yannelli/pi-rust/commit/5ae9fb6d77c068ff25649988c2c29edea2d48d85))
+- **extensions:** re-export the default exports of typebox, typebox/compile, and typebox/value ([a27f3c5](https://github.com/yannelli/pi-rust/commit/a27f3c55d0e0ce42fbbcc949c01216d14a33cb57))
+- **extensions:** let built-in tool factories run during and after loading ([1d65288](https://github.com/yannelli/pi-rust/commit/1d652888ebd05f8b2f182c64f39620709dace0a1))
+- **pi-js:** define the File global, as Node 20 and later do ([82ba783](https://github.com/yannelli/pi-rust/commit/82ba7838e37791013748944701f5ab8ccccdb131))
+
+## [0.12.23] - 2026-11-21
+
+### Added
+
+- **coding-agent:** send /bug reports to pi-rust.com instead of upstream ([2e63d36](https://github.com/yannelli/pi-rust/commit/2e63d36a490ce32f29507ce0681d020f0d4884a9))
+
 ## [0.12.22] - 2026-11-21
 
 ### Added

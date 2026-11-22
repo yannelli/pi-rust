@@ -11,10 +11,19 @@ export function unsupportedFunction(member) {
 	};
 }
 
-export function unsupportedClass(member) {
-	return class {
+/** `methods` exist on the prototype, so extensions that read or wrap them load; calls throw. */
+export function unsupportedClass(member, methods = []) {
+	const Unsupported = class {
 		constructor() {
 			throw unsupportedError(member);
 		}
 	};
+	for (const method of methods) {
+		Object.defineProperty(Unsupported.prototype, method, {
+			value: unsupportedFunction(`${member}.${method}`),
+			writable: true,
+			configurable: true,
+		});
+	}
+	return Unsupported;
 }

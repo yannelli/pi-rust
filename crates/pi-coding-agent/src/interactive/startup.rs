@@ -249,7 +249,7 @@ impl InteractiveMode {
         if let Some(crash) = crate::diagnostics::crash_log::take_unnotified_crash(&crashes, now) {
             let app = crate::resources::brand::APP_NAME;
             self.show_warning(&format!(
-                "{app} crashed on {} ({}). Run /bug to report it; the crash details are attached automatically.",
+                "{app} crashed on {} ({}). Run /bug to report it; the report includes the crash details.",
                 crash.timestamp, crash.message
             ));
         }

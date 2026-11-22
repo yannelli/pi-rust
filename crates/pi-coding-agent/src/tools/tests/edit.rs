@@ -108,10 +108,10 @@ async fn identical_replacement_is_error() {
 
 #[test]
 fn display_diff_elides_distant_context() {
-    use crate::tools::edit_diff::generate_diff_string;
+    use crate::tools::edit_diff::{DEFAULT_CONTEXT_LINES, generate_diff_string};
     let old: String = (1..=20).map(|i| format!("l{i}\n")).collect();
     let new = old.replace("l10\n", "X\n");
-    let (diff, first) = generate_diff_string(&old, &new);
+    let (diff, first) = generate_diff_string(&old, &new, DEFAULT_CONTEXT_LINES);
     assert_eq!(first, Some(10));
     let lines: Vec<&str> = diff.lines().collect();
     assert_eq!(lines.first(), Some(&"    ..."));

@@ -30,6 +30,7 @@ pub struct Synced {
     pub branch: String,
     pub commit: String,
     pub version: String,
+    pub jsdiff_version: String,
     pub date: String,
 }
 
@@ -47,6 +48,7 @@ impl Synced {
             branch: field("branch")?,
             commit: field("syncedCommit")?,
             version: field("syncedVersion")?,
+            jsdiff_version: field("jsdiffVersion")?,
             date: field("syncedOn")?,
         })
     }
@@ -111,6 +113,7 @@ pub fn build_report(upstream: &Path, root: &Path, synced: &Synced, allowlist: Al
         module_exports::section(upstream, root),
         node::section(root),
         sections::packages(upstream, root),
+        sections::jsdiff(upstream, &synced.jsdiff_version),
     ];
     Report::new(header(upstream, synced), sections, allowlist)
 }

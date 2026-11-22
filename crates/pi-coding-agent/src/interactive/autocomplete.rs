@@ -24,7 +24,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("export", "Export session (HTML default, or specify path: .html/.jsonl/.md)", None),
     ("import", "Import a JSONL session, preserving its ID and working directory", None),
     ("share", "Share session via a Radius artifact or a GitHub gist", None),
-    ("bug", "Report a bug to the Pi developers", Some("<description>")),
+    ("bug", "Report a bug to the pi-rust developers", Some("<description>")),
     ("copy", "Copy last agent message to clipboard", None),
     ("name", "Set session display name", None),
     ("session", "Show session info and stats", None),

@@ -93,6 +93,8 @@ pub(crate) fn dispatch_sync(runner: &ExtensionRunner, args: Vec<HostValue>) -> R
         "inline" => super::ops_sdk_resources::child_sync(runner, name, &args),
         "ui" => ops_ui::sync(runner, name, &args),
         "modelRuntime" => super::ops_sdk_model_runtime::sync(runner, name, &args),
+        // Tool factories such as `createReadTool` run during loading, before a session binds.
+        "tools" if name == "builtinInfo" => ops_host::sync(runner, &op, &args),
         "ctx" | "session" | "models" | "tools" | "tool" | "action" | "prompt" | "boundary" => {
             ops_session::sync(runner, &op, &args)
         }

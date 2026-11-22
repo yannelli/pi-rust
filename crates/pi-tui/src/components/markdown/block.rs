@@ -198,7 +198,7 @@ impl Lexer {
             }
             lines.drain(..index);
             let current_raw = current.join("\n");
-            let setext = rules::BLOCKQUOTE_SETEXT.replace_all(&current_raw, "\n    $1");
+            let setext = rules::replace_all(&rules::BLOCKQUOTE_SETEXT, &current_raw, "\n    $1");
             let current_text = rules::BLOCKQUOTE_PREFIX.replace_all(&setext, "").into_owned();
             raw = if raw.is_empty() { current_raw.clone() } else { format!("{raw}\n{current_raw}") };
             text = if text.is_empty() { current_text.clone() } else { format!("{text}\n{current_text}") };

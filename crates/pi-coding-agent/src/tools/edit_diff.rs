@@ -1,8 +1,12 @@
 //! Matching, replacement, and diff helpers for the edit tool.
 
 use anyhow::{anyhow, bail};
-use similar::{DiffOp, TextDiff};
 use unicode_normalization::UnicodeNormalization;
+
+pub use pi_durable::diff::{
+    DEFAULT_CONTEXT_LINES, EditDiff, generate_diff_string, generate_edit_diff, generate_unified_patch,
+};
+pub use pi_durable::tools::edit_diff::spawn_edit_diff;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -212,113 +216,4 @@ pub fn apply_edits_to_normalized_content(
         bail!("No changes made to {path}. The replacements produced identical content.");
     }
     Ok((content.to_string(), new_content))
-}
-
-/// Standard unified patch with file headers.
-pub fn generate_unified_patch(path: &str, old: &str, new: &str) -> String {
-    let diff = TextDiff::from_lines(old, new);
-    let body = diff.unified_diff().context_radius(4).to_string();
-    format!("--- {path}\n+++ {path}\n{body}")
-}
-
-enum PartKind {
-    Equal,
-    Removed,
-    Added,
-}
-
-fn diff_parts<'a>(old: &'a str, new: &'a str) -> Vec<(PartKind, Vec<&'a str>)> {
-    let diff = TextDiff::from_lines(old, new);
-    let old_lines: Vec<&str> = old.split_inclusive('\n').map(|l| l.strip_suffix('\n').unwrap_or(l)).collect();
-    let new_lines: Vec<&str> = new.split_inclusive('\n').map(|l| l.strip_suffix('\n').unwrap_or(l)).collect();
-    let mut parts = Vec::new();
-    for op in diff.ops() {
-        match *op {
-            DiffOp::Equal { old_index, len, .. } => {
-                parts.push((PartKind::Equal, old_lines[old_index..old_index + len].to_vec()))
-            }
-            DiffOp::Delete { old_index, old_len, .. } => {
-                parts.push((PartKind::Removed, old_lines[old_index..old_index + old_len].to_vec()))
-            }
-            DiffOp::Insert { new_index, new_len, .. } => {
-                parts.push((PartKind::Added, new_lines[new_index..new_index + new_len].to_vec()))
-            }
-            DiffOp::Replace { old_index, old_len, new_index, new_len } => {
-                parts.push((PartKind::Removed, old_lines[old_index..old_index + old_len].to_vec()));
-                parts.push((PartKind::Added, new_lines[new_index..new_index + new_len].to_vec()));
-            }
-        }
-    }
-    parts
-}
-
-/// Display diff with line numbers and 4 lines of context. Returns the diff and the first
-/// changed line number in the new file.
-pub fn generate_diff_string(old: &str, new: &str) -> (String, Option<usize>) {
-    const CONTEXT: usize = 4;
-    let parts = diff_parts(old, new);
-    let width = old.split('\n').count().max(new.split('\n').count()).to_string().len();
-    let mut out: Vec<String> = Vec::new();
-    let (mut old_num, mut new_num) = (1usize, 1usize);
-    let mut last_was_change = false;
-    let mut first_changed = None;
-    let skip_marker = format!(" {} ...", " ".repeat(width));
-
-    for (i, (kind, lines)) in parts.iter().enumerate() {
-        match kind {
-            PartKind::Added | PartKind::Removed => {
-                first_changed.get_or_insert(new_num);
-                for line in lines {
-                    if matches!(kind, PartKind::Added) {
-                        out.push(format!("+{new_num:>width$} {line}"));
-                        new_num += 1;
-                    } else {
-                        out.push(format!("-{old_num:>width$} {line}"));
-                        old_num += 1;
-                    }
-                }
-                last_was_change = true;
-            }
-            PartKind::Equal => {
-                let next_is_change = parts.get(i + 1).is_some_and(|(k, _)| !matches!(k, PartKind::Equal));
-                let n = lines.len();
-                let mut shown: Vec<(usize, usize)> = Vec::new();
-                if last_was_change && next_is_change {
-                    if n <= CONTEXT * 2 {
-                        shown.push((0, n));
-                    } else {
-                        shown.push((0, CONTEXT));
-                        shown.push((n - CONTEXT, n));
-                    }
-                } else if last_was_change {
-                    shown.push((0, CONTEXT.min(n)));
-                } else if next_is_change {
-                    shown.push((n.saturating_sub(CONTEXT), n));
-                }
-                let mut cursor = 0;
-                for (start, end) in shown {
-                    if start > cursor {
-                        out.push(skip_marker.clone());
-                        old_num += start - cursor;
-                        new_num += start - cursor;
-                    }
-                    for line in &lines[start..end] {
-                        out.push(format!(" {old_num:>width$} {line}"));
-                        old_num += 1;
-                        new_num += 1;
-                    }
-                    cursor = end;
-                }
-                if cursor < n {
-                    if last_was_change || next_is_change {
-                        out.push(skip_marker.clone());
-                    }
-                    old_num += n - cursor;
-                    new_num += n - cursor;
-                }
-                last_was_change = false;
-            }
-        }
-    }
-    (out.join("\n"), first_changed)
 }

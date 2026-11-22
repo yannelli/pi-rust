@@ -2,16 +2,20 @@
 //! computed from the file once the arguments are complete; the result adds the applied diff when
 //! it differs from the preview, or the error.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use pi_tui::components::StyleFn;
 use pi_tui::{BoxComponent, ComponentRef, Container, Spacer, Text, component};
 use serde_json::Value;
+use tokio::sync::oneshot;
 
 use super::{ToolRenderContext, ToolRenderer, ToolResultView, path_arg, render_tool_path};
 use crate::interactive::components::diff::render_diff;
 use crate::theme::{ThemeBg, ThemeColor, theme};
-use crate::tools::edit_diff::{Edit, apply_edits_to_normalized_content, generate_diff_string, normalize_to_lf};
+use crate::tools::edit_diff::{
+    DEFAULT_CONTEXT_LINES, Edit, apply_edits_to_normalized_content, generate_diff_string, normalize_to_lf,
+};
 use crate::tools::path_utils::resolve_to_cwd;
 
 pub struct EditRenderer;
@@ -26,8 +30,32 @@ pub enum EditPreview {
 #[derive(Default)]
 struct EditState {
     preview: Option<EditPreview>,
+    pending: Option<oneshot::Receiver<EditPreview>>,
     args_key: Option<String>,
     settled_error: bool,
+}
+
+fn start_preview(
+    path: String,
+    edits: Vec<Edit>,
+    cwd: PathBuf,
+    redraw: Arc<dyn Fn() + Send + Sync>,
+) -> oneshot::Receiver<EditPreview> {
+    let (send, receive) = oneshot::channel();
+    let work = move || {
+        if !send.is_closed() {
+            let preview = compute_edits_diff(&path, &edits, &cwd);
+            if send.send(preview).is_ok() {
+                redraw();
+            }
+        }
+    };
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn_blocking(work);
+    } else {
+        std::thread::spawn(work);
+    }
+    receive
 }
 
 fn preview_input(args: &Value) -> Option<(String, Vec<Edit>)> {
@@ -77,7 +105,7 @@ pub fn compute_edits_diff(path: &str, edits: &[Edit], cwd: &Path) -> EditPreview
     let content = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
     match apply_edits_to_normalized_content(&normalize_to_lf(content), edits, path) {
         Ok((base, new)) => {
-            let (diff, first_changed_line) = generate_diff_string(&base, &new);
+            let (diff, first_changed_line) = generate_diff_string(&base, &new, DEFAULT_CONTEXT_LINES);
             EditPreview::Diff { diff, first_changed_line }
         }
         Err(error) => EditPreview::Error(error.to_string()),
@@ -94,10 +122,9 @@ fn header_bg(state: &EditState) -> StyleFn {
     std::rc::Rc::new(move |text: &str| theme().bg(bg, text))
 }
 
-fn build_call(state: &EditState, context: &ToolRenderContext<'_>) -> ComponentRef {
+fn build_call(state: &EditState, path: &str, output_pad: usize) -> ComponentRef {
     let theme = theme();
-    let mut header = BoxComponent::new(context.output_pad, 1, Some(header_bg(state)));
-    let path = render_tool_path(path_arg(context.args).as_deref(), context.cwd, None);
+    let mut header = BoxComponent::new(output_pad, 1, Some(header_bg(state)));
     let title = format!("{} {path}", theme.fg(ThemeColor::ToolTitle, &theme.bold("edit")));
     header.add_child(component(Text::new(&title, 0, 0)));
     if let Some(preview) = &state.preview {
@@ -115,20 +142,34 @@ impl ToolRenderer for EditRenderer {
     fn render_call(&self, context: &mut ToolRenderContext<'_>) -> ComponentRef {
         let input = preview_input(context.args);
         let key = input.as_ref().map(args_key);
-        let (args_complete, cwd) = (context.args_complete, context.cwd.to_path_buf());
+        let redraw = context.state.redraw_from_worker.clone();
         let state = context.state.get_or_default::<EditState>();
         if state.args_key != key {
             *state = EditState { args_key: key, ..EditState::default() };
         }
-        if args_complete
-            && state.preview.is_none()
-            && let Some((path, edits)) = &input
-        {
-            state.preview = Some(compute_edits_diff(path, edits, &cwd));
+        if let Some(pending) = &mut state.pending {
+            match pending.try_recv() {
+                Ok(preview) => {
+                    state.preview = Some(preview);
+                    state.pending = None;
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {
+                    state.preview = Some(EditPreview::Error("Edit preview worker stopped.".into()));
+                    state.pending = None;
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {}
+            }
         }
-        let state = context.state.get_or_default::<EditState>();
-        let snapshot = EditState { preview: state.preview.clone(), args_key: None, settled_error: state.settled_error };
-        build_call(&snapshot, context)
+        if context.args_complete && state.preview.is_none() && state.pending.is_none() {
+            if let Some((path, edits)) = input {
+                match redraw {
+                    Some(redraw) => state.pending = Some(start_preview(path, edits, context.cwd.to_owned(), redraw)),
+                    None => state.preview = Some(compute_edits_diff(&path, &edits, context.cwd)),
+                }
+            }
+        }
+        let path = render_tool_path(path_arg(context.args).as_deref(), context.cwd, None);
+        build_call(state, &path, context.output_pad)
     }
 
     fn render_result(&self, result: &ToolResultView, context: &mut ToolRenderContext<'_>) -> Option<ComponentRef> {
@@ -137,13 +178,13 @@ impl ToolRenderer for EditRenderer {
         let first_changed_line = result.detail("firstChangedLine").and_then(Value::as_u64).map(|line| line as usize);
         let state = context.state.get_or_default::<EditState>();
         if let Some(diff) = result_diff {
+            state.pending = None;
             state.preview = Some(EditPreview::Diff { diff: diff.to_string(), first_changed_line });
         }
         state.settled_error = is_error;
-        let preview = state.preview.clone();
         let output = if is_error {
             let text = result.raw_text();
-            let preview_error = match &preview {
+            let preview_error = match &state.preview {
                 Some(EditPreview::Error(error)) => Some(error.as_str()),
                 _ => None,
             };

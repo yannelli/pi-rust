@@ -1,7 +1,7 @@
 //! Colored diffs with intra-line highlighting (upstream `components/diff.ts`). Input lines look
 //! like `+12 text`, `-12 text`, ` 12 text`, or `     ...`, as the edit tool writes them.
 
-use similar::{ChangeTag, TextDiff};
+use pi_durable::diff::{ChangeKind, diff_words, leading_whitespace};
 
 use crate::theme::{ThemeColor, theme};
 
@@ -46,53 +46,34 @@ fn replace_tabs(text: &str) -> String {
 }
 
 fn split_leading_whitespace(value: &str) -> (&str, &str) {
-    let trimmed = value.trim_start();
-    (&value[..value.len() - trimmed.len()], trimmed)
+    let leading = leading_whitespace(value);
+    (leading, &value[leading.len()..])
 }
 
 /// Word-level diff of one changed line, with the changed words shown inverted.
 fn render_intra_line_diff(old: &str, new: &str) -> (String, String) {
-    let diff = TextDiff::from_words(old, new);
-    let mut parts: Vec<(ChangeTag, String)> = Vec::new();
-    for change in diff.iter_all_changes() {
-        match parts.last_mut() {
-            Some((tag, value)) if *tag == change.tag() => value.push_str(change.value()),
-            _ => parts.push((change.tag(), change.value().to_string())),
-        }
-    }
     let theme = theme();
     let (mut removed, mut added) = (String::new(), String::new());
     let (mut first_removed, mut first_added) = (true, true);
-    for (tag, value) in parts {
-        match tag {
-            ChangeTag::Delete => {
-                let mut value = value.as_str();
-                if first_removed {
-                    let (leading, rest) = split_leading_whitespace(value);
-                    removed.push_str(leading);
-                    value = rest;
-                    first_removed = false;
-                }
-                if !value.is_empty() {
-                    removed.push_str(&theme.inverse(value));
-                }
-            }
-            ChangeTag::Insert => {
-                let mut value = value.as_str();
-                if first_added {
-                    let (leading, rest) = split_leading_whitespace(value);
-                    added.push_str(leading);
-                    value = rest;
-                    first_added = false;
-                }
-                if !value.is_empty() {
-                    added.push_str(&theme.inverse(value));
-                }
-            }
-            ChangeTag::Equal => {
+    for (kind, value) in diff_words(old, new) {
+        let (line, first) = match kind {
+            ChangeKind::Removed => (&mut removed, &mut first_removed),
+            ChangeKind::Added => (&mut added, &mut first_added),
+            ChangeKind::Equal => {
                 removed.push_str(&value);
                 added.push_str(&value);
+                continue;
             }
+        };
+        let mut value = value.as_str();
+        if *first {
+            let (leading, rest) = split_leading_whitespace(value);
+            line.push_str(leading);
+            value = rest;
+            *first = false;
+        }
+        if !value.is_empty() {
+            line.push_str(&theme.inverse(value));
         }
     }
     (removed, added)

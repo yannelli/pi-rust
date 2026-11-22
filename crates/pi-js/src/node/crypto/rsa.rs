@@ -1,12 +1,10 @@
-//! RSA over the RustCrypto `rsa` crate (generation, encryption, decryption, PSS and PKCS#1 v1.5
-//! signatures), with ring signing the PKCS#1 v1.5 and digest-length PSS cases it supports.
-//! Private-key operations in `rsa` run with blinding (RUSTSEC-2023-0071 has no fixed release).
+//! RSA over the RustCrypto `rsa` crate, with ring signing the PKCS#1 v1.5 and digest-length PSS
+//! cases it supports. Private-key operations in `rsa` run blinded on constant-time arithmetic.
 
+use getrandom::SysRng;
 use rsa::hazmat::{rsa_decrypt_and_check, rsa_encrypt};
-use rsa::rand_core::OsRng;
-use rsa::sha2::digest::DynDigest;
 use rsa::traits::{PrivateKeyParts, PublicKeyParts};
-use rsa::{BigUint, Oaep, Pkcs1v15Encrypt, Pkcs1v15Sign, Pss, RsaPrivateKey, RsaPublicKey};
+use rsa::{BoxedUint, Oaep, Pkcs1v15Encrypt, Pkcs1v15Sign, PrivateKey, Pss, PublicKey};
 
 use super::der::{self, fixed};
 use super::digest;
@@ -24,8 +22,8 @@ const MAX_BITS: usize = 16384;
 
 #[derive(Clone)]
 pub(super) struct Rsa {
-    pub public: RsaPublicKey,
-    pub private: Option<Box<RsaPrivateKey>>,
+    pub public: PublicKey,
+    pub private: Option<Box<PrivateKey>>,
 }
 
 fn openssl(code: &str, reason: &str, id: &str) -> JsError {
@@ -34,6 +32,18 @@ fn openssl(code: &str, reason: &str, id: &str) -> JsError {
 
 fn too_large() -> JsError {
     openssl("DATA_TOO_LARGE_FOR_KEY_SIZE", "data too large for key size", "0200006E")
+}
+
+fn too_small() -> JsError {
+    openssl("DATA_TOO_SMALL_FOR_KEY_SIZE", "data too small for key size", "0200007A")
+}
+
+fn too_large_for_modulus() -> JsError {
+    openssl("DATA_TOO_LARGE_FOR_MODULUS", "data too large for modulus", "02000084")
+}
+
+fn digest_too_big() -> JsError {
+    openssl("DIGEST_TOO_BIG_FOR_RSA_KEY", "digest too big for rsa key", "02000070")
 }
 
 fn bad_key() -> JsError {
@@ -60,17 +70,37 @@ fn digest_oid(hash: &str) -> Result<&'static str, JsError> {
     })
 }
 
-fn dyn_digest(hash: &str) -> Result<Box<dyn DynDigest + Send + Sync>, JsError> {
-    use rsa::sha2::Digest;
-    Ok(match hash {
-        "md5" => Box::new(md5::Md5::new()),
-        "sha1" => Box::new(sha1::Sha1::new()),
-        "sha256" => Box::new(rsa::sha2::Sha256::new()),
-        "sha384" => Box::new(rsa::sha2::Sha384::new()),
-        "sha512" => Box::new(rsa::sha2::Sha512::new()),
-        "sha512-256" => Box::new(rsa::sha2::Sha512_256::new()),
-        _ => return Err(invalid_digest(hash)),
-    })
+/// Evaluates `$body`, a `Result`, with the type `$D` set to the digest that `$hash` names.
+macro_rules! with_digest {
+    ($hash:expr, $D:ident => $body:expr) => {
+        match $hash {
+            "md5" => {
+                type $D = md5::Md5;
+                $body
+            }
+            "sha1" => {
+                type $D = sha1::Sha1;
+                $body
+            }
+            "sha256" => {
+                type $D = rsa::sha2::Sha256;
+                $body
+            }
+            "sha384" => {
+                type $D = rsa::sha2::Sha384;
+                $body
+            }
+            "sha512" => {
+                type $D = rsa::sha2::Sha512;
+                $body
+            }
+            "sha512-256" => {
+                type $D = rsa::sha2::Sha512_256;
+                $body
+            }
+            hash => Err(invalid_digest(hash)),
+        }
+    };
 }
 
 /// PKCS#1 v1.5 signature padding with the DigestInfo prefix for `hash`.
@@ -79,17 +109,9 @@ fn pkcs1_scheme(hash: &str, hash_len: usize) -> Result<Pkcs1v15Sign, JsError> {
     Ok(Pkcs1v15Sign { hash_len: Some(hash_len), prefix: info[..info.len() - hash_len].into() })
 }
 
-fn pss_scheme(hash: &str, salt_len: usize) -> Result<Pss, JsError> {
-    Ok(Pss { blinded: false, digest: dyn_digest(hash)?, salt_len })
-}
-
-fn oaep_scheme(hash: &str, label: &[u8]) -> Result<Oaep, JsError> {
-    let label = match std::str::from_utf8(label) {
-        Ok("") => None,
-        Ok(text) => Some(text.to_string()),
-        Err(_) => return Err(JsError::unsupported("crypto RSA-OAEP labels that are not UTF-8")),
-    };
-    Ok(Oaep { digest: dyn_digest(hash)?, mgf_digest: dyn_digest(hash)?, label })
+/// PSS padding; verification with a `None` salt length takes any salt length.
+fn pss<D: rsa::sha2::Digest>(salt_len: Option<usize>) -> Pss<D> {
+    Pss { blinded: true, digest: D::new(), salt_len }
 }
 
 fn ring_algorithm(hash: &str, padding: i32) -> Option<&'static dyn ring::signature::RsaEncoding> {
@@ -105,51 +127,63 @@ fn ring_algorithm(hash: &str, padding: i32) -> Option<&'static dyn ring::signatu
     })
 }
 
-fn big(bytes: &[u8]) -> BigUint {
-    BigUint::from_bytes_be(bytes)
+/// A big-endian integer with the smallest precision that holds it.
+fn big(bytes: &[u8]) -> BoxedUint {
+    match bytes.iter().position(|byte| *byte != 0) {
+        Some(start) => BoxedUint::from_be_slice_vartime(&bytes[start..]),
+        None => BoxedUint::from_be_slice_vartime(&[0]),
+    }
+}
+
+fn trimmed(value: &BoxedUint) -> Vec<u8> {
+    value.to_be_bytes_trimmed_vartime().into_vec()
 }
 
 impl Rsa {
     pub(super) fn from_public(n: &[u8], e: &[u8]) -> Result<Self, JsError> {
-        let public = RsaPublicKey::new_with_max_size(big(n), big(e), MAX_BITS).map_err(|_| bad_key())?;
+        let public = PublicKey::new_with_size_limits(big(n), big(e), 0..=MAX_BITS).map_err(|_| bad_key())?;
         Ok(Self { public, private: None })
     }
 
     /// A private key from `n`, `e`, `d`, `p`, and `q`; the CRT values are recomputed.
     pub(super) fn from_private(n: &[u8], e: &[u8], d: &[u8], p: &[u8], q: &[u8]) -> Result<Self, JsError> {
-        let private =
-            RsaPrivateKey::from_components(big(n), big(e), big(d), vec![big(p), big(q)]).map_err(|_| bad_key())?;
+        let (n, e, d, primes) = (big(n), big(e), big(d), vec![big(p), big(q)]);
+        // `from_components` refuses a prime wider than half the modulus, and Node takes such keys.
+        let private = match PrivateKey::from_components(n.clone(), e.clone(), d.clone(), primes.clone()) {
+            Err(rsa::Error::InvalidPrime) => PrivateKey::from_components_with_wide_primes(n, e, d, primes),
+            result => result,
+        }
+        .map_err(|_| bad_key())?;
         Ok(Self { public: private.to_public_key(), private: Some(Box::new(private)) })
     }
 
     pub(super) fn generate(bits: u64, e: u64) -> Result<Self, JsError> {
         if bits < 512 {
-            return Err(JsError::new("error:1C8000B3:Provider routines::key size too small")
-                .with_code("ERR_OSSL_KEY_SIZE_TOO_SMALL"));
+            return Err(JsError::new("error:1C8000AB:Provider routines::key size too small"));
         }
         if e < 3 || e % 2 == 0 {
-            return Err(JsError::new("error:1C80006B:Provider routines::invalid public exponent")
-                .with_code("ERR_OSSL_BAD_E_VALUE"));
+            return Err(JsError::new("error:020000B2:rsa routines::pub exponent out of range"));
         }
-        let private = RsaPrivateKey::new_with_exp(&mut OsRng, bits as usize, &BigUint::from(e))
+        // The checked `new_with_exp` refuses moduli under 1024 bits, and Node takes 512.
+        let private = PrivateKey::new_with_exp_unchecked(&mut SysRng, bits as usize, BoxedUint::from(e))
             .map_err(|error| JsError::new(format!("RSA key generation failed: {error}")))?;
         Ok(Self { public: private.to_public_key(), private: Some(Box::new(private)) })
     }
 
     pub(super) fn n(&self) -> Vec<u8> {
-        self.public.n().to_bytes_be()
+        self.public.n_bytes().into_vec()
     }
 
     pub(super) fn e(&self) -> Vec<u8> {
-        self.public.e().to_bytes_be()
+        self.public.e_bytes().into_vec()
     }
 
     pub(super) fn bits(&self) -> usize {
-        self.public.n().bits()
+        self.public.n().bit_width_vartime() as usize
     }
 
     pub(super) fn exponent(&self) -> String {
-        self.public.e().to_string()
+        num_bigint::BigUint::from_bytes_be(&self.e()).to_string()
     }
 
     fn size(&self) -> usize {
@@ -160,28 +194,24 @@ impl Rsa {
     pub(super) fn private_parts(&self) -> Option<[Vec<u8>; 8]> {
         let key = self.private.as_deref()?;
         let [p, q] = key.primes() else { return None };
-        let bytes = |value: &BigUint| value.to_bytes_be();
         Some([
             self.n(),
             self.e(),
-            bytes(key.d()),
-            bytes(p),
-            bytes(q),
-            bytes(key.dp()?),
-            bytes(key.dq()?),
-            bytes(&key.crt_coefficient()?),
+            trimmed(key.d()),
+            trimmed(p),
+            trimmed(q),
+            trimmed(key.dp()?),
+            trimmed(key.dq()?),
+            trimmed(&key.crt_coefficient()?),
         ])
     }
 
-    fn private_key(&self) -> Result<&RsaPrivateKey, JsError> {
+    fn private_key(&self) -> Result<&PrivateKey, JsError> {
         self.private.as_deref().ok_or_else(|| JsError::type_error("A private key is required"))
     }
 
     fn max_salt(&self, hash_len: usize) -> Result<usize, JsError> {
-        (self.bits() - 1)
-            .div_ceil(8)
-            .checked_sub(hash_len + 2)
-            .ok_or_else(|| openssl("KEY_SIZE_TOO_SMALL", "key size too small", "02000078"))
+        (self.bits() - 1).div_ceil(8).checked_sub(hash_len + 2).ok_or_else(too_large)
     }
 
     pub(super) fn sign(&self, hash: &str, data: &[u8], padding: i32, salt_length: i32) -> Result<Vec<u8>, JsError> {
@@ -198,20 +228,21 @@ impl Rsa {
                 return Ok(signature);
             }
         }
-        let result = if padding == PSS_PADDING {
-            let salt = match salt_length {
-                SALTLEN_DIGEST => hashed.len(),
-                length if length < 0 => self.max_salt(hashed.len())?,
-                length => length as usize,
-            };
-            if salt > self.max_salt(hashed.len())? {
-                return Err(too_large());
-            }
-            key.sign_with_rng(&mut OsRng, pss_scheme(hash, salt)?, &hashed)
-        } else {
-            key.sign_with_rng(&mut OsRng, pkcs1_scheme(hash, hashed.len())?, &hashed)
+        if padding != PSS_PADDING {
+            let scheme = pkcs1_scheme(hash, hashed.len())?;
+            return key.sign_with_rng(&mut SysRng, scheme, &hashed).map_err(|_| digest_too_big());
+        }
+        let salt = match salt_length {
+            SALTLEN_DIGEST => hashed.len(),
+            length if length < 0 => self.max_salt(hashed.len())?,
+            length => length as usize,
         };
-        result.map_err(|_| openssl("DIGEST_TOO_BIG_FOR_RSA_KEY", "digest too big for rsa key", "02000070"))
+        if salt > self.max_salt(hashed.len())? {
+            return Err(too_large());
+        }
+        with_digest!(hash, D => key
+            .sign_with_rng(&mut SysRng, pss::<D>(Some(salt)), &hashed)
+            .map_err(|_| digest_too_big()))
     }
 
     /// Check a signature; a negative PSS `salt_length` other than `SALTLEN_DIGEST` takes any salt length.
@@ -230,35 +261,38 @@ impl Rsa {
         if padding != PSS_PADDING {
             return Ok(self.public.verify(pkcs1_scheme(hash, hashed.len())?, &hashed, signature).is_ok());
         }
-        let check = |salt: usize| -> Result<bool, JsError> {
-            Ok(self.public.verify(pss_scheme(hash, salt)?, &hashed, signature).is_ok())
+        let salt = match salt_length {
+            SALTLEN_DIGEST => Some(hashed.len()),
+            length if length >= 0 => Some(length as usize),
+            _ => None,
         };
-        match salt_length {
-            SALTLEN_DIGEST => check(hashed.len()),
-            length if length >= 0 => check(length as usize),
-            _ => {
-                let Ok(max) = self.max_salt(hashed.len()) else { return Ok(false) };
-                let common = [hashed.len(), max];
-                for salt in common.into_iter().chain((0..=max).filter(|salt| !common.contains(salt))) {
-                    if salt <= max && check(salt)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-        }
+        with_digest!(hash, D => Ok(self.public.verify(pss::<D>(salt), &hashed, signature).is_ok()))
+    }
+
+    /// `data` as an integer below the modulus, at the modulus's precision as the raw operations require.
+    fn below_modulus(&self, data: &[u8]) -> Result<BoxedUint, JsError> {
+        let n = self.public.n();
+        BoxedUint::from_be_slice(data, n.bits_precision())
+            .ok()
+            .filter(|value| value < n.as_ref())
+            .ok_or_else(too_large_for_modulus)
+    }
+
+    /// `data` left-padded to the modulus length, after the range check that OpenSSL runs before it unpads.
+    fn ciphertext(&self, data: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.below_modulus(data)?;
+        Ok(fixed(data, self.size()))
     }
 
     fn raw_public(&self, data: &[u8]) -> Result<Vec<u8>, JsError> {
-        let value = rsa_encrypt(&self.public, &big(data))
-            .map_err(|_| openssl("DATA_TOO_LARGE_FOR_MODULUS", "data too large for modulus", "02000084"))?;
-        Ok(fixed(&value.to_bytes_be(), self.size()))
+        let value = rsa_encrypt(&self.public, &self.below_modulus(data)?).map_err(|_| too_large_for_modulus())?;
+        Ok(fixed(&value.to_be_bytes(), self.size()))
     }
 
     fn raw_private(&self, data: &[u8]) -> Result<Vec<u8>, JsError> {
-        let value = rsa_decrypt_and_check(self.private_key()?, Some(&mut OsRng), &big(data))
-            .map_err(|_| openssl("DATA_TOO_LARGE_FOR_MODULUS", "data too large for modulus", "02000084"))?;
-        Ok(fixed(&value.to_bytes_be(), self.size()))
+        let value = rsa_decrypt_and_check(self.private_key()?, Some(&mut SysRng), &self.below_modulus(data)?)
+            .map_err(|_| too_large_for_modulus())?;
+        Ok(fixed(&value.to_be_bytes(), self.size()))
     }
 
     /// `publicEncrypt` (`private == false`) or `privateEncrypt`.
@@ -271,17 +305,19 @@ impl Rsa {
         label: &[u8],
     ) -> Result<Vec<u8>, JsError> {
         match padding {
-            NO_PADDING if data.len() != self.size() => Err(too_large()),
+            NO_PADDING if data.len() < self.size() => Err(too_small()),
+            NO_PADDING if data.len() > self.size() => Err(too_large()),
             NO_PADDING if private => self.raw_private(data),
             NO_PADDING => self.raw_public(data),
-            OAEP_PADDING if !private => {
-                self.public.encrypt(&mut OsRng, oaep_scheme(oaep_hash, label)?, data).map_err(|_| too_large())
-            }
+            OAEP_PADDING if !private => with_digest!(oaep_hash, D => self
+                .public
+                .encrypt(&mut SysRng, Oaep::<D>::new_with_label(label), data)
+                .map_err(|_| too_large())),
             PKCS1_PADDING if private => self
                 .private_key()?
-                .sign_with_rng(&mut OsRng, Pkcs1v15Sign::new_unprefixed(), data)
+                .sign_with_rng(&mut SysRng, Pkcs1v15Sign::new_unprefixed(), data)
                 .map_err(|_| too_large()),
-            PKCS1_PADDING => self.public.encrypt(&mut OsRng, Pkcs1v15Encrypt, data).map_err(|_| too_large()),
+            PKCS1_PADDING => self.public.encrypt(&mut SysRng, Pkcs1v15Encrypt, data).map_err(|_| too_large()),
             _ => Err(unknown_padding()),
         }
     }
@@ -299,25 +335,42 @@ impl Rsa {
             return Err(openssl("DATA_GREATER_THAN_MOD_LEN", "data greater than mod len", "0200006C"));
         }
         match padding {
+            NO_PADDING | OAEP_PADDING | PKCS1_PADDING if private && data.is_empty() => {
+                Err(openssl("DATA_TOO_SMALL", "data too small", "0200006F"))
+            }
             NO_PADDING if private => self.raw_private(data),
             NO_PADDING => self.raw_public(data),
-            OAEP_PADDING if private => self
-                .private_key()?
-                .decrypt_blinded(&mut OsRng, oaep_scheme(oaep_hash, label)?, data)
-                .map_err(|_| openssl("OAEP_DECODING_ERROR", "oaep decoding error", "02000079")),
-            PKCS1_PADDING if private => self
-                .private_key()?
-                .decrypt_blinded(&mut OsRng, Pkcs1v15Encrypt, data)
-                .map_err(|_| openssl("PKCS_DECODING_ERROR", "pkcs decoding error", "0200009F")),
+            OAEP_PADDING if private => {
+                let key = self.private_key()?;
+                let ciphertext = self.ciphertext(data)?;
+                with_digest!(oaep_hash, D => key
+                    .decrypt_blinded(&mut SysRng, Oaep::<D>::new_with_label(label), &ciphertext)
+                    .map_err(|_| openssl("OAEP_DECODING_ERROR", "oaep decoding error", "02000079")))
+            }
+            // Bad padding returns synthetic plaintext (implicit rejection), as OpenSSL 3.2 and later do.
+            PKCS1_PADDING if private => {
+                let key = self.private_key()?;
+                let ciphertext = self.ciphertext(data)?;
+                key.decrypt_blinded(&mut SysRng, Pkcs1v15Encrypt, &ciphertext)
+                    .map_err(|_| openssl("PKCS_DECODING_ERROR", "pkcs decoding error", "0200009F"))
+            }
             PKCS1_PADDING => {
                 // Block type 1 carries public data, so a plain scan is fine here.
                 let em = self.raw_public(data)?;
-                let end = em.iter().skip(2).position(|byte| *byte == 0).map(|index| index + 2);
-                match end {
-                    Some(end) if em[..2] == [0, 1] && end >= 10 && em[2..end].iter().all(|b| *b == 0xff) => {
-                        Ok(em[end + 1..].to_vec())
+                if em[0] != 0 {
+                    return Err(openssl("INVALID_PADDING", "invalid padding", "0200008A"));
+                }
+                if em[1] != 1 {
+                    return Err(openssl("BLOCK_TYPE_IS_NOT_01", "block type is not 01", "0200006A"));
+                }
+                let padded = &em[2..];
+                match padded.iter().position(|byte| *byte != 0xff) {
+                    None => Err(openssl("NULL_BEFORE_BLOCK_MISSING", "null before block missing", "02000071")),
+                    Some(end) if padded[end] != 0 => {
+                        Err(openssl("BAD_FIXED_HEADER_DECRYPT", "bad fixed header decrypt", "02000066"))
                     }
-                    _ => Err(openssl("PADDING_CHECK_FAILED", "padding check failed", "02000072")),
+                    Some(end) if end < 8 => Err(openssl("BAD_PAD_BYTE_COUNT", "bad pad byte count", "02000067")),
+                    Some(end) => Ok(padded[end + 1..].to_vec()),
                 }
             }
             _ => Err(unknown_padding()),
@@ -366,5 +419,164 @@ mod tests {
         let max = key.sign("sha256", b"hello", PSS_PADDING, SALTLEN_MAX).unwrap();
         assert!(public.verify(&ring::signature::RSA_PKCS1_2048_8192_SHA256, b"hello", &pkcs1).is_ok());
         assert!(key.verify("sha256", b"hello", &max, PSS_PADDING, SALTLEN_MAX).unwrap());
+    }
+
+    fn code(result: Result<Vec<u8>, JsError>) -> Option<String> {
+        result.err().and_then(|error| error.code)
+    }
+
+    #[test]
+    fn odd_sized_and_imported_small_keys_work() {
+        let key = Rsa::generate(513, 3).unwrap();
+        assert_eq!((key.bits(), key.exponent(), key.e()), (513, "3".to_string(), vec![3]));
+        let public = Rsa::from_public(&key.n(), &key.e()).unwrap();
+        let signature = key.sign("md5", b"hello", PSS_PADDING, 7).unwrap();
+        assert!(public.verify("md5", b"hello", &signature, PSS_PADDING, SALTLEN_MAX).unwrap());
+        assert!(!public.verify("md5", b"hello", &signature, PSS_PADDING, 8).unwrap());
+        let too_big = key.sign("sha512", b"hello", PSS_PADDING, SALTLEN_MAX);
+        assert_eq!(code(too_big).as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_KEY_SIZE"));
+        let parts = key.private_parts().unwrap();
+        let imported = Rsa::from_private(&parts[0], &parts[1], &parts[2], &parts[3], &parts[4]).unwrap();
+        assert_eq!(imported.private_parts().unwrap(), parts);
+        let mut block = vec![0; key.size()];
+        block[key.size() - 1] = 42;
+        let raw = public.encrypt(false, &block, NO_PADDING, "sha1", b"").unwrap();
+        assert_eq!(imported.decrypt(true, &raw, NO_PADDING, "sha1", b"").unwrap(), block);
+        assert_eq!(Rsa::generate(512, 65537).unwrap().exponent(), "65537");
+    }
+
+    #[test]
+    fn oaep_labels_take_any_bytes() {
+        let key = Rsa::generate(1024, 65537).unwrap();
+        let label = [0xff, 0x00, 0xfe];
+        let sealed = key.encrypt(false, b"secret", OAEP_PADDING, "sha256", &label).unwrap();
+        assert_eq!(key.decrypt(true, &sealed, OAEP_PADDING, "sha256", &label).unwrap(), b"secret");
+        let wrong = key.decrypt(true, &sealed, OAEP_PADDING, "sha256", b"other").unwrap_err();
+        assert_eq!(wrong.code.as_deref(), Some("ERR_OSSL_RSA_OAEP_DECODING_ERROR"));
+    }
+
+    #[test]
+    fn private_keys_with_unbalanced_primes_import_and_work() {
+        use super::super::bigint::generate_prime;
+        let e = num_bigint::BigUint::from(65537u32);
+        let (small, large, d) = loop {
+            let small = generate_prime(256, false, None, None).unwrap();
+            let large = generate_prime(512, false, None, None).unwrap();
+            if let Some(d) = e.modinv(&((&small - 1u32) * (&large - 1u32))) {
+                break (small, large, d);
+            }
+        };
+        let n = &small * &large;
+        for (p, q) in [(&small, &large), (&large, &small)] {
+            let parts = [&n, &e, &d, p, q].map(|value| value.to_bytes_be());
+            let key = Rsa::from_private(&parts[0], &parts[1], &parts[2], &parts[3], &parts[4]).unwrap();
+            assert_eq!(key.private_parts().unwrap()[..5], parts);
+            let signature = key.sign("sha256", b"hello", PKCS1_PADDING, SALTLEN_MAX).unwrap();
+            assert!(key.verify("sha256", b"hello", &signature, PKCS1_PADDING, SALTLEN_MAX).unwrap());
+            let sealed = key.encrypt(false, b"secret", OAEP_PADDING, "sha1", b"").unwrap();
+            assert_eq!(key.decrypt(true, &sealed, OAEP_PADDING, "sha1", b"").unwrap(), b"secret");
+        }
+    }
+
+    #[test]
+    fn raw_input_at_or_above_the_modulus_is_rejected() {
+        let key = Rsa::generate(512, 65537).unwrap();
+        let block = vec![0xff; key.size()];
+        for private in [false, true] {
+            let error = key.decrypt(private, &block, NO_PADDING, "sha1", b"").unwrap_err();
+            assert_eq!(error.code.as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS"));
+        }
+        let error = key.decrypt(false, &block, PKCS1_PADDING, "sha1", b"").unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS"));
+    }
+
+    #[test]
+    fn keys_that_node_rejects_only_at_use_fail_at_import() {
+        use num_bigint::BigUint;
+        let key = Rsa::generate(512, 65537).unwrap();
+        let [n, e, d, p, q, ..] = key.private_parts().unwrap();
+        let int = |bytes: &[u8]| BigUint::from_bytes_be(bytes);
+        let wide_d = (int(&d) + (int(&p) - 1u32) * (int(&q) - 1u32)).to_bytes_be();
+        let square = (int(&p) * int(&p)).to_bytes_be();
+        let mut even = n.clone();
+        *even.last_mut().unwrap() &= 0xfe;
+        let failures = [
+            Rsa::from_private(&n, &e, &wide_d, &p, &q).err(),
+            Rsa::from_private(&square, &e, &d, &p, &p).err(),
+            Rsa::from_public(&even, &e).err(),
+            Rsa::from_public(&[0], &e).err(),
+            Rsa::from_public(&n, &[1]).err(),
+            Rsa::from_public(&n, &[4]).err(),
+            Rsa::from_public(&[vec![0xff; 2049], vec![0xfb]].concat(), &e).err(),
+        ];
+        for failure in failures {
+            assert_eq!(failure.and_then(|error| error.code).as_deref(), Some("ERR_OSSL_UNSUPPORTED"));
+        }
+    }
+
+    #[test]
+    fn private_decryption_runs_the_openssl_input_checks() {
+        let key = Rsa::generate(512, 65537).unwrap();
+        for padding in [PKCS1_PADDING, OAEP_PADDING] {
+            let sealed = loop {
+                let sealed = key.encrypt(false, b"secret", padding, "sha1", b"").unwrap();
+                if sealed[0] == 0 {
+                    break sealed;
+                }
+            };
+            assert_eq!(key.decrypt(true, &sealed[1..], padding, "sha1", b"").unwrap(), b"secret");
+        }
+        for padding in [NO_PADDING, PKCS1_PADDING, OAEP_PADDING] {
+            let empty = key.decrypt(true, &[], padding, "sha1", b"");
+            assert_eq!(code(empty).as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_SMALL"));
+            let above = key.decrypt(true, &vec![0xff; key.size()], padding, "sha1", b"");
+            assert_eq!(code(above).as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS"));
+        }
+        for private in [false, true] {
+            let short = key.encrypt(private, &[1; 10], NO_PADDING, "sha1", b"");
+            assert_eq!(code(short).as_deref(), Some("ERR_OSSL_RSA_DATA_TOO_SMALL_FOR_KEY_SIZE"));
+        }
+    }
+
+    #[test]
+    fn public_decryption_reports_the_openssl_padding_error() {
+        let key = Rsa::generate(512, 65537).unwrap();
+        let block = |head: [u8; 2], fill: u8, separator: Option<usize>| {
+            let mut em = vec![fill; key.size()];
+            em[..2].copy_from_slice(&head);
+            if let Some(index) = separator {
+                em[index] = 0;
+            }
+            key.encrypt(true, &em, NO_PADDING, "sha1", b"").unwrap()
+        };
+        let cases = [
+            (block([0, 2], 0xff, Some(20)), "ERR_OSSL_RSA_BLOCK_TYPE_IS_NOT_01"),
+            (block([1, 1], 0xff, Some(20)), "ERR_OSSL_RSA_INVALID_PADDING"),
+            (block([0, 1], 0xff, None), "ERR_OSSL_RSA_NULL_BEFORE_BLOCK_MISSING"),
+            (block([0, 1], 0xff, Some(8)), "ERR_OSSL_RSA_BAD_PAD_BYTE_COUNT"),
+            (block([0, 1], 0xfe, Some(20)), "ERR_OSSL_RSA_BAD_FIXED_HEADER_DECRYPT"),
+            (Vec::new(), "ERR_OSSL_RSA_BLOCK_TYPE_IS_NOT_01"),
+        ];
+        for (data, expected) in cases {
+            assert_eq!(code(key.decrypt(false, &data, PKCS1_PADDING, "sha1", b"")).as_deref(), Some(expected));
+        }
+        let valid = block([0, 1], 0xff, Some(20));
+        assert_eq!(key.decrypt(false, &valid, PKCS1_PADDING, "sha1", b"").unwrap(), vec![0xff; key.size() - 21]);
+    }
+
+    #[test]
+    fn generation_errors_match_node() {
+        let small = Rsa::generate(511, 65537).err().unwrap();
+        assert_eq!(
+            (small.message.as_str(), small.code),
+            ("error:1C8000AB:Provider routines::key size too small", None)
+        );
+        for e in [1, 2, 4] {
+            let error = Rsa::generate(512, e).err().unwrap();
+            assert_eq!(
+                (error.message.as_str(), error.code),
+                ("error:020000B2:rsa routines::pub exponent out of range", None)
+            );
+        }
     }
 }

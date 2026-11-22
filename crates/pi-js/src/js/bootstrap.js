@@ -584,7 +584,7 @@
     defineLazy(name, () => loadBuiltin("timers")[name]);
   }
   const lazyGlobals = {
-    buffer: ["Buffer", "Blob", "atob", "btoa"],
+    buffer: ["Buffer", "Blob", "File", "atob", "btoa"],
     url: ["URL", "URLSearchParams"],
     "internal/web": ["EventTarget", "Event", "CustomEvent", "AbortController", "AbortSignal", "DOMException",
       "TextEncoder", "TextDecoder"],

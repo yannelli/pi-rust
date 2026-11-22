@@ -15,6 +15,7 @@ fn fake_upstream() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let up = dir.path();
     let agent = "packages/coding-agent/src";
+    write(up, "packages/coding-agent/package.json", r#"{"dependencies":{"diff":"2.1.0"}}"#);
     write(up, &format!("{agent}/cli/args.ts"), "if (arg === \"--model\") {} else if (arg === \"--zzz-fake\") {}");
     write(
         up,
@@ -68,6 +69,7 @@ fn synced() -> Synced {
         branch: "main".into(),
         commit: "d2e7d8b7c1d31d3661f769d5caef7ba8d50c3e03".into(),
         version: "1.3.0".into(),
+        jsdiff_version: "2.0.0".into(),
         date: "2026-10-19".into(),
     }
 }
@@ -81,7 +83,7 @@ fn report_on_a_fake_upstream_tree() {
     let dir = fake_upstream();
     let report = build_report(dir.path(), root(), &synced(), Allowlist::default());
     let text = report.render();
-    assert_eq!(report.sections.len(), 10);
+    assert_eq!(report.sections.len(), 11);
     for heading in
         ["Upstream commits", "CLI flags", "Settings keys", "Slash commands", "Built-in tools", "Model catalog"]
     {
@@ -109,10 +111,26 @@ fn report_on_a_fake_upstream_tree() {
     assert_eq!(names(&find("models").missing), ["anthropic", "zzzprov"]);
     assert_eq!(names(&find("extensionApi").missing), ["zzzFakeMethod"]);
     assert_eq!(names(&find("packages").missing), ["zzzpkg"]);
+    assert_eq!(names(&find("jsdiff").missing), ["diff@2.1.0"]);
     let exports = names(&find("moduleExports").missing);
     assert_eq!(exports, ["@zzz/alias: (module)", "@earendil-works/pi-tui: zzzTuiExport"]);
     assert!(names(&find("packages").extra).contains(&"pi-js".to_string()));
     assert!(report.findings() > 0);
+}
+
+#[test]
+fn edit_diff_version_compares_the_declared_dependency_with_the_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let check = |manifest| {
+        write(dir.path(), "packages/coding-agent/package.json", manifest);
+        sections::jsdiff(dir.path(), "2.0.0")
+    };
+    let matching = check(r#"{"dependencies":{"diff":"2.0.0"}}"#);
+    assert!(matches!(matching.status, Status::Ran));
+    assert_eq!(matching.counts(), (0, 0, 0));
+    assert_eq!(check(r#"{"dependencies":{"diff":"^2.0.0"}}"#).missing[0].name, "diff@^2.0.0");
+    assert_eq!(check(r#"{"dependencies":{}}"#).extra[0].name, "diff@2.0.0");
+    assert!(matches!(check("{").status, Status::Skipped(_)));
 }
 
 #[test]

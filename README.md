@@ -133,6 +133,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   - `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references.
 
   See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
+- `pi.registerProvider(provider)` with an upstream `Provider` object, which has `getModels()` and no string `api`, registers nothing and reports a `register_provider` error. Use `pi.registerProvider(name, { api, baseUrl, models, streamSimple })`. An object with `id` and a string `api` registers as that config. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - The providers that extensions get from `@earendil-works/pi-ai/providers/all` stream, classify, generate images, and resolve auth in Rust. Their API key login asks for one key, including for Amazon Bedrock, Google Vertex AI, and Cloudflare. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
 - When you quit the interactive mode, pi waits at most 3 seconds for the running turn and the `session_shutdown` handlers, then exits. Upstream pi waits until they finish.
 - An abort finishes in less than a second. Upstream pi waits for every tool and handler.
@@ -144,6 +145,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   See [RPC mode](crates/pi-coding-agent/docs/rpc.md#abort).
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
+- `/bug` offers Upload Report, Open GitHub Issue, and Export as Zip. Upload Report sends the report privately to `pi-rust.com` (`PI_BUG_REPORT_URL` overrides it). Open GitHub Issue writes the zip archive and opens a public prefilled issue form on `yannelli/pi-rust`; you submit it and attach the zip yourself. Upstream pi uploads the report to its Radius gateway (`radius.pi.dev`).
 - Word movement in Chinese, Japanese, Korean (CJK), and Thai text uses ICU4X dictionaries, so some word boundaries differ from `Intl.Segmenter` in Node.
 - `pi-env` looks for remote daemons in a `pi-env-daemons` folder next to the `pi` program. Each release has a `pi-env-daemons-<tag>.tar.gz` archive with the daemons for Linux, Android (Termux), macOS, and Windows on x86-64 and arm64. Extract this archive in the folder that contains `pi`.
 - `pi experimental` and its commands `server`, `client`, `durable`, and `vacation` need `PI_EXPERIMENTAL=1`, as in upstream pi. `server` and `client` use Unix sockets. On Windows, they show a message that they need Unix. Upstream pi also has no Windows transport.
@@ -312,6 +314,7 @@ These parts come from other projects. Each release archive includes their licens
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |
 | Warning colors of `loadProjectContextFiles` in the extension SDK | [chalk](https://github.com/chalk/chalk) 6.0.0 by Sindre Sorhus | [`LICENSE-chalk`](crates/pi-coding-agent/src/extensions/js/LICENSE-chalk) |
 | Settings JSON error messages | [V8](https://github.com/v8/v8), BSD 3-Clause | [`LICENSE-v8-settings`](crates/pi-coding-agent/src/settings/LICENSE-v8) |
+| Edit diffs and the word highlights of the diff view | [jsdiff](https://github.com/kpdecker/jsdiff) 8.0.4 by Kevin Decker, BSD 3-Clause | [`LICENSE-jsdiff`](crates/pi-durable/src/diff/LICENSE-jsdiff) |
 | File locks and exit cleanup for `ProjectTrustStore` | [proper-lockfile](https://github.com/moxystudio/node-proper-lockfile) 4.1.2 and [signal-exit](https://github.com/tapjs/signal-exit) 3.0.7 | [`LICENSE-proper-lockfile`](crates/pi-coding-agent/src/extensions/js/LICENSE-proper-lockfile), [`LICENSE-signal-exit`](crates/pi-coding-agent/src/extensions/js/LICENSE-signal-exit) |
 
 The release archives also include `THIRD-PARTY-LICENSES.md` with the licenses of the third-party Rust crates in the binaries. The Release workflow writes it with [cargo-about](https://github.com/EmbarkStudios/cargo-about) from `about.toml` and `about.hbs`.

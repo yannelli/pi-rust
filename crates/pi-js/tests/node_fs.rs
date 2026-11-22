@@ -11,9 +11,10 @@ const mark = (text) => fs.writeFileSync("stage", text);
 mark("create paths");
 fs.writeFileSync("file", "unchanged");
 fs.mkdirSync("directory");
+const nanos = (stat) => [String(stat.atimeNs), String(stat.mtimeNs)];
 const out = {};
 for (const path of ["file", "directory"]) {
-  const times = () => { const s = fs.statSync(path); return [s.atimeMs, s.mtimeMs]; };
+  const times = () => nanos(fs.statSync(path, { bigint: true }));
   mark(`${path}: sync`);
   fs.utimesSync(path, new Date(1000005), new Date(2000005));
   const sync = times();
@@ -29,8 +30,7 @@ out.isDirectory = fs.statSync("directory").isDirectory();
 mark("file: fd sync");
 const fd = fs.openSync("file", "r+");
 fs.futimesSync(fd, new Date(1000005), new Date(2000005));
-const stat = fs.fstatSync(fd);
-out.fdSync = [stat.atimeMs, stat.mtimeMs];
+out.fdSync = nanos(fs.fstatSync(fd, { bigint: true }));
 fs.closeSync(fd);
 mark("done");
 return out;
@@ -40,11 +40,33 @@ return out;
         assert!(std::env::var_os("CI").is_none(), "CI must run the real Node timestamp control");
         return;
     };
-    let expected = run_cjs_within(&node, &node_root, SCRIPT, 30).await;
+    let mut expected = run_cjs_within(&node, &node_root, SCRIPT, 30).await;
     let (_quickjs_dir, quickjs_root) = tempdir();
     let (quickjs, _capture) = runtime(&quickjs_root);
-    let actual = run_cjs_within(&quickjs, &quickjs_root, SCRIPT, 30).await;
+    let mut actual = run_cjs_within(&quickjs, &quickjs_root, SCRIPT, 30).await;
+    // pi-js truncates set times to microseconds like Node 22. Node 24 keeps nanoseconds.
+    if node_major() > 22 {
+        truncate_nanos_to_micros(&mut expected);
+        truncate_nanos_to_micros(&mut actual);
+    }
     assert_eq!(actual, expected);
+}
+
+fn node_major() -> u32 {
+    let path = node_common::node().expect("the Node control ran");
+    pi_js::node_backend::probe(&path).expect("the Node control ran").major
+}
+
+/// Drops the last three digits of every nanosecond time string.
+fn truncate_nanos_to_micros(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(text) if text.len() > 3 && text.bytes().all(|byte| byte.is_ascii_digit()) => {
+            text.truncate(text.len() - 3);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(truncate_nanos_to_micros),
+        serde_json::Value::Object(fields) => fields.values_mut().for_each(truncate_nanos_to_micros),
+        _ => {}
+    }
 }
 
 // Expected values come from running the same script under Node 22 in an empty directory.

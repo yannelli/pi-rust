@@ -11,7 +11,8 @@
 //!   with scroll views, scrollbars, wheel, selection, copy-on-select, and transcript search.
 //! - [`Terminal`]: the terminal behind a trait. [`ProcessTerminal`] reads raw stdin bytes on a
 //!   background thread and parses them like upstream (Kitty keyboard protocol, xterm
-//!   modifyOtherKeys, bracketed paste); [`testing::VirtualTerminal`] emulates a terminal in tests.
+//!   modifyOtherKeys, bracketed paste); `testing::VirtualTerminal` (feature `testing`) emulates a
+//!   terminal in tests.
 //! - Key handling: [`keys`] (parsing and `matches_key`), [`keybindings`] (ids, defaults, user
 //!   overrides), [`stdin_buffer`] (splitting batched input).
 //! - Text: [`utils`] (visible width, ANSI-aware truncate, wrap, slice, OSC 8 links), [`colors`],
@@ -87,6 +88,7 @@ pub mod stdin_buffer;
 pub mod terminal;
 pub mod terminal_colors;
 pub mod terminal_image;
+#[cfg(feature = "testing")]
 pub mod testing;
 pub mod tui;
 pub mod ui_loop;

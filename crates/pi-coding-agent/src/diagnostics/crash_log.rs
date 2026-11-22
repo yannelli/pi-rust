@@ -150,7 +150,7 @@ pub fn crash_report_instructions(session_file: Option<&str>) -> String {
         Some(_) => format!("run `{app} -r` to resume the session, then"),
         None => format!("start {app} and"),
     };
-    format!("To report this crash: {resume} run /bug. The crash details are attached automatically.")
+    format!("To report this crash: {resume} run /bug. The report includes the crash details.")
 }
 
 /// Record panics as `uncaught_exception` crashes in `path` (upstream `uncaughtCrash`), then run
@@ -200,10 +200,7 @@ mod tests {
         context.set_cwd(Path::new("/w"));
         let error = anyhow::anyhow!("disk full").context("Failed to resume session");
         let instructions = record_fatal_error(&path, &context, &error).unwrap();
-        assert_eq!(
-            instructions,
-            "To report this crash: start pi and run /bug. The crash details are attached automatically."
-        );
+        assert_eq!(instructions, "To report this crash: start pi and run /bug. The report includes the crash details.");
         let record = &read_crash_log(&path)[0];
         assert_eq!((record.kind.as_str(), record.cwd.as_str()), ("fatal_error", "/w"));
         assert_eq!(record.message, "Failed to resume session: disk full");

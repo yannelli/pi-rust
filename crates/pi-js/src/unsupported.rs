@@ -19,9 +19,12 @@ pub fn supported_modules() -> Vec<&'static str> {
 pub const UNSUPPORTED_APIS: &[&str] = &[
     "crypto: ciphers outside AES (CBC, CTR, ECB, CFB, OFB, GCM, CCM, OCB), DES, 3DES, and ChaCha20-Poly1305 \
      (for example aes-128-cfb8, aes-*-xts, camellia, bf, rc4), AES-GCM IVs longer than 16 bytes other than \
-     32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA-OAEP labels \
-     that are not UTF-8, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key encryption \
-     with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, setFips",
+     32 or 64, AES-OCB IVs other than 8, 12, or 15 bytes and tags other than 8, 12, or 16, RSA keys that Node \
+     imports and rejects only when used (an even or zero modulus, an exponent that is even or outside 3 to \
+     2^33-1, a public key modulus over 16384 bits, d >= n, or p = q) fail at import with \
+     ERR_OSSL_UNSUPPORTED, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key \
+     encryption with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, \
+     setFips",
     "child_process: stdio entries that are Unix socket or pipe streams, descriptors 0 to 2 at an index above \
      2, and on Windows sockets and anything but 'ignore' above index 2; sending handles other than TCP \
      net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \

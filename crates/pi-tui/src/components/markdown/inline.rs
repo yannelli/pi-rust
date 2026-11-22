@@ -2,7 +2,7 @@
 
 use super::block::{floor_boundary, rtrim};
 use super::lexer::Lexer;
-use super::rules::{self, captures, captures_anywhere, is_match};
+use super::rules::{self, captures, captures_anywhere, is_match, replace_all};
 use super::token::Token;
 use crate::utils::{CJK_PUNCTUATION_REGEX, js_trim};
 
@@ -70,6 +70,19 @@ fn cjk_touches_delimiter(matched: &str, clipped: &str, end: usize) -> bool {
         || clipped.get(end..).and_then(|rest| rest.chars().next()).is_some_and(is_cjk)
 }
 
+/// Bytes of a long text run that one `INLINE_TEXT` retry scans, well under the backtrack limit.
+const TEXT_CHUNK_BYTES: usize = 64 * 1024;
+
+/// The start of the last word in the first `TEXT_CHUNK_BYTES`. The rule's lookaheads cannot
+/// cross whitespace, so the split gives the same tokens. A longer word is cut at a char boundary.
+fn text_chunk_end(src: &str) -> usize {
+    let head = &src[..floor_boundary(src, TEXT_CHUNK_BYTES)];
+    head.char_indices()
+        .rev()
+        .find(|&(index, c)| index > 0 && !c.is_whitespace() && head[..index].ends_with(char::is_whitespace))
+        .map_or(head.len(), |(index, _)| index)
+}
+
 fn text_token(text: &str) -> Token {
     Token::Text { raw: text.to_string(), text: text.to_string(), tokens: None }
 }
@@ -85,32 +98,28 @@ impl Lexer {
         masked = rules::ANY_PUNCTUATION
             .replace_all(&masked, |c: &regex::Captures| same_length_mask(&c[0], '+'))
             .into_owned();
-        rules::BLOCK_SKIP
-            .replace_all(&masked, |c: &fancy_regex::Captures<'_, str>| {
-                format!("[{}]", "a".repeat(c[0].len().saturating_sub(2)))
-            })
-            .into_owned()
+        replace_all(&rules::BLOCK_SKIP, &masked, |c: &fancy_regex::Captures<'_, str>| {
+            format!("[{}]", "a".repeat(c[0].len().saturating_sub(2)))
+        })
     }
 
     fn mask_reflinks(&self, text: &str) -> String {
-        rules::REFLINK_SEARCH
-            .replace_all(text, |c: &fancy_regex::Captures<'_, str>| {
-                let found = &c[0];
-                let bracket = found.rfind('[').unwrap_or(0);
-                let label = &found[bracket + 1..found.len() - 1];
-                if !self.links.contains_key(label) {
-                    return found.to_string();
+        replace_all(&rules::REFLINK_SEARCH, text, |c: &fancy_regex::Captures<'_, str>| {
+            let found = &c[0];
+            let bracket = found.rfind('[').unwrap_or(0);
+            let label = &found[bracket + 1..found.len() - 1];
+            if !self.links.contains_key(label) {
+                return found.to_string();
+            }
+            if bracket > 1 && !found.starts_with('!') {
+                let inner = &found[1..bracket - 1];
+                if self.link_in_text(inner) {
+                    let masked_inner = self.mask_reflinks(inner);
+                    return format!("[{masked_inner}][{}]", "a".repeat(found.len() - bracket - 2));
                 }
-                if bracket > 1 && !found.starts_with('!') {
-                    let inner = &found[1..bracket - 1];
-                    if self.link_in_text(inner) {
-                        let masked_inner = self.mask_reflinks(inner);
-                        return format!("[{masked_inner}][{}]", "a".repeat(found.len() - bracket - 2));
-                    }
-                }
-                format!("[{}]", "a".repeat(found.len() - 2))
-            })
-            .into_owned()
+            }
+            format!("[{}]", "a".repeat(found.len() - 2))
+        })
     }
 
     fn link_in_text(&self, text: &str) -> bool {
@@ -358,8 +367,16 @@ impl Lexer {
         Some(Token::Link { raw: raw.clone(), href, text: raw, tokens, image: false })
     }
 
+    /// The rule matches any non-empty source, so `None` from `captures` is a backtrack-limit
+    /// error on a long text run. The retry lexes a word-aligned prefix to keep the rest.
     pub(crate) fn inline_text(&mut self, src: &str) -> Option<Token> {
-        let cap = captures(&rules::INLINE_TEXT, src)?;
-        Some(text_token(&cap[0]))
+        if let Some(cap) = captures(&rules::INLINE_TEXT, src) {
+            return Some(text_token(&cap[0]));
+        }
+        if src.is_empty() {
+            return None;
+        }
+        let prefix = &src[..text_chunk_end(src)];
+        Some(captures(&rules::INLINE_TEXT, prefix).map_or_else(|| text_token(prefix), |cap| text_token(&cap[0])))
     }
 }
