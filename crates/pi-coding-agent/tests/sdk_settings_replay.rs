@@ -1,5 +1,6 @@
 //! The 609 oracle cases of upstream `SettingsManager` (earendil-works/pi 35dfa757), replayed against
 //! pi-rust's SDK `SettingsManager` and compared with the golden the authentic upstream class wrote.
+//! Only the steps in [`DIVERGENCES`] may differ.
 
 use crate::extensions::harness;
 
@@ -18,6 +19,67 @@ fn sha256(bytes: &[u8]) -> String {
 
 fn golden() -> Value {
     serde_json::from_str(GOLDEN).expect("golden.json parses")
+}
+
+/// A step whose value pi-rust changes on purpose.
+struct Divergence {
+    case: &'static str,
+    step: usize,
+    member: &'static str,
+    /// What upstream returned, as JSON text; the golden must still hold it.
+    upstream: &'static str,
+    /// What pi-rust returns, as JSON text.
+    pi_rust: &'static str,
+    reason: &'static str,
+}
+
+/// The intended differences from upstream. Keep the list short, and record each one in the README
+/// section "Differences from upstream pi".
+const DIVERGENCES: &[Divergence] = &[
+    Divergence {
+        case: "getter/getEnableInstallTelemetry/empty",
+        step: 0,
+        member: "getEnableInstallTelemetry",
+        upstream: "true",
+        pi_rust: "false",
+        reason: "install telemetry is off unless the user turns it on",
+    },
+    Divergence {
+        case: "getter/getEnableInstallTelemetry/invalid",
+        step: 0,
+        member: "getEnableInstallTelemetry",
+        upstream: "true",
+        pi_rust: "false",
+        reason: "install telemetry is off unless the user turns it on",
+    },
+];
+
+/// The golden with each divergence's `returned` value replaced by pi-rust's. Panics when an entry
+/// no longer matches the golden, so stale entries are removed.
+fn with_divergences(mut golden: Value) -> Value {
+    let cases = golden["cases"].as_array_mut().expect("cases");
+    for divergence in DIVERGENCES {
+        let Divergence { case, step, member, upstream, pi_rust, reason } = divergence;
+        let (upstream, pi_rust): (Value, Value) =
+            (serde_json::from_str(upstream).unwrap(), serde_json::from_str(pi_rust).unwrap());
+        assert_ne!(upstream, pi_rust, "{case}: not a divergence ({reason})");
+        let found = cases.iter_mut().find(|entry| entry["id"] == *case);
+        let entry = found.unwrap_or_else(|| panic!("stale divergence: no case {case} ({reason})"));
+        let recorded = entry["steps"].get_mut(*step).filter(|recorded| recorded["member"] == *member);
+        let recorded = recorded.unwrap_or_else(|| panic!("stale divergence: {case} step {step} is not {member}"));
+        assert_eq!(recorded["returned"], upstream, "stale divergence: {case} step {step} changed upstream");
+        recorded["returned"] = pi_rust;
+    }
+    golden
+}
+
+#[test]
+fn every_divergence_matches_the_golden() {
+    let golden = golden();
+    let adjusted = with_divergences(golden.clone());
+    let changed = golden["cases"].as_array().unwrap().iter().zip(adjusted["cases"].as_array().unwrap());
+    let cases: std::collections::BTreeSet<_> = DIVERGENCES.iter().map(|divergence| divergence.case).collect();
+    assert_eq!(changed.filter(|(upstream, ours)| upstream != ours).count(), cases.len());
 }
 
 #[test]
@@ -117,7 +179,7 @@ async fn the_oracle_cases_replay_against_the_sdk_settings_manager() {
         .unwrap();
     assert!(h.errors().is_empty(), "{:?}", h.errors());
     let replay: Value = serde_json::from_str(&std::fs::read_to_string(h.cwd.join("replay.json")).unwrap()).unwrap();
-    let golden = golden();
+    let golden = with_divergences(golden());
     #[cfg(windows)]
     let golden = on_this_platform(golden, &h.cwd.join("oracle-run"));
     let (expected, actual) = (golden["cases"].as_array().unwrap(), replay["cases"].as_array().unwrap());

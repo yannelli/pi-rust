@@ -17,7 +17,7 @@ use crate::interactive::{InteractiveMode, InteractiveOptions};
 use crate::packages::{ModelsUpdateFn, PackageCommandOptions, SelfUpdateFn, SelfUpdateRequest};
 use crate::platform::VERSION;
 use crate::platform::changelog::{StartupChangelog, embedded_changelog_entries, startup_changelog};
-use crate::platform::telemetry::{REPORT_INSTALL_URL, install_telemetry_enabled, report_install_telemetry};
+use crate::platform::telemetry::{install_telemetry_enabled, report_install_telemetry, telemetry_url};
 use crate::platform::version_check::{
     LatestPiRelease, VersionCheckOptions, check_for_new_pi_version, version_check_skipped,
 };
@@ -120,16 +120,17 @@ pub fn startup_changelog_once(settings: &SettingsManager, has_messages: bool) ->
         .clone()
 }
 
-/// Send the anonymous install ping in the background when `enableInstallTelemetry` or
-/// `PI_TELEMETRY` allows it and pi is online.
+/// Send the anonymous install ping to pi-rust.com (or `PI_TELEMETRY_URL`) in the background when
+/// `enableInstallTelemetry` or `PI_TELEMETRY` allows it and pi is online.
 pub fn spawn_install_telemetry(settings: &SettingsManager) -> Option<JoinHandle<bool>> {
     if !install_telemetry_enabled(settings) || crate::config::offline() {
         return None;
     }
     let runtime = tokio::runtime::Handle::try_current().ok()?;
-    Some(runtime.spawn(async {
+    let origin = telemetry_url();
+    Some(runtime.spawn(async move {
         let client = pi_ai::http::shared_client();
-        report_install_telemetry(&client, REPORT_INSTALL_URL, VERSION, true, false).await
+        report_install_telemetry(&client, &origin, VERSION, true, false).await
     }))
 }
 

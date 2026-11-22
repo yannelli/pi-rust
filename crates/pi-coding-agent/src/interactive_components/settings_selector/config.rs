@@ -170,7 +170,7 @@ impl Default for SettingsConfig {
             mermaid_rendering_mode: MermaidRenderingMode::Streaming,
             show_cache_miss_notices: false,
             collapse_changelog: false,
-            enable_install_telemetry: true,
+            enable_install_telemetry: false,
             double_escape_action: DoubleEscapeAction::Tree,
             tree_filter_mode: TreeFilterMode::Default,
             show_hardware_cursor: false,
