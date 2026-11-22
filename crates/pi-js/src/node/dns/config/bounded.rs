@@ -52,43 +52,49 @@ pub(in crate::node::dns) fn read(path: &Path, limit: usize) -> Option<Vec<u8>> {
 /// On failure it closes stdout, kills the child and waits up to `REAP_DEADLINE` for it to exit.
 #[cfg(any(windows, target_os = "macos", test))]
 pub(in crate::node::dns) fn run(command: Command, deadline: Duration, limit: usize) -> Option<Output> {
+    try_run(command, deadline, limit).ok()
+}
+
+#[cfg(any(windows, target_os = "macos", test))]
+pub(in crate::node::dns) fn try_run(command: Command, deadline: Duration, limit: usize) -> std::io::Result<Output> {
+    use std::io::{Error, ErrorKind};
     use tokio::io::AsyncReadExt;
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    let program = command.get_program().to_owned();
+    let spawn_error = |error: Error| Error::new(error.kind(), format!("starting {program:?}: {error}"));
     let mut command = tokio::process::Command::from(command);
     command.stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
     runtime.block_on(async move {
         let end = tokio::time::Instant::now() + deadline;
         #[cfg(windows)]
         let (mut child, stdout) = {
-            let (server, writer) = super::bounded_windows::pipe().ok()?;
+            let (server, writer) = super::bounded_windows::pipe()?;
             // Connect while this process holds the writer, so the helper cannot exit first.
-            tokio::time::timeout_at(end, server.connect()).await.ok()?.ok()?;
+            tokio::time::timeout_at(end, server.connect()).await??;
             command.stdout(writer);
-            let child = command.spawn().ok()?;
+            let child = command.spawn().map_err(spawn_error)?;
             // The command holds the parent's copy of the write end, which would delay EOF.
             drop(command);
-            (child, Some(server))
+            (child, server)
         };
         #[cfg(not(windows))]
         let (mut child, stdout) = {
-            let mut child = command.stdout(Stdio::piped()).spawn().ok()?;
-            let stdout = child.stdout.take();
+            let mut child = command.stdout(Stdio::piped()).spawn().map_err(spawn_error)?;
+            let stdout = child.stdout.take().ok_or_else(|| Error::other("missing helper stdout"))?;
             (child, stdout)
         };
         let output = tokio::time::timeout_at(end, async {
-            let mut stdout = stdout?;
             let mut bytes = Vec::new();
-            (&mut stdout).take(limit as u64 + 1).read_to_end(&mut bytes).await.ok()?;
+            stdout.take(limit as u64 + 1).read_to_end(&mut bytes).await?;
             if bytes.len() > limit {
-                return None;
+                return Err(Error::new(ErrorKind::InvalidData, "DNS helper output exceeded its limit"));
             }
-            let status = child.wait().await.ok()?;
-            Some(Output { success: status.success(), stdout: bytes })
+            let status = child.wait().await?;
+            Ok(Output { success: status.success(), stdout: bytes })
         })
         .await
-        .ok()
-        .flatten();
-        if output.is_none() {
+        .unwrap_or_else(|error| Err(error.into()));
+        if output.is_err() {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(REAP_DEADLINE, child.wait()).await;
         }

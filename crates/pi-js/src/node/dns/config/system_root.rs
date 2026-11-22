@@ -5,8 +5,18 @@ use std::path::PathBuf;
 
 pub(in crate::node::dns) const SYSTEM_ROOT: &str = r"\\?\GLOBALROOT\SystemRoot";
 
+#[cfg(windows)]
 pub(in crate::node::dns) fn system32(file: &str) -> PathBuf {
-    PathBuf::from(format!(r"{SYSTEM_ROOT}\System32\{file}"))
+    windows_directory().join("System32").join(file)
+}
+
+fn win32_path(path: PathBuf) -> PathBuf {
+    if let Some(drive) = path.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
+        && drive.as_bytes().get(1..3) == Some(b":\\")
+    {
+        return PathBuf::from(drive);
+    }
+    path
 }
 
 #[cfg(windows)]
@@ -14,12 +24,7 @@ pub(in crate::node::dns) fn windows_directory() -> &'static std::path::Path {
     static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     ROOT.get_or_init(|| {
         let path = std::fs::canonicalize(SYSTEM_ROOT).unwrap_or_else(|_| PathBuf::from(SYSTEM_ROOT));
-        if let Some(drive) = path.to_str().and_then(|s| s.strip_prefix(r"\\?\"))
-            && drive.as_bytes().get(1..3) == Some(b":\\")
-        {
-            return PathBuf::from(drive);
-        }
-        path
+        win32_path(path)
     })
 }
 
@@ -43,24 +48,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn helpers_resolve_under_the_kernel_root() {
-        assert_eq!(system32("netsh.exe"), PathBuf::from(r"\\?\GLOBALROOT\SystemRoot\System32\netsh.exe"));
+    fn kernel_paths_with_a_drive_letter_use_win32_spelling() {
+        assert_eq!(win32_path(PathBuf::from(r"\\?\D:\Windows")), PathBuf::from(r"D:\Windows"));
+        assert_eq!(win32_path(PathBuf::from(SYSTEM_ROOT)), PathBuf::from(SYSTEM_ROOT));
     }
 
     #[cfg(windows)]
     #[test]
     fn the_kernel_root_opens_files_and_starts_system_utilities() {
+        let kernel_reg = PathBuf::from(format!(r"{SYSTEM_ROOT}\System32\reg.exe"));
+        assert_eq!(std::fs::canonicalize(system32("reg.exe")).unwrap(), std::fs::canonicalize(kernel_reg).unwrap());
         assert!(system32("netsh.exe").is_file() && system32("reg.exe").is_file());
         assert!(system32(r"drivers\etc").is_dir());
         let key = r"HKLM\System\CurrentControlSet\Services\Tcpip\Parameters";
         let mut reg = command("reg.exe");
         reg.args(["query", key]);
-        let output = super::super::bounded::run(reg, std::time::Duration::from_secs(10), 1 << 20);
-        assert!(output.is_some_and(|output| output.success));
+        let output = super::super::bounded::try_run(reg, std::time::Duration::from_secs(10), 1 << 20).unwrap();
+        assert!(output.success, "reg query exited unsuccessfully");
         let mut netsh = command("netsh.exe");
         netsh.args(["interface", "ipv4", "show", "route"]);
         let bounded = super::super::bounded::MAX_HELPER_OUTPUT;
-        let routes = super::super::bounded::run(netsh, std::time::Duration::from_secs(10), bounded).unwrap();
+        let routes = super::super::bounded::try_run(netsh, std::time::Duration::from_secs(10), bounded).unwrap();
         assert!(routes.success);
         assert!(!super::super::windows::parse_routes(&String::from_utf8_lossy(&routes.stdout)).0.is_empty());
     }
@@ -85,7 +93,7 @@ mod tests {
         let pid: u32 = std::fs::read_to_string(pid_file).unwrap().parse().unwrap();
         let mut tasklist = std::process::Command::new(system32("tasklist.exe"));
         tasklist.args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"]);
-        let listed = super::super::bounded::run(tasklist, Duration::from_secs(20), 1 << 16).unwrap();
+        let listed = super::super::bounded::try_run(tasklist, Duration::from_secs(20), 1 << 16).unwrap();
         assert!(listed.success);
         assert!(!String::from_utf8_lossy(&listed.stdout).contains(&format!("\"{pid}\"")));
     }

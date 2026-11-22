@@ -23,16 +23,16 @@ pub(super) fn pipe() -> std::io::Result<(NamedPipeServer, Stdio)> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::bounded::{HELPER_DEADLINE, run};
+    use super::super::bounded::{HELPER_DEADLINE, Output, try_run};
     use super::super::system_root::system32;
     use std::process::Command;
     use std::time::{Duration, Instant};
 
-    fn cmd(script: &str, deadline: Duration, limit: usize) -> Option<super::super::bounded::Output> {
+    fn cmd(script: &str, deadline: Duration, limit: usize) -> std::io::Result<Output> {
         use std::os::windows::process::CommandExt;
         let mut command = Command::new(system32("cmd.exe"));
         command.args(["/d", "/c"]).raw_arg(script);
-        run(command, deadline, limit)
+        try_run(command, deadline, limit)
     }
 
     #[test]
@@ -42,7 +42,7 @@ mod tests {
         assert_eq!(output.stdout, b"DNS configuration\r\n");
         let output = cmd("echo partial& exit 3", HELPER_DEADLINE, 64).unwrap();
         assert_eq!((output.success, output.stdout.as_slice()), (false, b"partial\r\n".as_slice()));
-        assert!(cmd("echo 0123456789", HELPER_DEADLINE, 8).is_none());
+        assert_eq!(cmd("echo 0123456789", HELPER_DEADLINE, 8).err().unwrap().kind(), std::io::ErrorKind::InvalidData);
     }
 
     #[test]
@@ -54,7 +54,7 @@ mod tests {
             "start /b \"\" \"{powershell}\" -NoProfile -NonInteractive -Command Start-Sleep -Seconds 6& echo early"
         );
         let started = Instant::now();
-        assert!(cmd(&script, Duration::from_secs(1), 64).is_none());
+        assert_eq!(cmd(&script, Duration::from_secs(1), 64).err().unwrap().kind(), std::io::ErrorKind::TimedOut);
         assert!(started.elapsed() < Duration::from_secs(4), "{:?}", started.elapsed());
     }
 }
