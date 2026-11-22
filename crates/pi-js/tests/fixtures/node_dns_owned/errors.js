@@ -10,7 +10,7 @@ const server = await start((query) => {
   if (query.name === "38.2.0.192.in-addr.arpa") return { answers: [["@", "TXT", 60, "wrong type"]] };
   if (query.name in RCODES) return { rcode: RCODES[query.name] };
   if (query.name === "drop.test") return null;
-  if (query.name === "garbage.test") return { raw: () => Buffer.from([1, 2, 3]) };
+  if (query.name === "garbage.test") return { raw: (q) => Buffer.from([q.id >> 8, q.id & 255, 3]) };
   if (query.name === "wrongid.test") return { raw: (q) => Buffer.concat([Buffer.from([(q.id + 1) >> 8 & 255, (q.id + 1) & 255]), Buffer.from([0x81, 0x80, 0, 1, 0, 0, 0, 0, 0, 0]), q.question]) };
   if (query.name === "held.test") return new Promise((resolve) => held.push(() => resolve({ answers: [["@", "A", 60, "192.0.2.30"]] })));
   if (query.type === "A") return { answers: [["@", "A", 60, "192.0.2.31"]] };

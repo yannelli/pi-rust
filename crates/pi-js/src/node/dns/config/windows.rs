@@ -2,6 +2,7 @@
 
 //! Windows DNS servers in c-ares 1.34 `get_DNS_Windows` order: best route metric to each server
 //! on its adapter plus the interface metric. Routes come from `netsh` only when two servers differ.
+//! `netsh` starts from the kernel's `\SystemRoot` link, so `SystemRoot` and `PATH` do not pick it.
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -145,37 +146,29 @@ pub(super) fn servers() -> Vec<SocketAddr> {
     order(&candidates, tables.as_ref())
 }
 
-/// Runs `netsh` for each address family in use. `None` when no table could be read.
+/// Runs `netsh` for each address family in use, both at once and each within the helper
+/// deadline. `None` when no table could be read.
 #[cfg(windows)]
 fn route_tables(candidates: &[Candidate]) -> Option<Tables> {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let netsh = std::path::Path::new(&root).join("System32\\netsh.exe");
-    let children: Vec<_> = [("ipv4", true), ("ipv6", false)]
+    use super::bounded;
+    let show = |family: &str| {
+        let mut command = super::system_root::command("netsh.exe");
+        command.args(["interface", family, "show", "route"]);
+        bounded::run(command, bounded::HELPER_DEADLINE, bounded::MAX_HELPER_OUTPUT)
+            .filter(|output| output.success)
+            .map(|output| parse_routes(&String::from_utf8_lossy(&output.stdout)))
+    };
+    let families = [("ipv4", true), ("ipv6", false)]
         .into_iter()
-        .filter(|(_, v4)| candidates.iter().any(|candidate| candidate.server.is_ipv4() == *v4))
-        .filter_map(|(family, _)| {
-            Command::new(&netsh)
-                .args(["interface", family, "show", "route"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-                .ok()
-        })
-        .collect();
+        .filter(|(_, v4)| candidates.iter().any(|candidate| candidate.server.is_ipv4() == *v4));
+    let read: Vec<Option<Tables>> = std::thread::scope(|scope| {
+        let workers: Vec<_> = families.map(|(family, _)| scope.spawn(move || show(family))).collect();
+        workers.into_iter().map(|worker| worker.join().ok().flatten()).collect()
+    });
     let mut tables: Tables = (Vec::new(), Vec::new());
-    for child in children {
-        if let Ok(output) = child.wait_with_output()
-            && output.status.success()
-        {
-            let (routes, names) = parse_routes(&String::from_utf8_lossy(&output.stdout));
-            tables.0.extend(routes);
-            tables.1.extend(names);
-        }
+    for (routes, names) in read.into_iter().flatten() {
+        tables.0.extend(routes);
+        tables.1.extend(names);
     }
     (!tables.0.is_empty()).then_some(tables)
 }

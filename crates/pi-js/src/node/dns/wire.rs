@@ -2,6 +2,7 @@
 //! record formatting in the shapes Node 22 (c-ares 1.34) returns.
 
 mod format;
+mod local;
 mod name;
 mod record;
 #[cfg(test)]
@@ -19,6 +20,7 @@ const NOTFOUND: &str = "ENOTFOUND";
 
 const HEADER: usize = 12;
 const CLASS_IN: u16 = 1;
+const FLAG_RESPONSE: u16 = 0x8000;
 const MASK_OPCODE: u16 = 0x7800;
 const FLAG_TC: u16 = 0x0200;
 const FLAG_RD: u16 = 0x0100;
@@ -86,7 +88,8 @@ impl Kind {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Reply {
-    /// A well-formed message for another query: an empty datagram, wrong ID, or other question.
+    /// A message for another query: a UDP datagram under 2 bytes or with another ID, or a
+    /// well-formed message with another ID or question.
     Unrelated,
     /// TC is set on a UDP reply; ask again over TCP.
     Truncated,
@@ -100,13 +103,16 @@ pub(crate) enum Reply {
 pub(crate) struct Question {
     name: Name,
     kind: Kind,
+    usage: local::Usage,
 }
 
 impl Question {
     /// Fails as c-ares does. `EBADNAME`: empty or long labels, over 255 bytes of labels and
     /// dots, bad escapes, bytes outside `[A-Za-z0-9-._/*]`. `EFORMERR`: over 255 characters.
     pub(crate) fn new(host: &str, kind: Kind) -> Result<Self, &'static str> {
-        Ok(Self { name: Name::from_text(host)?, kind })
+        let name = Name::from_text(host)?;
+        let usage = local::Usage::for_name(&name);
+        Ok(Self { name, kind, usage })
     }
 
     /// A recursive query (RD set) with one question and no EDNS record, as Node 22 sends.
@@ -121,13 +127,17 @@ impl Question {
         packet
     }
 
-    /// Checks one UDP datagram against the query sent with `id`. `Err("EBADRESP")` is a
-    /// message c-ares cannot parse; like c-ares, this check comes before the ID check.
+    /// Checks one UDP datagram against the query sent with `id`. A datagram without that ID is
+    /// ignored before parsing; c-ares parses it first and fails the query with `EBADRESP`.
     pub(crate) fn answer(&self, id: u16, bytes: &[u8], ttl: bool) -> Result<Reply, &'static str> {
+        if !bytes.starts_with(&id.to_be_bytes()) {
+            return Ok(Reply::Unrelated);
+        }
         self.check(id, bytes, ttl, true)
     }
 
-    /// Checks one TCP message. c-ares ignores TC on TCP.
+    /// Checks one TCP message. `Err("EBADRESP")` is a message c-ares cannot parse; like
+    /// c-ares, this check comes before the ID check. c-ares ignores TC on TCP.
     pub(crate) fn answer_tcp(&self, id: u16, bytes: &[u8], ttl: bool) -> Result<Reply, &'static str> {
         self.check(id, bytes, ttl, false)
     }
@@ -143,7 +153,7 @@ impl Question {
         }
         let word = |index: usize| u16::from_be_bytes([bytes[index * 2], bytes[index * 2 + 1]]);
         let flags = word(1);
-        // c-ares accepts QUERY, IQUERY, STATUS, NOTIFY and UPDATE and does not read QR.
+        // c-ares accepts QUERY, IQUERY, STATUS, NOTIFY and UPDATE.
         if !matches!((flags & MASK_OPCODE) >> 11, 0 | 1 | 2 | 4 | 5) || word(2) != 1 {
             return Err(BADRESP);
         }
@@ -153,7 +163,12 @@ impl Question {
             return Err(BADRESP);
         }
         let sections = record::sections(bytes, at + 4, [word(3), word(4), word(5)])?;
-        if word(0) != id || !asked.same(&self.name) || qtype != self.kind.code() || qclass != CLASS_IN {
+        if flags & FLAG_RESPONSE == 0
+            || word(0) != id
+            || !asked.same(&self.name)
+            || qtype != self.kind.code()
+            || qclass != CLASS_IN
+        {
             return Ok(Reply::Unrelated);
         }
         if udp && flags & FLAG_TC != 0 {

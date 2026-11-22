@@ -17,13 +17,20 @@ fn question() -> Question {
     ask("q.example", Kind::A)
 }
 
-/// The UDP result, which the TCP entry point must match for every reply without TC.
+/// The UDP result. TCP must match it for every reply with `ID` and without TC; UDP ignores
+/// every other datagram.
 fn answer_bytes(bytes: &[u8]) -> Result<Reply, &'static str> {
     let udp = question().answer(ID, bytes, false);
-    if udp != Ok(Reply::Truncated) {
+    if !bytes.starts_with(&ID.to_be_bytes()) {
+        assert_eq!(udp, Ok(Reply::Unrelated), "{bytes:02x?}");
+    } else if udp != Ok(Reply::Truncated) {
         assert_eq!(question().answer_tcp(ID, bytes, false), udp);
     }
     udp
+}
+
+fn tcp(bytes: &[u8]) -> Result<Reply, &'static str> {
+    question().answer_tcp(ID, bytes, false)
 }
 
 fn resolved(measure: bool) -> Result<Reply, &'static str> {
@@ -54,19 +61,32 @@ fn replies_to_other_queries_are_unrelated() {
 }
 
 #[test]
-fn qr_and_known_opcodes_are_not_checked() {
-    assert_eq!(answer_bytes(&with_additional(0x0100, &[])), resolved(true));
+fn only_responses_with_a_known_opcode_can_answer_a_query() {
+    assert_eq!(answer_bytes(&with_additional(0x0100, &[])), Ok(Reply::Unrelated));
     assert_eq!(answer_bytes(&with_additional(0x8980, &[])), resolved(true));
     assert_eq!(answer_bytes(&with_additional(0x9980, &[])), Err("EBADRESP"));
 }
 
 #[test]
-fn a_malformed_message_fails_before_the_id_check() {
+fn udp_ignores_datagrams_without_the_id_before_parsing() {
     let mut wrong_id = question().encode(ID ^ 1);
-    assert_eq!(answer_bytes(&wrong_id[..5]), Err("EBADRESP"));
     wrong_id[2] = 0x81;
     wrong_id[7] = 1;
-    assert_eq!(answer_bytes(&wrong_id), Err("EBADRESP"));
+    for bytes in [&[0x12][..], &[1, 2, 3], &wrong_id[..5], &wrong_id, &[0x34, 0x12, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0]] {
+        assert_eq!(question().answer(ID, bytes, false), Ok(Reply::Unrelated), "{bytes:02x?}");
+    }
+    assert_eq!(question().answer(ID, &ID.to_be_bytes(), false), Err("EBADRESP"));
+    assert_eq!(question().answer(ID, &question().encode(ID)[..5], false), Err("EBADRESP"));
+}
+
+#[test]
+fn a_malformed_tcp_message_fails_before_the_id_check() {
+    let mut wrong_id = question().encode(ID ^ 1);
+    assert_eq!(tcp(&wrong_id[..5]), Err("EBADRESP"));
+    assert_eq!(tcp(&[0x12]), Err("EBADRESP"));
+    wrong_id[2] = 0x81;
+    wrong_id[7] = 1;
+    assert_eq!(tcp(&wrong_id), Err("EBADRESP"));
     let other_class = |class: u8| {
         let mut bytes = packet(&question(), RESPONSE | 3, [&[], &[], &[]]);
         bytes[26] = class;
@@ -87,7 +107,6 @@ fn truncation_is_read_after_the_sections_and_only_on_udp() {
     let mut wrong_id = clean.clone();
     wrong_id[1] ^= 1;
     assert_eq!(answer_bytes(&wrong_id), Ok(Reply::Unrelated));
-    let tcp = |bytes: &[u8]| question().answer_tcp(ID, bytes, false);
     assert_eq!(tcp(&with_additional(0x8380, &[])), resolved(true));
     assert_eq!(tcp(&clean), failed("ENODATA"));
     assert_eq!(tcp(&wrong_id), Ok(Reply::Unrelated));
@@ -156,8 +175,8 @@ fn malformed_replies_fail_with_badresp() {
     let header_end = question().encode(ID).len();
     let bad = |bytes: &[u8]| assert_eq!(answer_bytes(bytes), Err("EBADRESP"), "{bytes:02x?}");
     bad(&question().encode(ID)[..8]);
-    bad(&[1, 2, 3]);
-    bad(&[0x34, 0x12, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0]);
+    bad(&[0x12, 0x34, 3]);
+    bad(&[0x12, 0x34, 0x81, 0x80, 0, 1, 0, 0, 0, 0, 0]);
     let mut no_question = packet(&question(), RESPONSE, [&a_answer(), &[], &[]]);
     no_question[5] = 0;
     bad(&no_question);

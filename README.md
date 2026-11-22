@@ -111,6 +111,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   - A new login stores its OAuth and API endpoints for later refreshes. Older logins without this metadata keep their mainland endpoints.
   - `KIMI_CODE_OAUTH_HOST` and `KIMI_CODE_BASE_URL`, when set, override the saved endpoints. A custom model `baseUrl` in `models.json` stays in effect.
 - Kimi and Moonshot tool requests infer omitted types from enums, constants, and unambiguous schema structure.
+- QuickJS answers `localhost` and loopback reverse queries locally. It rejects `onion` and `invalid` names and their subdomains without contacting a DNS server. If the OS supplies no DNS servers, `getServers()` returns an empty list. Extensions can supply a server with `setServers()`. See [DNS behavior](docs/parity/GAPS.md#extension-runtime-pi-js).
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.

@@ -5,6 +5,7 @@ mod hosts;
 mod hosts_address;
 mod hosts_path;
 mod resolver;
+mod system;
 mod wire;
 
 use std::cell::RefCell;
@@ -24,6 +25,7 @@ use crate::runtime::convert::{caught, from_json, throw};
 use crate::runtime::scope::spawn_op;
 use config::Lookup;
 use resolver::Resolver;
+pub(crate) use system::prime as prime_system_dns;
 use wire::{Kind, Question};
 
 struct Channel {
@@ -31,7 +33,6 @@ struct Channel {
     local: (Ipv4Addr, Ipv6Addr),
     cancel: CancellationToken,
     lookups: Arc<[Lookup]>,
-    hosts: Arc<hosts::Cache>,
 }
 
 impl Drop for Channel {
@@ -129,7 +130,7 @@ enum Step {
 
 /// c-ares `next_lookup` for `ares_gethostbyaddr` up to the first DNS query it sends. A hosts
 /// file hit and a query that fails before it is sent finish at once, as they do in c-ares.
-fn next_lookup(resolver: &Resolver, hosts: &hosts::Cache, ip: IpAddr, lookups: &[Lookup]) -> Step {
+fn next_lookup(resolver: &Resolver, hosts: &hosts::Hosts, ip: IpAddr, lookups: &[Lookup]) -> Step {
     for (at, lookup) in lookups.iter().enumerate() {
         match lookup {
             Lookup::Files => {
@@ -151,10 +152,10 @@ fn next_lookup(resolver: &Resolver, hosts: &hosts::Cache, ip: IpAddr, lookups: &
 /// error from reading a successful reply ends the lookup.
 async fn reverse_query(
     resolver: &Resolver,
-    hosts: Arc<hosts::Cache>,
+    hosts: Arc<hosts::Hosts>,
     ip: IpAddr,
     question: &Question,
-    rest: &[Lookup],
+    check_hosts: bool,
     local: (Ipv4Addr, Ipv6Addr),
     cancel: CancellationToken,
 ) -> Result<Json, &'static str> {
@@ -163,12 +164,17 @@ async fn reverse_query(
         Err(_) => {}
         found => return found,
     }
-    if rest.contains(&Lookup::Files)
-        && let Ok(Some(aliases)) = tokio::task::spawn_blocking(move || hosts.aliases(ip)).await
-    {
+    if check_hosts && let Some(aliases) = hosts.aliases(ip) {
         return Ok(json!(aliases));
     }
     Err("ENOTFOUND")
+}
+
+fn local_result<'js>(ctx: &Ctx<'js>, result: Result<Json, &'static str>) -> rquickjs::Result<Value<'js>> {
+    match result {
+        Ok(value) => from_json(ctx, &value),
+        Err(code) => code.into_js(ctx),
+    }
 }
 
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
@@ -205,11 +211,10 @@ fn create_channel<'js>(
     max_timeout: u32,
 ) -> rquickjs::Result<Object<'js>> {
     let list: Option<Vec<(String, u16)>> = super::net::parse_options(&ctx, values)?;
-    // c-ares reads the system options for every channel, then applies the caller's servers.
-    let config = config::system(list.is_none());
+    let config = system::settings();
     let servers = match list {
         Some(list) => parse_servers(&ctx, list)?,
-        None => config.servers,
+        None => config.servers.clone(),
     };
     let timeout = if timeout > 0 { Duration::from_millis(timeout as u64) } else { config.timeout };
     let max_timeout = (max_timeout > 0).then(|| Duration::from_millis(u64::from(max_timeout)));
@@ -218,8 +223,7 @@ fn create_channel<'js>(
         resolver: Arc::new(resolver),
         local: (Ipv4Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED),
         cancel: CancellationToken::new(),
-        lookups: config.lookups.into(),
-        hosts: Arc::default(),
+        lookups: Arc::from(config.lookups.as_slice()),
     };
     let channel = Rc::new(RefCell::new(channel));
     let object = Object::new(ctx.clone())?;
@@ -264,20 +268,23 @@ fn create_channel<'js>(
     let cancel_channel = Rc::clone(&channel);
     set_fn(&object, "cancel", move || std::mem::take(&mut cancel_channel.borrow_mut().cancel).cancel())?;
     set_fn(&object, "query", move |ctx: Ctx<'js>, kind: String, host: String, ttl: bool| {
-        let (resolver, local, cancel, lookups, hosts) = {
+        let (resolver, local, cancel, lookups) = {
             let channel = channel.borrow();
-            let shared = (Arc::clone(&channel.resolver), Arc::clone(&channel.lookups), Arc::clone(&channel.hosts));
-            (shared.0, channel.local, channel.cancel.clone(), shared.1, shared.2)
+            (Arc::clone(&channel.resolver), channel.local, channel.cancel.clone(), Arc::clone(&channel.lookups))
         };
         if kind == "REVERSE" {
             let ip = ip_address(&host).ok_or_else(|| throw(&ctx, &dns_error("EINVAL", "getHostByAddr", &host)))?;
-            let (question, rest) = match next_lookup(&resolver, &hosts, ip, &lookups) {
+            let hosts = system::hosts();
+            let (question, check_hosts) = match next_lookup(&resolver, &hosts, ip, &lookups) {
                 Step::Found(aliases) => return from_json(&ctx, &json!(aliases)),
                 Step::Missed => return "ENOTFOUND".into_js(&ctx),
-                Step::Query(question, rest) => (question, lookups[rest..].to_vec()),
+                Step::Query(question, rest) => (question, lookups[rest..].contains(&Lookup::Files)),
             };
+            if let Some(answer) = question.local_answer(false) {
+                return local_result(&ctx, answer);
+            }
             let work = async move {
-                let names = reverse_query(&resolver, hosts, ip, &question, &rest, local, cancel).await;
+                let names = reverse_query(&resolver, hosts, ip, &question, check_hosts, local, cancel).await;
                 names.map_err(|code| dns_error(code, "getHostByAddr", &host))
             };
             let promise = spawn_op(&ctx, work, |ctx, names| from_json(ctx, &names).map_err(|error| caught(ctx, error)));
@@ -285,11 +292,13 @@ fn create_channel<'js>(
         }
         let record_type = Kind::parse(&kind).ok_or_else(|| throw(&ctx, &JsError::type_error("Unknown record type")))?;
         let syscall = format!("query{}{}", &kind[..1], kind[1..].to_ascii_lowercase());
-        let name = idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::EMPTY).unwrap_or_default();
-        let question = match resolver.prepare(&name, record_type) {
+        let question = match resolver.prepare(&host, record_type) {
             Ok(question) => question,
             Err(code) => return code.into_js(&ctx),
         };
+        if let Some(answer) = question.local_answer(ttl) {
+            return local_result(&ctx, answer);
+        }
         let work = async move {
             let found = resolver.resolve_question(&question, ttl, local, cancel).await;
             found.map_err(|code| dns_error(code, &syscall, &host))

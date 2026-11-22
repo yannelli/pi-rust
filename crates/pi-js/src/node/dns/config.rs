@@ -1,10 +1,15 @@
 //! System resolver settings as c-ares 1.34 `ares_init_by_sysconfig` reads them: platform
 //! servers and options, then `RES_OPTIONS`, which overrides them.
 
+pub(super) mod bounded;
+#[cfg(windows)]
+mod bounded_windows;
+#[cfg(any(windows, test))]
+pub(super) mod system_root;
 #[cfg(any(windows, test))]
 mod windows;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
 /// One source in the c-ares `lookups` string: `f` for the hosts file, `b` for DNS.
@@ -30,16 +35,24 @@ impl Default for Config {
 
 const DEFAULT_LOOKUPS: [Lookup; 2] = [Lookup::Files, Lookup::Dns];
 
-pub(super) fn system(include_servers: bool) -> Config {
-    let mut config = platform(include_servers);
-    if let Some(options) = std::env::var_os("RES_OPTIONS") {
-        set_options(&mut config, &options.to_string_lossy());
+/// A full snapshot of the system settings. It runs system utilities on macOS and Windows, so call
+/// it off the JavaScript thread. No discovered server leaves `servers` empty.
+pub(super) fn system() -> Config {
+    finish(platform(), std::env::var_os("RES_OPTIONS").map(|text| text.to_string_lossy().into_owned()))
+}
+
+fn finish(mut config: Config, res_options: Option<String>) -> Config {
+    if let Some(options) = res_options {
+        set_options(&mut config, &options);
     }
     config.servers.retain(|server| !blocked(server.ip()));
-    if include_servers && config.servers.is_empty() {
-        config.servers.push(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 53));
-    }
     config
+}
+
+#[cfg(not(windows))]
+fn read_file(path: &str) -> String {
+    let bytes = bounded::read(std::path::Path::new(path), bounded::MAX_CONFIG_FILE).unwrap_or_default();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// `ares_server_blacklisted`: deprecated site-local `fec0::/10` servers are skipped.
@@ -122,33 +135,31 @@ fn parse_lookup_files(config: &mut Config, nsswitch: &str, svc: &[String]) {
 
 #[cfg(not(windows))]
 fn resolv_conf() -> Config {
-    let contents = std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default();
-    parse_resolv_conf(&contents)
+    parse_resolv_conf(&read_file("/etc/resolv.conf"))
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn platform(_: bool) -> Config {
+fn platform() -> Config {
     let mut config = resolv_conf();
-    let read = |path: &str| std::fs::read_to_string(path).unwrap_or_default();
-    parse_lookup_files(&mut config, &read("/etc/nsswitch.conf"), &[read("/etc/netsvc.conf"), read("/etc/svc.conf")]);
+    let svc = [read_file("/etc/netsvc.conf"), read_file("/etc/svc.conf")];
+    parse_lookup_files(&mut config, &read_file("/etc/nsswitch.conf"), &svc);
     config
 }
 
 /// c-ares reads only `dnsinfo` on macOS, which `scutil --dns` prints; every channel takes its
-/// options there. The generated `/etc/resolv.conf` is used only when `scutil` fails.
+/// options there. The generated `/etc/resolv.conf` is used only when `scutil` fails or stalls.
 #[cfg(target_os = "macos")]
-fn platform(include_servers: bool) -> Config {
-    let output = std::process::Command::new("/usr/sbin/scutil").arg("--dns").env("LC_ALL", "C").output();
+fn platform() -> Config {
+    let mut scutil = std::process::Command::new("/usr/sbin/scutil");
+    scutil.arg("--dns").env("LC_ALL", "C");
+    let output = bounded::run(scutil, bounded::HELPER_DEADLINE, bounded::MAX_HELPER_OUTPUT);
     let mut config = match output {
-        Ok(output) if output.status.success() && output.stdout.starts_with(b"DNS configuration") => {
+        Some(output) if output.success && output.stdout.starts_with(b"DNS configuration") => {
             macos_config(&String::from_utf8_lossy(&output.stdout))
         }
         _ => resolv_conf(),
     };
     config.lookups = DEFAULT_LOOKUPS.to_vec();
-    if !include_servers {
-        config.servers.clear();
-    }
     config
 }
 
@@ -232,10 +243,7 @@ fn parse_resolv_conf(contents: &str) -> Config {
 }
 
 #[cfg(windows)]
-fn platform(include_servers: bool) -> Config {
-    if !include_servers {
-        return Config::default();
-    }
+fn platform() -> Config {
     Config { servers: windows::servers(), ..Config::default() }
 }
 
@@ -291,5 +299,13 @@ mod tests {
         assert_eq!((config.timeout, config.rotate), (Duration::from_secs(7), true));
         assert!(blocked("fec0:0:0:ffff::1".parse().unwrap()) && blocked("feff::1".parse().unwrap()));
         assert!(!blocked("fe80::1".parse().unwrap()) && !blocked("192.0.2.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn no_discovered_server_stays_empty_and_a_configured_local_server_stays() {
+        let config = finish(Config::default(), Some("timeout:5".into()));
+        assert_eq!((config.servers, config.timeout), (vec![], Duration::from_secs(5)));
+        let local = parse_resolv_conf("nameserver 127.0.0.1\nnameserver fec0::1\n");
+        assert_eq!(finish(local, None).servers, ["127.0.0.1:53".parse().unwrap()]);
     }
 }

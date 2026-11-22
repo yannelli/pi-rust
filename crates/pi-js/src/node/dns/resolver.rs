@@ -1,6 +1,8 @@
 //! DNS record queries, retry timing, and server selection for a single Node resolver.
 
 mod health;
+#[cfg(test)]
+mod local_tests;
 mod tcp;
 #[cfg(test)]
 mod tests;
@@ -27,6 +29,7 @@ pub(crate) const CONNREFUSED: &str = "ECONNREFUSED";
 pub(crate) const TIMEOUT: &str = "ETIMEOUT";
 pub(crate) const BADRESP: &str = "EBADRESP";
 pub(crate) const NO_SERVERS: &str = "UNKNOWN_ARES_ERROR";
+const BADNAME: &str = "EBADNAME";
 
 pub(crate) struct Resolver {
     servers: Vec<Arc<Server>>,
@@ -140,15 +143,23 @@ impl Resolver {
         self.resolve_question(&question, ttl, local, cancel).await
     }
 
+    /// Takes the hostname as JavaScript passed it. Onion and invalid names fail with
+    /// `ENOTFOUND` and loopback names pass without servers; both match on decoded labels.
     pub(super) fn prepare(&self, name: &str, kind: Kind) -> Result<Question, &'static str> {
-        let name_bytes = name.strip_suffix('.').unwrap_or(name).as_bytes();
-        if name_bytes.last_chunk::<6>().is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".onion")) {
-            return Err("ENOTFOUND");
+        let ascii = idna::domain_to_ascii_cow(name.as_bytes(), idna::AsciiDenyList::EMPTY).map_err(|_| BADNAME)?;
+        // IDNA can erase an entire label. Only an explicit root may turn into a root query.
+        if matches!(ascii.as_ref(), "" | ".") && !matches!(name, "" | "." | "。" | "．" | "｡") {
+            return Err(BADNAME);
         }
-        if self.servers.is_empty() {
-            return Err(NO_SERVERS);
+        match Question::new(&ascii, kind) {
+            Ok(question) => match question.special_use() {
+                Ok(false) if self.servers.is_empty() => Err(NO_SERVERS),
+                Ok(_) => Ok(question),
+                Err(code) => Err(code),
+            },
+            Err(_) if self.servers.is_empty() => Err(NO_SERVERS),
+            Err(code) => Err(code),
         }
-        Question::new(name, kind)
     }
 
     pub(super) async fn resolve_question(
@@ -158,6 +169,9 @@ impl Resolver {
         local: (Ipv4Addr, Ipv6Addr),
         cancel: CancellationToken,
     ) -> Result<Json, &'static str> {
+        if let Some(answer) = question.local_answer(ttl) {
+            return answer;
+        }
         tokio::select! {
             biased;
             () = cancel.cancelled() => Err(CANCELLED),

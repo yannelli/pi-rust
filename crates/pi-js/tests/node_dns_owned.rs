@@ -7,7 +7,7 @@ use crate::node_common;
 use std::path::Path;
 
 use common::*;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const SERVER: &str = include_str!("fixtures/node_dns_owned/dns_server.cjs");
 
@@ -101,6 +101,43 @@ async fn dns_aliases_server_selection_and_tcp_match_node() {
     quickjs_case(name, body, golden).await;
 }
 
+#[tokio::test]
+async fn reserved_names_and_invalid_idna_stay_local() {
+    let (_dir, root) = tempdir();
+    let (runtime, _) = runtime(&root);
+    let script = r#"
+        const { Resolver } = require("node:dns/promises");
+        const { start } = require("./dns_server.cjs");
+        const mark = text => require("node:fs").appendFileSync(require("node:path").join(__dirname, "stage"), text + "\n");
+        const server = await start(() => ({ answers: [["@", "A", 60, "192.0.2.17"]] }));
+        try {
+          const r = new Resolver({ tries: 1, timeout: 1000 });
+          r.setServers([server.address]);
+          const result = p => p.catch(error => error.code);
+          mark("local answers");
+          const pending = r.resolve4("api.LOCALHOST.", { ttl: true });
+          r.cancel();
+          const local = [await pending, await r.resolve6("localhost"), await r.resolvePtr("12.0.0.127.in-addr.arpa"),
+            await result(r.resolveMx("localhost")), await result(r.resolve4("onion")),
+            await result(r.resolve4(String.raw`host.\111nion`)), await result(r.resolve4("host.invalid")),
+            await result(r.resolve4("\uFFFD"))];
+          mark("ordinary DNS");
+          const remote = [await r.resolve4("."), await r.resolve4("notlocalhost.test")];
+          const queries = server.log.filter(entry => entry.type === "A").map(entry => entry.name);
+          r.setServers([]);
+          return [local, remote, queries, await r.resolve4("localhost"), await result(r.resolve4("ordinary.test"))];
+        } finally { await server.close(); }
+    "#;
+    assert_eq!(
+        run_case(&runtime, &root, script).await,
+        json!([
+            [[{"address": "127.0.0.1", "ttl": 86400}], ["::1"], ["localhost"], "ENODATA",
+             "ENOTFOUND", "ENOTFOUND", "ENOTFOUND", "EBADNAME"],
+            [["192.0.2.17"], ["192.0.2.17"]], ["", "notlocalhost.test"], ["127.0.0.1"], "UNKNOWN_ARES_ERROR"
+        ])
+    );
+}
+
 /// Reruns every case on real Node through the Node backend, so CI hosts (Windows included) recheck the
 /// goldens. Skips without Node 22, since other majors bundle other c-ares releases.
 #[tokio::test]
@@ -119,11 +156,13 @@ async fn dns_fixtures_match_the_node_backend() {
     }
     let (quickjs, _) = common::runtime(&root);
     let servers = r#"return new (require("node:dns").Resolver)().getServers();"#;
-    assert_eq!(
-        run_cjs_within(&quickjs, &root, servers, 30).await,
-        run_cjs_within(&runtime, &root, servers, 30).await,
-        "system DNS servers differ from Node {version}"
-    );
+    let system = run_cjs_within(&quickjs, &root, servers, 30).await;
+    let node_system = run_cjs_within(&runtime, &root, servers, 30).await;
+    if system == json!([]) {
+        assert!(node_system == json!([]) || node_system == json!(["127.0.0.1"]), "system DNS servers: {node_system}");
+    } else {
+        assert_eq!(system, node_system, "system DNS servers differ from Node {version}");
+    }
     let reverse = r#"
         const { start } = require("./dns_server.cjs");
         const server = await start(() => ({answers: [["@", "PTR", 60, "from-dns.test"]]}));
@@ -144,11 +183,17 @@ async fn dns_fixtures_match_the_node_backend() {
           return rows;
         } finally { await server.close(); }
     "#;
-    assert_eq!(
-        run_case(&quickjs, &root, reverse).await,
-        run_case(&runtime, &root, reverse).await,
-        "reverse results or DNS traffic differ from Node {version} on this host"
-    );
+    let mut expected_reverse = run_case(&runtime, &root, reverse).await;
+    for index in 0..2 {
+        if expected_reverse[index] == json!([["from-dns.test"], 1]) {
+            // QuickJS answers a loopback PTR locally when hosts-file policy would otherwise send it to DNS.
+            expected_reverse[index] = json!([["localhost"], 0]);
+            if index == 0 {
+                expected_reverse[3] = json!([true, ["localhost"]]);
+            }
+        }
+    }
+    assert_eq!(run_case(&quickjs, &root, reverse).await, expected_reverse, "reverse lookup on Node {version}");
     let mut failures = Vec::new();
     for (name, body, golden) in CASES {
         let actual = run_case(&runtime, &root, body).await;

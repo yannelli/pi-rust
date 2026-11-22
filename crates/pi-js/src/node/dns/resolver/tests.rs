@@ -158,6 +158,25 @@ async fn malformed_reply_moves_to_the_next_server_at_once() {
 }
 
 #[tokio::test]
+async fn unrelated_udp_noise_before_the_answer_does_not_demote_the_server() {
+    let handler: Handler = Arc::new(|query| {
+        let other = [query[0] ^ 0xFF, query[1]];
+        let mut header = other.to_vec();
+        header.extend_from_slice(&[0x81, 0x80, 0, 1, 0, 0]);
+        vec![vec![query[0]], other.to_vec(), header, reply(query, 0, false, Some(Answer::A([1, 2, 3, 4])))]
+    });
+    let (noisy, _) = udp_server(handler).await;
+    let (other, asked) =
+        udp_server(Arc::new(|query| vec![reply(query, 0, false, Some(Answer::A([9, 9, 9, 9])))])).await;
+    let both = resolver(vec![noisy, other], 1000, 1);
+    let found = both.resolve("a.test", Kind::A, false, ANY, CancellationToken::new()).await;
+    assert_eq!(found, Ok(json!(["1.2.3.4"])));
+    assert_eq!(both.ordered_servers(), [noisy, other]);
+    assert_eq!(both.servers[0].priority().0, 0);
+    assert_eq!(asked.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn timeouts_rotate_servers_and_respect_max_timeout() {
     let (first, one) = udp_server(Arc::new(|_| Vec::new())).await;
     let (second, two) = udp_server(Arc::new(|_| Vec::new())).await;
@@ -208,7 +227,7 @@ async fn alias_only_address_replies_finish_without_a_second_query() {
 
 #[tokio::test]
 async fn queries_and_get_servers_remember_failures_across_set_servers() {
-    let (broken, hits) = udp_server(Arc::new(|_| vec![vec![0]])).await;
+    let (broken, hits) = udp_server(Arc::new(|query| vec![query[..2].to_vec()])).await;
     let (good, _) = udp_server(Arc::new(|query| vec![reply(query, 0, false, Some(Answer::A([1, 2, 3, 4])))])).await;
     let config = [broken, good];
     let first = resolver(config.to_vec(), 300, 1);

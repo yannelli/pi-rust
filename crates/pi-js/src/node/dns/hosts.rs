@@ -5,15 +5,15 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::SystemTime;
+use std::path::Path;
 
 /// c-ares returns at most 100 aliases from one entry.
 const MAX_ALIASES: usize = 100;
 /// `INET6_ADDRSTRLEN` and the 256-byte hostname buffer, each with room for the NUL.
 const MAX_ADDRESS: usize = 45;
 const MAX_NAME: usize = 255;
+/// Larger files are read up to the last full line within this size.
+const MAX_FILE: usize = 32 << 20;
 
 #[derive(Default)]
 pub(super) struct Hosts {
@@ -113,45 +113,14 @@ impl Hosts {
     }
 }
 
-struct Cached {
-    loaded: u64,
-    hosts: Arc<Hosts>,
+/// The platform hosts file. A missing, unreadable, or non-regular file gives no entries.
+/// It runs `reg.exe` on Windows and reads the file, so call it off the JavaScript thread.
+pub(super) fn system() -> Hosts {
+    super::hosts_path::path().map(|path| read(&path, MAX_FILE)).unwrap_or_default()
 }
 
-/// The parsed hosts file of one channel, as c-ares keeps `channel->hf`.
-#[derive(Default)]
-pub(super) struct Cache {
-    path: OnceLock<Option<PathBuf>>,
-    cached: Mutex<Option<Cached>>,
-}
-
-fn seconds(time: SystemTime) -> u64 {
-    time.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs())
-}
-
-impl Cache {
-    /// Aliases for `ip`; `None` when the file has no entry for it or cannot be read.
-    pub(super) fn aliases(&self, ip: IpAddr) -> Option<Vec<String>> {
-        let path = self.path.get_or_init(super::hosts_path::path).as_deref()?;
-        self.load(path)?.aliases(ip)
-    }
-
-    /// Reads `path` again when its modification second is at or after the second of the last
-    /// load, or every 60 seconds when it cannot be checked, as `ares_hosts_expired` does.
-    fn load(&self, path: &Path) -> Option<Arc<Hosts>> {
-        let now = seconds(SystemTime::now());
-        let modified = std::fs::metadata(path).and_then(|meta| meta.modified()).map_or(now.saturating_sub(60), seconds);
-        let mut cache = self.cached.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(cached) = cache.as_ref()
-            && cached.loaded > modified
-        {
-            return Some(Arc::clone(&cached.hosts));
-        }
-        *cache = None;
-        let hosts = Arc::new(Hosts::parse(&std::fs::read(path).ok()?));
-        *cache = Some(Cached { loaded: now, hosts: Arc::clone(&hosts) });
-        Some(hosts)
-    }
+fn read(path: &Path, limit: usize) -> Hosts {
+    super::config::bounded::read(path, limit).map(|bytes| Hosts::parse(&bytes)).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -199,17 +168,18 @@ mod tests {
     }
 
     #[test]
-    fn reloads_after_the_file_changes() {
+    fn reads_a_regular_file_up_to_the_size_limit() {
         let dir = std::env::temp_dir().join(format!("pi-dns-hosts-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("hosts");
-        std::fs::write(&file, "10.1.0.1 a b\n").unwrap();
-        let ip = "10.1.0.1".parse().unwrap();
-        let cache = Cache::default();
-        assert_eq!(cache.load(&file).unwrap().aliases(ip), Some(vec!["b".to_string()]));
-        std::fs::write(&file, "10.1.0.1 a c\n").unwrap();
-        assert_eq!(cache.load(&file).unwrap().aliases(ip), Some(vec!["c".to_string()]));
-        assert!(Cache::default().load(&dir.join("missing")).is_none());
+        std::fs::write(&file, "10.1.0.1 a b\n10.1.0.2 c d\n").unwrap();
+        let (first, second) = ("10.1.0.1".parse().unwrap(), "10.1.0.2".parse().unwrap());
+        let hosts = read(&file, MAX_FILE);
+        assert_eq!((hosts.aliases(first), hosts.aliases(second)), (Some(vec!["b".into()]), Some(vec!["d".into()])));
+        let cut = read(&file, 20);
+        assert_eq!((cut.aliases(first), cut.aliases(second)), (Some(vec!["b".into()]), None));
+        assert_eq!(read(&dir, MAX_FILE).aliases(first), None);
+        assert_eq!(read(&dir.join("missing"), MAX_FILE).aliases(first), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

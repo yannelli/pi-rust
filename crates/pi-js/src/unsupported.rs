@@ -80,8 +80,12 @@ pub const DIFFERENCES: &[&str] = &[
     "v8: heap statistics come from QuickJS memory use, heap snapshots have no nodes, setFlagsFromString \
      and promiseHooks do nothing, and strings with only Latin-1 characters always count as one-byte",
     "dns: lookup filters getaddrinfo results by family and hints after the call, and every failure other \
-     than a temporary one is ENOTFOUND. On Windows, the resolver uses adapter metrics alone when it \
-     cannot read the system route table",
+     than a temporary one is ENOTFOUND. Record queries handle localhost and loopback PTRs locally, reject \
+     onion and invalid zones locally, and return EBADNAME for invalid IDNA. Replies must carry the response \
+     flag. UDP ignores datagrams without the matching transaction ID. An empty system server list stays \
+     empty. The resolver refreshes system \
+     settings and hosts in the background. Windows uses adapter metrics alone when the route table is \
+     unavailable and accepts only SystemRoot and windir variables in the registry hosts path",
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
      returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
      and other OpenSSL tuning options are ignored; a session Buffer is an opaque handle that works only in \

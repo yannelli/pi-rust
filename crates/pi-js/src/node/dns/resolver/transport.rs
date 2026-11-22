@@ -1,7 +1,11 @@
 //! One exchange with one server: a connected UDP socket that lives only for the exchange, or a
 //! question on the server's shared TCP stream.
 
+#[cfg(test)]
+mod tests;
+
 use std::cell::RefCell;
+use std::future::Future;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr, UdpSocket as StdUdpSocket};
 
@@ -15,6 +19,9 @@ use super::CONNREFUSED;
 use super::tcp::TcpPool;
 use super::timer::Running;
 
+/// Unrelated datagrams read in a row before the receive loop yields to the scheduler.
+const UNRELATED_PER_YIELD: usize = 16;
+
 thread_local! {
     // Only the synchronous receive and parse borrow this buffer. Pending queries share it on each worker.
     static DATAGRAM: RefCell<BytesMut> = RefCell::new(BytesMut::with_capacity(usize::from(u16::MAX)));
@@ -27,6 +34,31 @@ pub(super) struct Attempt<'a> {
     pub(super) ttl: bool,
     pub(super) server: SocketAddr,
     pub(super) source: IpAddr,
+}
+
+/// The receive side of a connected datagram socket.
+pub(super) trait Datagrams {
+    /// Resolves when a datagram or a socket error is pending, with that error.
+    fn wait_readable(&self) -> impl Future<Output = std::io::Result<()>> + Send;
+    fn receive_into(&self, buffer: &mut BytesMut) -> std::io::Result<usize>;
+}
+
+impl Datagrams for UdpSocket {
+    async fn wait_readable(&self) -> std::io::Result<()> {
+        let ready = self.ready(Interest::READABLE | Interest::ERROR).await?;
+        if ready.is_error() {
+            // Linux can report a connected UDP port refusal as EPOLLERR without EPOLLIN.
+            match self.try_io(Interest::ERROR, || self.take_error()?.ok_or(ErrorKind::WouldBlock.into())) {
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                Ok(error) | Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn receive_into(&self, buffer: &mut BytesMut) -> std::io::Result<usize> {
+        self.try_recv_buf(buffer)
+    }
 }
 
 fn io_error(_: std::io::Error) -> &'static str {
@@ -52,21 +84,28 @@ impl Attempt<'_> {
         if !sent {
             socket.send(self.packet).await.map_err(io_error)?;
         }
+        self.receive(&socket, timer).await
+    }
+
+    /// Reads datagrams until one answers the question. A socket that stays readable with
+    /// unrelated datagrams yields now and then, so the deadline and cancellation still run.
+    pub(super) async fn receive(&self, socket: &impl Datagrams, timer: &Running<'_>) -> Result<Reply, &'static str> {
+        let mut unrelated = 0;
         loop {
-            let ready = socket.ready(Interest::READABLE | Interest::ERROR).await.map_err(io_error)?;
-            if ready.is_error() {
-                // Linux can report a connected UDP port refusal as EPOLLERR without EPOLLIN.
-                match socket.try_io(Interest::ERROR, || socket.take_error()?.ok_or(ErrorKind::WouldBlock.into())) {
-                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
-                    Ok(error) | Err(error) => return Err(io_error(error)),
-                }
-            }
+            socket.wait_readable().await.map_err(io_error)?;
             let received = DATAGRAM.with_borrow_mut(|buffer| {
                 buffer.clear();
-                socket.try_recv_buf(buffer).map(|_| self.question.answer(self.id, buffer, self.ttl))
+                socket.receive_into(buffer).map(|_| self.question.answer(self.id, buffer, self.ttl))
             });
             match received {
-                Ok(Ok(Reply::Unrelated)) => timer.activity(),
+                Ok(Ok(Reply::Unrelated)) => {
+                    timer.activity();
+                    unrelated += 1;
+                    if unrelated == UNRELATED_PER_YIELD {
+                        unrelated = 0;
+                        tokio::task::yield_now().await;
+                    }
+                }
                 Ok(reply) => return reply,
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {}
                 Err(error) => return Err(io_error(error)),
