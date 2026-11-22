@@ -221,6 +221,7 @@ impl JsRuntime {
             .name(options.name.clone())
             .stack_size(THREAD_STACK_BYTES)
             .spawn(move || thread_main(thread_shared, thread_sender, receiver, setup, ready_sender))?;
+        crate::node::prime_system_dns();
         let started = ready.recv().unwrap_or_else(|_| Err(JsError::new("the JavaScript thread exited during startup")));
         let runtime = Self { handle: JsHandle::new(sender, shared), thread: Some(thread), owned_tokio };
         started.map(|()| runtime)

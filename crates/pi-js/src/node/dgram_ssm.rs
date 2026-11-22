@@ -34,14 +34,14 @@ fn scope_id(text: &str) -> Option<u32> {
 }
 
 #[cfg(unix)]
-fn interface_index(name: &str) -> u32 {
+pub(super) fn interface_index(name: &str) -> u32 {
     let Ok(name) = std::ffi::CString::new(name) else { return 0 };
     // SAFETY: `name` is a valid NUL-terminated string for the duration of the call.
     unsafe { libc::if_nametoindex(name.as_ptr()) }
 }
 
 #[cfg(not(unix))]
-fn interface_index(name: &str) -> u32 {
+pub(super) fn interface_index(name: &str) -> u32 {
     name.parse().unwrap_or(0)
 }
 

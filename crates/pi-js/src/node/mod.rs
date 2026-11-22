@@ -49,6 +49,8 @@ use rquickjs::{Ctx, Function, Object, Persistent};
 
 use crate::runtime::state::state;
 
+pub(crate) use dns::prime_system_dns;
+
 const BOOTSTRAP: &str = include_str!("../js/bootstrap.js");
 
 /// Install natives, run the bootstrap, and keep its internal API object.

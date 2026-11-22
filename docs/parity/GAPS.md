@@ -46,6 +46,14 @@ These commits are older than the synced commit, so the report no longer lists th
 
 ## Extension runtime (pi-js)
 
+QuickJS handles these DNS record queries locally, including when an extension calls `setServers()`. Names under `localhost` resolve to loopback. Loopback PTR queries return `localhost`, or the hosts-file aliases when the system checks that file first. The `onion` and `invalid` zones return `ENOTFOUND`. These rules apply after decoding DNS labels. A hostname that fails IDNA conversion returns `EBADNAME`. The root name `.` remains valid.
+
+QuickJS accepts messages marked as DNS responses and ignores UDP datagrams that lack the pending query's transaction ID. A malformed reply with the matching ID returns `EBADRESP`. QuickJS keeps an empty system server list when discovery finds none. A query that requires a server then returns `UNKNOWN_ARES_ERROR`.
+
+System DNS settings and the hosts file each have a five-second cache. A read after that starts a background refresh. If a refresh is still pending five seconds later, new lookups of that data see an empty snapshot until the read completes. Existing resolvers keep their configured server list.
+
+Windows uses the system route table and adapter metrics to rank servers and uses adapter metrics alone if the route table is unavailable. The registry hosts directory may be absolute or start with `%SystemRoot%` or `%windir%`. QuickJS skips directories that depend on other environment variables. If the registry utility is unavailable, it uses the default hosts directory.
+
 IPC handle retries use a flat wrapper instead of Node's nested `net.Native` wrapper. Internal listeners receive descriptors with only `close()`, stray acknowledgements are ignored, and failed retries release their copies and queues. A cluster connection queued to a worker that disconnects is not reclaimed. These limits are listed in `crates/pi-js/src/unsupported.rs`.
 
 `crates/pi-js/src/unsupported.rs` is the full list. Open items that need a decision:
