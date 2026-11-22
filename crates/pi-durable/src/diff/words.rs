@@ -36,15 +36,16 @@ fn trailing_whitespace(text: &str) -> &str {
     &text[text.trim_end_matches(is_js_whitespace).len()..]
 }
 
-/// Byte ranges of the matches of the jsdiff regex `[word]+|\s+|[^word]`.
-fn parts(text: &str) -> Vec<(usize, usize)> {
-    let mut parts = Vec::new();
+/// Byte ranges of the matches of the jsdiff regex `[word]+|\s+|[^word]`, and whether each is whitespace.
+fn parts(text: &str) -> impl Iterator<Item = (usize, usize, bool)> {
     let mut chars = text.char_indices().peekable();
-    while let Some((start, c)) = chars.next() {
+    std::iter::from_fn(move || {
+        let (start, c) = chars.next()?;
         let mut end = start + c.len_utf8();
+        let is_space = is_js_whitespace(c);
         let same_class: Option<fn(char) -> bool> = if is_word_char(c) {
             Some(is_word_char)
-        } else if is_js_whitespace(c) {
+        } else if is_space {
             Some(is_js_whitespace)
         } else {
             None
@@ -54,51 +55,50 @@ fn parts(text: &str) -> Vec<(usize, usize)> {
                 end = i + next.len_utf8();
             }
         }
-        parts.push((start, end));
-    }
-    parts
+        Some((start, end, is_space))
+    })
 }
 
-/// jsdiff word tokens: each word or punctuation mark with the whitespace on both sides, so
-/// adjacent tokens share their whitespace.
-fn tokenize(text: &str) -> Vec<(usize, usize)> {
-    let is_space = |(start, end): (usize, usize)| text[start..end].starts_with(is_js_whitespace);
-    let mut tokens: Vec<(usize, usize)> = Vec::new();
-    let mut prev = None;
-    for part in parts(text) {
-        if is_space(part) {
-            match tokens.last_mut().filter(|_| prev.is_some()) {
-                Some(last) => last.1 = part.1,
-                None => tokens.push(part),
+/// A jsdiff word token, `text[start..end]`: the word or punctuation mark `text[word.0..word.1]` with
+/// the whitespace on both sides, so adjacent tokens share their whitespace. Tokens compare by the word.
+struct Token {
+    start: usize,
+    end: usize,
+    word: (usize, usize),
+}
+
+fn tokenize(text: &str) -> Vec<Token> {
+    let mut tokens: Vec<Token> = Vec::with_capacity(text.len() / 4 + 1);
+    let mut space_before = None;
+    for (start, end, is_space) in parts(text) {
+        if is_space {
+            match tokens.last_mut() {
+                Some(last) => last.end = end,
+                None => tokens.push(Token { start, end, word: (start, start) }),
             }
-        } else if let Some(space) = prev.filter(|&prev| is_space(prev)) {
-            match tokens.last_mut().filter(|last| **last == space) {
-                Some(last) => last.1 = part.1,
-                None => tokens.push((space.0, part.1)),
-            }
-        } else {
-            tokens.push(part);
+            space_before = Some(start);
+            continue;
         }
-        prev = Some(part);
+        let token_start = space_before.take().unwrap_or(start);
+        // Whitespace at the start of the text is a token of its own until a word follows it.
+        match tokens.last_mut().filter(|last| last.start == token_start) {
+            Some(last) => (last.end, last.word) = (end, (start, end)),
+            None => tokens.push(Token { start: token_start, end, word: (start, end) }),
+        }
     }
     tokens
-}
-
-/// Tokens compare by their text without the surrounding whitespace.
-fn words<'a>(text: &'a str, tokens: &[(usize, usize)]) -> Vec<&'a str> {
-    tokens.iter().map(|&(start, end)| text[start..end].trim_matches(is_js_whitespace)).collect()
 }
 
 /// Word diff of one line: each change with its text, after the whitespace cleanup of jsdiff.
 pub fn diff_words(old: &str, new: &str) -> Vec<(ChangeKind, String)> {
     let (old_tokens, new_tokens) = (tokenize(old), tokenize(new));
-    let (old_words, new_words) = (words(old, &old_tokens), words(new, &new_tokens));
-    let mut changes: Vec<(ChangeKind, String)> = diff_tokens(&old_words, &new_words, |a, b| a == b)
+    let same_word = |a: &Token, b: &Token| old[a.word.0..a.word.1] == new[b.word.0..b.word.1];
+    let mut changes: Vec<(ChangeKind, String)> = diff_tokens(&old_tokens, &new_tokens, same_word)
         .into_iter()
         .map(|change| {
             let (text, tokens) =
                 if change.kind == ChangeKind::Removed { (old, &old_tokens) } else { (new, &new_tokens) };
-            (change.kind, text[tokens[change.start].0..tokens[change.start + change.len - 1].1].to_owned())
+            (change.kind, text[tokens[change.start].start..tokens[change.start + change.len - 1].end].to_owned())
         })
         .collect();
     let (mut last_keep, mut insertion, mut deletion) = (None, None, None);
@@ -132,11 +132,11 @@ fn common_suffix<'a>(a: &'a str, b: &str) -> &'a str {
 
 // jsdiff throws when the text lacks the prefix or suffix; these keep the text as it is.
 fn replace_prefix(text: &str, old: &str, new: &str) -> String {
-    text.strip_prefix(old).map_or_else(|| text.to_owned(), |rest| format!("{new}{rest}"))
+    text.strip_prefix(old).map_or_else(|| text.to_owned(), |rest| [new, rest].concat())
 }
 
 fn replace_suffix(text: &str, old: &str, new: &str) -> String {
-    text.strip_suffix(old).map_or_else(|| text.to_owned(), |rest| format!("{rest}{new}"))
+    text.strip_suffix(old).map_or_else(|| text.to_owned(), |rest| [rest, new].concat())
 }
 
 /// jsdiff `maximumOverlap`, a KMP search: the longest prefix of `b` that `a` ends with.
