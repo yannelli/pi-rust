@@ -1,6 +1,6 @@
 # Documentation index
 
-Created: 2026-10-29. Last updated: 2026-11-04.
+Created: 2026-10-29. Last updated: 2026-11-21.
 
 | Document | Use it when |
 | --- | --- |
@@ -18,3 +18,4 @@ Created: 2026-10-29. Last updated: 2026-11-04.
 | [../crates/pi-coding-agent/docs/deferred-context.md](../crates/pi-coding-agent/docs/deferred-context.md) | You change deferred skills or context entries, the `contextExposure` setting, or what `tool_search` returns for them. It has the extension API for `contextEntries`. |
 | [../crates/pi-coding-agent/docs/acp-providers.md](../crates/pi-coding-agent/docs/acp-providers.md) | You change the ACP client provider, the `/acp` browser, or the `acpAgents` setting. It records the ACP registry format and how Kiro CLI and Amp run over ACP. |
 | [../crates/pi-coding-agent/docs/mcp.md](../crates/pi-coding-agent/docs/mcp.md) | You change when MCP servers connect (`lifecycle`) or the MCP tool cache in `mcp-cache/`. |
+| [../crates/pi-tui/docs/fancy-regex.md](../crates/pi-tui/docs/fancy-regex.md) | You change a markdown rule in pi-tui that uses `fancy-regex`. It records which calls panic and how the lexer handles a backtrack-limit error. |

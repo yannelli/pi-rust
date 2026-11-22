@@ -157,11 +157,12 @@ fn switches_from_raw_to_rendered_math_when_a_streamed_delimiter_closes() {
     assert_eq!(plain(&md.render(80)), ["Map ℂ³"]);
 }
 
-/// Renders with tagged bold and italic so emphasis boundaries show up in the text.
+/// Renders with tagged bold, italic, and code so token boundaries show up in the text.
 fn rendered_tagged(text: &str) -> Vec<String> {
     let theme = MarkdownTheme {
         bold: Rc::new(|text: &str| format!("<b>{text}</b>")),
         italic: Rc::new(|text: &str| format!("<i>{text}</i>")),
+        code: Rc::new(|text: &str| format!("<code>{text}</code>")),
         ..default_theme()
     };
     let mut md = Markdown::new(text, 0, 0, theme, None, MarkdownOptions::default());
@@ -335,4 +336,15 @@ fn renders_html_like_tags_as_text() {
     assert!(joined.contains("hidden content") || joined.contains("<thinking>"));
     let joined = plain(&markdown("```html\n<div>Some HTML</div>\n```").render(80)).join("\n");
     assert!(joined.contains("<div>") && joined.contains("</div>"));
+}
+
+#[test]
+fn renders_a_paragraph_longer_than_the_backtrack_limit() {
+    let _caps = Capabilities::plain();
+    let suffix = "hello world <i>em</i> <code>a*b*</code> end";
+    for run in ["hello world ".repeat(35_000), "hello world hello world hello world\n".repeat(11_700)] {
+        let rendered = rendered_tagged(&format!("{run}*em* `a*b*` end")).join(" ");
+        assert_eq!(rendered.matches("hello").count(), run.matches("hello").count());
+        assert!(rendered.ends_with(suffix), "{:?}", &rendered[rendered.len().saturating_sub(80)..]);
+    }
 }
