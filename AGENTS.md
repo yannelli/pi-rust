@@ -27,6 +27,7 @@
 | Run the scheduled gap review | [docs/agents/daily-gap-check.md](docs/agents/daily-gap-check.md) |
 | Change the Cursor or Google Antigravity provider | [docs/providers/subscription-providers.md](docs/providers/subscription-providers.md) |
 | Change a `fancy-regex` markdown rule in pi-tui | [crates/pi-tui/docs/fancy-regex.md](crates/pi-tui/docs/fancy-regex.md) |
+| Change RSA in `node:crypto` | [crates/pi-js/docs/rsa.md](crates/pi-js/docs/rsa.md) |
 
 All documents are listed in [docs/INDEX.md](docs/INDEX.md).
 

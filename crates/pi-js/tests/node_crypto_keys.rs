@@ -279,6 +279,20 @@ out.encryption = [
   crypto.publicEncrypt(publicKey, secret).length,
 ];
 try { crypto.privateDecrypt(privateKey, Buffer.alloc(128, 1)); } catch (e) { out.badDecrypt = e.code; }
+const label = Buffer.from([0xff, 0, 0xfe]);
+out.binaryLabel = crypto
+  .privateDecrypt({ key: privateKey, oaepHash: "sha256", oaepLabel: label }, crypto.publicEncrypt({ key: publicKey, oaepHash: "sha256", oaepLabel: label }, secret))
+  .toString();
+const code = (f) => { try { f(); return null; } catch (e) { return e.code; } };
+out.aboveModulus = [crypto.constants.RSA_NO_PADDING, crypto.constants.RSA_PKCS1_PADDING].map((padding) =>
+  code(() => crypto.publicDecrypt({ key: publicKey, padding }, Buffer.alloc(128, 0xff))));
+out.privateInput = [1, 4].flatMap((padding) => [Buffer.alloc(128, 0xff), Buffer.alloc(0)].map((data) =>
+  code(() => crypto.privateDecrypt({ key: privateKey, padding }, data))));
+out.generateErrors = [{ modulusLength: 511 }, { modulusLength: 512, publicExponent: 4 }].map((options) => {
+  try { crypto.generateKeyPairSync("rsa", options); return null; } catch (e) { return [e.message, "code" in e]; }
+});
+const synthetic = crypto.privateDecrypt({ key: privateKey, padding: 1 }, Buffer.alloc(128, 1));
+out.implicitRejection = [Buffer.isBuffer(synthetic), synthetic.equals(crypto.privateDecrypt({ key: privateKey, padding: 1 }, Buffer.alloc(128, 1)))];
 out.pair = await new Promise((r) => crypto.generateKeyPair("rsa-pss", { modulusLength: 512 }, (e, pub, priv) => r([e, pub.type, priv.asymmetricKeyType])));
 const groups = {};
 for (const name of ["modp1", "modp2", "modp5", "modp14", "modp15", "modp16", "modp17", "modp18"]) {
@@ -335,6 +349,19 @@ async fn rsa_dh_and_primes_round_trip() {
         "signatures": [true, true, true, false, true, false],
         "encryption": ["top secret", "top secret", "top secret", "top secret", 128],
         "badDecrypt": "ERR_OSSL_RSA_OAEP_DECODING_ERROR",
+        "binaryLabel": "top secret",
+        "aboveModulus": ["ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS", "ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS"],
+        "privateInput": [
+            "ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS",
+            "ERR_OSSL_RSA_DATA_TOO_SMALL",
+            "ERR_OSSL_RSA_DATA_TOO_LARGE_FOR_MODULUS",
+            "ERR_OSSL_RSA_DATA_TOO_SMALL"
+        ],
+        "generateErrors": [
+            ["error:1C8000AB:Provider routines::key size too small", false],
+            ["error:020000B2:rsa routines::pub exponent out of range", false]
+        ],
+        "implicitRejection": [true, true],
         "pair": [null, "public", "rsa-pss"],
         "groups": {
             "modp1": [768, head, "f44c42e9a63a3620ffffffffffffffff"],
@@ -365,4 +392,42 @@ async fn rsa_dh_and_primes_round_trip() {
         ]
     });
     assert_same_keys(&run(RSA_DH_SCRIPT).await, &expected);
+}
+
+// The key, the 127-byte ciphertext, and the PSS signature come from Node 22.23.5 (OpenSSL 3.5.9).
+const RSA_NODE_VECTORS_SCRIPT: &str = r##"
+const crypto = require("node:crypto");
+const key = crypto.createPrivateKey(`-----BEGIN PRIVATE KEY-----
+MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBALJZy8iFlsYPB4gK
+NWDNIvX9F8VrfSesOtZOPY8ZzKIyw9P6YIqVsP4wGqrI3tdm/efd0WVDA6Fq5tzw
+CBRp1UfR+NWfdelC7XCXOGItCpMQBSOzVVke5wEzBlqm/KSOjaKcJidZklOQEN0n
+K/vt8+/LW1lvu6WCprZwKsjE77y1AgMBAAECgYA68ThK9fNlU3Q+vnjzm/gQ6esg
+QKzlHqN3TfZEQ9eAR1y2wsmDI4OSDh3SEX6sG4qQRZu9Zo9dmnHf1Kgm7u8gNuI0
+LL5Nf4YzFdu4HN+aWXp9CogjeaZTvbx1YVqhepu/9Kbqaj39Deit7oCffNw5zRiY
+xjLERFMo4uCx5sHWZQJBAN9GKYTnOjk1cfCH0MZt02IX2aGD/m2V/ElFOkNORyGK
+QUYv5X/USc981JIznnX4en9C9ZEHMis07p1TnZPjF38CQQDMff3lUP6b/UwmvsaC
+zinppzFy/wNfR3nnBY94zXPPLAhplX1ZMB33BbdL7jZUEOQdG5hBtgRd2HpwwT77
+6WXLAkA54diVqdRATIizUKJhLsukHIbBBpUJF98Fp7rJBBwQp+TwKy6WCxTvg28g
+T91+u+IV5+f9px3scZaCltC9LBxFAkANj4VYwahAu+li4F/VqMpKvlWfJJ4aoWjK
+EypSfn1hja/5IHqxgWlbSju/g0qDBKO78mqEYQelGYf1FjuRBQdFAkEAvBCOMM4a
+8thy1gqkjAT/cHNFcUAcEYOKJA157BYtLbG+DuNbeW3A0uyD4nFvqZd+3UFN42Po
+++jq0FwMMf4cgg==
+-----END PRIVATE KEY-----`);
+const publicKey = crypto.createPublicKey(key);
+const pss = Buffer.from("60b31b534dd19a2c592c0151619a4bbda8bfc20de9451f48af92b3befb87a8e63f64e71ac1d1fb3a29ef1365a446a8ec3518eb7629955181ec7c456c00e5906e443b8eb8d499d8c75f612ba90c746e34191c781353a2912774df1619001ac6fc437d31eafd46e278b9ac93ba20b400d4919b1d803b1bab8c7486d834cb6eeaa9", "hex");
+return {
+  synthetic: crypto.privateDecrypt({ key, padding: 1 }, Buffer.alloc(128, 1)).toString("hex"),
+  short: crypto.privateDecrypt({ key, padding: 1 }, Buffer.from("c2bed0e1891df04afdf58f9c95dc65403e02b5f7c7df9ec333509687144919313c467e5bc243ea51c3476e8a60ccd6480b558b8127c0bd6d33c989286e24e83b7fa2763d554a1d61be7768dc0379c529501be823f203821527d453e446c33c5943126edf465c0bc5d60d90a048f4c2f86276dc99b724ed33ca21056573647a", "hex")).toString(),
+  pss: [20, -2, 32].map((saltLength) => crypto.verify("sha256", Buffer.from("payload"), { key: publicKey, padding: 6, saltLength }, pss)),
+};
+"##;
+
+#[tokio::test]
+async fn rsa_matches_node_vectors() {
+    let expected = json!({
+        "synthetic": "96f2037942149f132cd97b86d0b2ebd63e70aa2c05960424f29342d286c561913f2502ef076ecc0c7fad50a14bdeb13fb6fd9180",
+        "short": "top secret",
+        "pss": [true, true, false]
+    });
+    assert_same_keys(&run(RSA_NODE_VECTORS_SCRIPT).await, &expected);
 }

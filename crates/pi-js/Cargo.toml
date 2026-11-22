@@ -38,7 +38,7 @@ ed448-goldilocks = { version = "=0.14.0-pre.15", default-features = false, featu
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 getrandom = { version = "0.4.3", features = ["sys_rng"] }
 k256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
-md-5 = "0.10.6"
+md-5 = "0.11.0"
 notify = "8.2.0"
 num-bigint = "0.5.1"
 num-traits = "0.2.19"
@@ -58,8 +58,8 @@ p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecd
 p384 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
 p521 = { version = "0.14.0", default-features = false, features = ["ecdsa", "ecdh", "std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["encryption", "3des"] }
-rsa = { version = "0.9.10", default-features = false, features = ["std", "u64_digit", "sha2", "hazmat"] }
-sha1 = "0.10.6"
+rsa = { version = "0.10.0", default-features = false, features = ["std", "hazmat", "pkcs1v15"] }
+sha1 = "0.11.0"
 socket2 = { version = "0.6.5", features = ["all"] }
 unicode-segmentation = "1.12"
 url = "2.5.8"
