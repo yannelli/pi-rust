@@ -26,6 +26,8 @@ An edit result stores the numbered display diff in `details.diff` and the unifie
 
 ## When upstream changes the `diff` version
 
+`cargo xtask parity` compares `dependencies.diff` in the upstream coding-agent manifest with `jsdiffVersion` in [upstream.json](upstream.json). The report flags a different version range or a removed dependency. Update `jsdiffVersion` after you check the port against the new version.
+
 1. Read the jsdiff release notes for changes to `diffLines`, `diffWords`, `structuredPatch`, and `formatPatch`. Also look for new jsdiff functions or options that upstream starts to use.
 2. Compare the port with the new version. The comparison does not run in CI.
 

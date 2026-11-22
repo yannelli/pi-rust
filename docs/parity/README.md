@@ -41,6 +41,7 @@ cargo xtask parity --upstream ../pi-upstream --out parity-report.md
 | Extension API | `ExtensionAPI` in `packages/coding-agent/src/core/extensions/types.ts` | `crates/pi-coding-agent/src/extensions/` |
 | Node built-ins | `require("module").builtinModules` (Node 22) | `crates/pi-js/src/resolve/mod.rs`, `unsupported.rs` |
 | Packages | `packages/*` | `crates/pi-*` |
+| Edit diff dependency | `dependencies.diff` in `packages/coding-agent/package.json` | `jsdiffVersion` in `docs/parity/upstream.json` |
 
 The report cannot see these items. When an upstream commit changes them, check them by hand: TUI rendering, keybindings, themes, the system prompt text, compaction prompts, provider request bodies, and docs.
 
