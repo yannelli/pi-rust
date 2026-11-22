@@ -17,7 +17,22 @@ export const resolveModelScopeWithDiagnostics = unsupportedFunction("resolveMode
 export const runPrintMode = unsupportedFunction("runPrintMode");
 export const runRpcMode = unsupportedFunction("runRpcMode");
 
-export const AgentSession = unsupportedClass("AgentSession");
+// The public methods of upstream `AgentSession` (v1.6.0). pi-rust sessions do not inherit from
+// this class, so a method an extension replaces here never runs.
+const AGENT_SESSION_METHODS = [
+	"subscribe", "dispose", "refreshContext", "setCacheWarmingMode", "getActiveToolNames",
+	"getCallableToolNames", "getAllTools", "getToolDefinition", "setActiveToolsByName", "setScopedModels",
+	"prompt", "steer", "followUp", "sendCustomMessage", "sendUserMessage", "clearQueue", "getSteeringMessages",
+	"getFollowUpMessages", "abort", "waitForIdle", "setModel", "cycleModel", "setThinkingLevel",
+	"cycleThinkingLevel", "getAvailableThinkingLevels", "supportsThinking", "setSteeringMode",
+	"setFollowUpMode", "compact", "abortCompaction", "abortBranchSummary", "setAutoCompactionEnabled",
+	"bindExtensions", "reload", "abortRetry", "setAutoRetryEnabled", "executeBash", "recordBashResult",
+	"abortBash", "setSessionName", "navigateTree", "getUserMessagesForForking", "getSessionStats",
+	"getContextUsage", "exportToHtml", "exportToJsonl", "summarizeForBugReport", "getLastAssistantText",
+	"createReplacedSessionContext", "hasExtensionHandlers",
+];
+
+export const AgentSession = unsupportedClass("AgentSession", AGENT_SESSION_METHODS);
 export const AgentSessionRuntime = unsupportedClass("AgentSessionRuntime");
 export const DefaultPackageManager = unsupportedClass("DefaultPackageManager");
 export const ExtensionRunner = unsupportedClass("ExtensionRunner");
