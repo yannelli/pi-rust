@@ -43,14 +43,14 @@ impl<'a> LineDiff<'a> {
 /// One line diff with the default context for both the display diff and the patch.
 pub fn generate_edit_diff(path: &str, old: &str, new: &str) -> EditDiff {
     let lines = LineDiff::new(old, new);
-    let (diff, first_changed_line) = display_diff(&lines, old, new, DEFAULT_CONTEXT_LINES);
+    let (diff, first_changed_line) = display_diff(&lines, DEFAULT_CONTEXT_LINES);
     EditDiff { diff, first_changed_line, patch: unified_patch(&lines, path, DEFAULT_CONTEXT_LINES) }
 }
 
 /// Display diff with line numbers and `context` lines around each change. Returns the diff and
 /// the first changed line number in the new file.
 pub fn generate_diff_string(old: &str, new: &str, context: usize) -> (String, Option<usize>) {
-    display_diff(&LineDiff::new(old, new), old, new, context)
+    display_diff(&LineDiff::new(old, new), context)
 }
 
 /// Standard unified patch with file headers and `context` lines around each change.
@@ -58,8 +58,13 @@ pub fn generate_unified_patch(path: &str, old: &str, new: &str, context: usize) 
     unified_patch(&LineDiff::new(old, new), path, context)
 }
 
-fn display_diff(lines: &LineDiff, old: &str, new: &str, context: usize) -> (String, Option<usize>) {
-    let width = old.split('\n').count().max(new.split('\n').count()).to_string().len();
+/// `text.split('\n').count()` of the text that gave the tokens.
+fn line_count(tokens: &[&str]) -> usize {
+    tokens.len() + usize::from(tokens.last().is_none_or(|line| line.ends_with('\n')))
+}
+
+fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
+    let width = line_count(&lines.old).max(line_count(&lines.new)).to_string().len();
     let mut out = String::new();
     let (mut old_num, mut new_num) = (1usize, 1usize);
     let mut last_was_change = false;
@@ -69,10 +74,11 @@ fn display_diff(lines: &LineDiff, old: &str, new: &str, context: usize) -> (Stri
     };
 
     for (i, change) in lines.changes.iter().enumerate() {
-        let text: Vec<&str> = lines.lines(change).iter().map(|line| line.strip_suffix('\n').unwrap_or(line)).collect();
+        let text = lines.lines(change);
         if change.kind != ChangeKind::Equal {
             first_changed.get_or_insert(new_num);
             for line in text {
+                let line = line.strip_suffix('\n').unwrap_or(line);
                 if change.kind == ChangeKind::Added {
                     let _ = writeln!(out, "+{new_num:>width$} {line}");
                     new_num += 1;
@@ -101,6 +107,7 @@ fn display_diff(lines: &LineDiff, old: &str, new: &str, context: usize) -> (Stri
                 new_num += start - cursor;
             }
             for line in &text[start..end] {
+                let line = line.strip_suffix('\n').unwrap_or(line);
                 let _ = writeln!(out, " {old_num:>width$} {line}");
                 old_num += 1;
                 new_num += 1;
