@@ -2,6 +2,26 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.27] - 2026-11-22
+
+### Added
+
+- **coding-agent:** share sessions on pi-rust.com ([952d39f](https://github.com/yannelli/pi-rust/commit/952d39fdfc1be47fb40028f159bbb897a0cc07c1))
+- **coding-agent:** choose how provider requests identify pi-rust ([c37dd23](https://github.com/yannelli/pi-rust/commit/c37dd23848a58619d94194b7f764eec067a63580))
+- **coding-agent:** report install telemetry as off by default to extensions ([5ee12ba](https://github.com/yannelli/pi-rust/commit/5ee12ba81813e98b7e70c3040806c6241dc54bd1))
+- **catalog:** read the model catalog from pi-rust.com instead of pi.dev ([80fe75f](https://github.com/yannelli/pi-rust/commit/80fe75f42b07bf5270a58dfc7d66355b5a8a56db))
+- **coding-agent:** send opt-in install telemetry to pi-rust.com, off by default ([bee171e](https://github.com/yannelli/pi-rust/commit/bee171ebc589c6eda33f37bc74b383d7cf6ce01c))
+- **js:** replace Hickory with a scoped DNS resolver ([923837b](https://github.com/yannelli/pi-rust/commit/923837b48488050f1b1cd1fee335fbbbf66fcf3e))
+
+### Fixed
+
+- **embedded:** wait for running callbacks in pi_embedded_free ([15a62e0](https://github.com/yannelli/pi-rust/commit/15a62e026f5941d07f4a7ca8cd997d332fe470c2))
+- **extensions:** load packages passed to pi -e and fix extension SDK gaps ([8085589](https://github.com/yannelli/pi-rust/commit/80855896dea2d9c3558809c04444c445054c9ac0))
+- **js:** launch DNS utilities from verified Windows drive paths ([1f510e5](https://github.com/yannelli/pi-rust/commit/1f510e594a03dfc85c93f1f49baf4ef1c5e1e097))
+- **js:** harden DNS queries and system resolver discovery ([758335a](https://github.com/yannelli/pi-rust/commit/758335aaf69bb0bf5883f1ad6378275e1cd70262))
+- **js:** match Node DNS replies and resolver failover ([f80217e](https://github.com/yannelli/pi-rust/commit/f80217e511970dc92ca9e8b3b5bd62128923c07c))
+- **js:** discover active macOS DNS servers ([7fb2da7](https://github.com/yannelli/pi-rust/commit/7fb2da7be00c93b5afb6f661923e7edf4797f9a2))
+
 ## [0.12.26] - 2026-11-22
 
 ### Changed
