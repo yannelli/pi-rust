@@ -29,8 +29,12 @@ To change the installation, set these environment variables:
 | Variable | Effect |
 | --- | --- |
 | `PI_VERSION` | Install this release, for example `0.5.3`, in place of the latest release. |
-| `PI_INSTALL_DIR` | Install `pi` in this directory. Do not use `~/.cargo/bin`, because `pi update --self` treats a binary there as a cargo installation. |
-| `PI_RELEASES_URL` | Download from a mirror of `https://github.com/yannelli/pi-rust/releases`. The mirror must serve `latest/download/SHA256SUMS` and `download/<tag>/<file>`. |
+| `PI_INSTALL_DIR` | Install `pi` in this directory. |
+| `PI_RELEASES_URL` | Download from a mirror of `https://github.com/yannelli/pi-rust/releases`. |
+
+Do not set `PI_INSTALL_DIR` to `~/.cargo/bin`. `pi update --self` treats a binary there as a cargo installation.
+
+The mirror in `PI_RELEASES_URL` must serve `latest/download/SHA256SUMS` and `download/<tag>/<file>`.
 
 Example:
 
@@ -48,7 +52,7 @@ On macOS and Linux (x86_64 and arm64):
 brew install yannelli/tap/pi
 ```
 
-The formula installs the release archive for your platform. Update with `brew upgrade yannelli/tap/pi`. `pi update --self` does not replace a Homebrew installation.
+The formula installs the release archive for your platform. To update, run `brew upgrade yannelli/tap/pi`. `pi update --self` does not replace a Homebrew installation.
 
 ## Manual install
 
@@ -56,7 +60,7 @@ Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for
 
 - `pi` or `pi.exe`
 - `README.md` and `CHANGELOG.md`
-- `LICENSE`, `LICENSE-pi-acp`, `LICENSE-node`, `LICENSE-v8`, `LICENSE-mcp-typescript-sdk`, `LICENSE-chalk`, `LICENSE-proper-lockfile`, `LICENSE-signal-exit`, and `THIRD-PARTY-LICENSES.md`
+- The license files
 
 | Platform | Target |
 | --- | --- |
@@ -73,13 +77,27 @@ Each [release](https://github.com/yannelli/pi-rust/releases) has one archive for
 The Linux binaries are static, so they run on all distributions, including Termux.
 
 ```sh
-target=x86_64-unknown-linux-musl   # pick yours from the table
-tag=$(curl -fsSL https://api.github.com/repos/yannelli/pi-rust/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
-curl -fsSLO "https://github.com/yannelli/pi-rust/releases/download/$tag/pi-$tag-$target.tar.gz"
-curl -fsSLO "https://github.com/yannelli/pi-rust/releases/download/$tag/SHA256SUMS"
-grep " pi-$tag-$target.tar.gz$" SHA256SUMS | sha256sum -c -   # macOS: shasum -a 256 -c -
-tar -xzf "pi-$tag-$target.tar.gz"
-mkdir -p ~/.local/bin && install -m 755 "pi-$tag-$target/pi" ~/.local/bin/pi   # ~/.local/bin must be on PATH
+# Pick your target from the table.
+target=x86_64-unknown-linux-musl
+api=https://api.github.com/repos/yannelli/pi-rust/releases/latest
+base=https://github.com/yannelli/pi-rust/releases/download
+
+# Get the tag of the latest release.
+tag=$(curl -fsSL "$api" \
+  | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+file="pi-$tag-$target.tar.gz"
+
+curl -fsSLO "$base/$tag/$file"
+curl -fsSLO "$base/$tag/SHA256SUMS"
+
+# On macOS, use shasum -a 256 -c - in place of sha256sum -c -.
+grep " $file$" SHA256SUMS | sha256sum -c -
+
+tar -xzf "$file"
+
+# ~/.local/bin must be on PATH.
+mkdir -p ~/.local/bin \
+  && install -m 755 "pi-$tag-$target/pi" ~/.local/bin/pi
 pi --version
 ```
 
@@ -88,12 +106,21 @@ If macOS stops `pi` after a browser download, run `xattr -d com.apple.quarantine
 ### Windows
 
 ```powershell
-$target = "x86_64-pc-windows-msvc"   # or aarch64-pc-windows-msvc
-$tag = (Invoke-RestMethod https://api.github.com/repos/yannelli/pi-rust/releases/latest).tag_name
-Invoke-WebRequest "https://github.com/yannelli/pi-rust/releases/download/$tag/pi-$tag-$target.zip" -OutFile pi.zip
+# For Windows arm64, use aarch64-pc-windows-msvc.
+$target = "x86_64-pc-windows-msvc"
+$api = "https://api.github.com/repos/yannelli/pi-rust/releases/latest"
+$base = "https://github.com/yannelli/pi-rust/releases/download"
+
+# Get the tag of the latest release.
+$tag = (Invoke-RestMethod $api).tag_name
+Invoke-WebRequest "$base/$tag/pi-$tag-$target.zip" -OutFile pi.zip
 Expand-Archive pi.zip -DestinationPath "$env:LOCALAPPDATA\pi" -Force
 $bin = "$env:LOCALAPPDATA\pi\pi-$tag-$target"
-[Environment]::SetEnvironmentVariable("Path", "$([Environment]::GetEnvironmentVariable('Path', 'User'));$bin", "User")
+[Environment]::SetEnvironmentVariable(
+  "Path",
+  "$([Environment]::GetEnvironmentVariable('Path', 'User'));$bin",
+  "User"
+)
 ```
 
 Then open a new terminal. The `Path` change applies only to new terminals.

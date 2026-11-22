@@ -47,7 +47,9 @@ The `prompt` response data has `agentInvoked` when pi knows whether the prompt r
 | A prompt that started a run | `started` | `true` |
 | A prompt queued as steering or a follow-up | `queued` | absent |
 
-A client can finish the turn at once when `agentInvoked` is `false`. When an extension command sends a prompt, the response can come before the run starts. If that prompt then starts no run, because an abort cancels it or an `input` handler takes it, pi sends `{"type": "prompt_result", "id": <the prompt's id>, "agentInvoked": false}` once no extension prompt is pending, so the client can finish the turn.
+A client can finish the turn at once when `agentInvoked` is `false`.
+
+When an extension command sends a prompt, the response can come before the run starts. An abort can cancel that prompt, or an `input` handler can take it. If the prompt then starts no run, pi sends `{"type": "prompt_result", "id": <the prompt's id>, "agentInvoked": false}` once no extension prompt is pending. The client can then finish the turn.
 
 ## Abort
 

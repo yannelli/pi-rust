@@ -64,8 +64,12 @@ The default agent directory is `~/.pi/agent`. Set `PI_CODING_AGENT_DIR` to use a
 | `marketplace/bin/<tag>/<target>/` | Binaries shared by extensions from the same release |
 
 The default index comes from releases of `yannelli/pi-rust-extensions` on GitHub.
-Set `PI_MARKETPLACE_URL` to use another asset base URL. The public key and signature check stay the same.
-With this override, pi reads `<base>/index.json` for the latest release and `<base>/<tag>/index.json` for a specific release.
+
+To use another asset base URL, set `PI_MARKETPLACE_URL`. The public key and signature check stay the same. With this override, pi reads these indexes:
+
+- `<base>/index.json` for the latest release.
+- `<base>/<tag>/index.json` for a specific release.
+
 The signature file is `index.json.sig` next to the index. Binary URLs come from the signed index.
 
 With `PI_OFFLINE=1`, pi uses installed extensions without a download. Search and new installs need network access. In `/extensions`, the Marketplace tab shows `Marketplace unavailable:` with the error, and the Installed tab continues to work.
