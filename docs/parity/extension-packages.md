@@ -50,11 +50,26 @@ The checks used temporary homes and agent directories. The five terminal checks 
 
 The CLI also loaded `-e npm:@narumitw/pi-goal@0.55.3` into a fresh temporary package directory. A second run with `--offline` reused that installation. Both runs registered the published entry point and returned the expected response to `/goal status`.
 
+## Windows checks
+
+All 25 packages, the five terminal menus and the AgentFS check also passed on Windows 11 x64 build 26300 with Node 26.13.0. The CLI was a debug `x86_64-pc-windows-gnu` build; releases use MSVC. Package prefixes and temporary directories had spaces in their paths, and the terminal checks ran in a Windows pseudoconsole. The Windows run found two more host gaps:
+
+| Before the fix | Change |
+| --- | --- |
+| Accounts failed to load. Its `fchmodSync` call on a descriptor opened for reading threw `EACCES`. | Reopen the handle with attribute access, as libuv does, so `fchmod` sets the read-only attribute through any descriptor. |
+| In RPC, JSON and print modes, `-e npm:` wrote npm's output into the protocol stream on stdout, and npm inherited the protocol's stdin. Unix redirects the stdout descriptor, but Windows does not. | While pi owns stdout, run package manager commands with stdin closed and stdout sent to stderr, as upstream does. |
+
+The CLI also loaded a local package given as an absolute path with backslashes or forward slashes, as a `.\` relative path and as an entry file. It loaded `-e npm:@narumitw/pi-goal@0.55.3` online and again with `--offline`.
+
+The Node backend starts more slowly on Windows. In the debug build, Chat drew its first frame after about 20 seconds; a QuickJS package took about 2 seconds. On Windows CI, the Node backend tests also take about twice as long as on macOS and Linux. The check scripts allow 60 to 90 seconds for each package.
+
+## Final macOS build
+
 The final debug CLI had SHA-256 `26124f22dbd015c9a2f85aa562abbe8b7aa226d37e5d537ab73f908c1fead222`. All 1,935 tests in `pi-coding-agent` passed. Five regression tests for sessions, accounts and file operations passed again with Node selected explicitly. Rust formatting and workspace Clippy passed. The macOS linker emitted the same compact-unwind size warning on the baseline and final debug builds.
 
 ## Repeat the checks
 
-From the repository root, build the local CLI and install the pinned npm packages in a temporary directory. Pi supplies the extension SDK. The install command omits peer dependencies and package lifecycle scripts. npm resolves each package's dependency ranges at install time. Use Node 22 or later and Python 3.9 or later with SQLite. The terminal check requires a POSIX pseudoterminal.
+From the repository root, build the local CLI and install the pinned npm packages in a temporary directory. Pi supplies the extension SDK. The install command omits peer dependencies and package lifecycle scripts. npm resolves each package's dependency ranges at install time. Use Node 22 or later and Python 3.9 or later with SQLite. The terminal check uses a POSIX pseudoterminal, or a pseudoconsole on Windows. On Windows, run the commands in Git Bash and use `py -3` for `python3`. The scripts add `.exe` to `target/debug/pi`.
 
 ```sh
 cargo build --locked -p pi-coding-agent --bin pi
