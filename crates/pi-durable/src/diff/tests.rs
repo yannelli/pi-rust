@@ -1,5 +1,19 @@
 use super::*;
 
+mod line_changes;
+mod patch;
+
+struct Xorshift(u32);
+
+impl Xorshift {
+    fn pick(&mut self, n: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 17;
+        self.0 ^= self.0 << 5;
+        self.0 as usize % n
+    }
+}
+
 /// `(old, new, context, display diff, first changed line, patch)`, as upstream pi and jsdiff 8.0.4 give them.
 type Case = (&'static str, &'static str, usize, &'static str, Option<usize>, &'static str);
 
@@ -97,15 +111,9 @@ fn line_diffs_match_upstream() {
 /// The xorshift32 pair of `scripts/jsdiff-oracle.mjs`: 3,000 lines with 40% of them changed.
 fn large_pair() -> (String, String) {
     const VOCAB: [&str; 8] = ["}", "", "  return x;", "a", "b", "\tif (x) {", "x", "é中😀"];
-    let mut state: u32 = 0x2545_f491;
-    let mut next = move |n: u32| {
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        (state % n) as usize
-    };
-    let old: Vec<&str> = (0..3000).map(|_| VOCAB[next(8)]).collect();
-    let new: Vec<&str> = old.iter().map(|&line| if next(10) < 4 { VOCAB[next(8)] } else { line }).collect();
+    let mut rng = Xorshift(0x2545_f491);
+    let old: Vec<&str> = (0..3000).map(|_| VOCAB[rng.pick(8)]).collect();
+    let new: Vec<&str> = old.iter().map(|&line| if rng.pick(10) < 4 { VOCAB[rng.pick(8)] } else { line }).collect();
     (old.join("\n") + "\n", new.join("\n") + "\n")
 }
 
