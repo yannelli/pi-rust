@@ -90,15 +90,6 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) ->
     }
     let runtime = runner.sdk_model_runtime(args.u64(0))?;
     let value = match name {
-        "refresh" => refresh(&runner, &runtime, &args.json(1)).await,
-        "setRuntimeApiKey" => {
-            runtime.set_runtime_api_key(&args.str(1)?, &args.str(2)?);
-            Value::Null
-        }
-        "removeRuntimeApiKey" => {
-            runtime.remove_runtime_api_key(&args.str(1)?).await;
-            Value::Null
-        }
         "listCredentials" => json!(runtime.list_credentials().await.map_err(error)?),
         "getAvailable" => {
             runtime.refresh_configured_providers().await;
@@ -146,7 +137,7 @@ async fn create(runner: &Arc<ExtensionRunner>, options: &Value) -> Result<Value,
     Ok(json!(id))
 }
 
-async fn refresh(runner: &ExtensionRunner, runtime: &ModelRuntime, options: &Value) -> Value {
+pub(super) async fn refresh(runner: &ExtensionRunner, runtime: &ModelRuntime, options: &Value) -> Value {
     let allow_network = options["allowNetwork"].as_bool().unwrap_or(!offline());
     let providers =
         options["providers"].as_array().map(|list| list.iter().filter_map(Value::as_str).map(str::to_string).collect());

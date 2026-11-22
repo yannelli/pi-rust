@@ -153,26 +153,43 @@ export function createRuntime(onChange) {
 			return tracked;
 		},
 		registerProvider(name, config, extensionPath) {
-			runtime.providers.set(name, { config, extensionPath });
 			if (!runtime.modelsBound) {
-				runtime.pendingProviders.push(name);
+				runtime.pendingProviders.push({ name, config, extensionPath });
 				return;
 			}
-			runtime.applyProvider(name);
+			runtime.applyProvider(name, config, extensionPath);
 		},
-		applyProvider(name) {
-			const entry = runtime.providers.get(name);
-			if (!entry) return;
+		applyProvider(name, config, extensionPath) {
 			try {
-				runtime.modelCall("provider.register", name, providerJson(entry.config), entry.extensionPath);
+				runtime.setProvider(name, config, extensionPath);
 			} catch (error) {
 				call("error", {
-					extensionPath: entry.extensionPath,
+					extensionPath,
 					event: "register_provider",
 					error: error instanceof Error ? error.message : String(error),
 					stack: null,
 				});
 			}
+		},
+		setProvider(name, config, extensionPath) {
+			if (typeof name !== "string" || !config || typeof config !== "object") {
+				throw new TypeError("registerProvider requires a provider name and configuration.");
+			}
+			const effective = { ...runtime.providers.get(name)?.config };
+			for (const [key, value] of Object.entries(config)) {
+				if (value !== undefined) effective[key] = value;
+			}
+			runtime.modelCall("provider.register", name, providerJson(effective), extensionPath);
+			runtime.providers.set(name, { config: effective, extensionPath });
+		},
+		contextProvider(method, name, config) {
+			runtime.assertActive();
+			if (method === "get") return runtime.providers.get(name)?.config;
+			if (method === "register") {
+				return runtime.setProvider(name, config, runtime.providers.get(name)?.extensionPath ?? "ctx.modelRegistry");
+			}
+			if (method === "unregister") return runtime.unregisterProvider(name);
+			throw new Error(`Unknown provider operation: ${method}`);
 		},
 		/** Upstream `registerNativeProvider`: reported as unsupported where a registration error shows. */
 		registerNativeProvider(provider, extensionPath) {
@@ -189,10 +206,10 @@ export function createRuntime(onChange) {
 			call("error", { extensionPath, event: "register_provider", error, stack: null });
 		},
 		unregisterProvider(name) {
-			runtime.providers.delete(name);
-			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending !== name);
-			runtime.pendingNativeProviders = runtime.pendingNativeProviders.filter((pending) => pending.id !== name);
 			if (runtime.modelsBound) runtime.modelCall("provider.unregister", name);
+			runtime.providers.delete(name);
+			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending.name !== name);
+			runtime.pendingNativeProviders = runtime.pendingNativeProviders.filter((pending) => pending.id !== name);
 		},
 		registerVirtualModel(definition, extensionPath) {
 			const key = `${definition.provider}/${definition.id}`;
@@ -227,7 +244,9 @@ export function createRuntime(onChange) {
 		/** The model runtime exists: apply queued providers and virtual models, then directly. */
 		bindModels() {
 			runtime.modelsBound = true;
-			for (const name of runtime.pendingProviders.splice(0)) runtime.applyProvider(name);
+			for (const { name, config, extensionPath } of runtime.pendingProviders.splice(0)) {
+				runtime.applyProvider(name, config, extensionPath);
+			}
 			for (const pending of runtime.pendingNativeProviders.splice(0)) runtime.rejectNativeProvider(pending);
 			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
 		},

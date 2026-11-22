@@ -1,8 +1,9 @@
 // Event dispatch (upstream `core/extensions/runner.ts`): handlers run in load order, failures are
 // reported as extension errors, and each event combines handler results as upstream does.
 import { getCurrentSystemMessage } from "../pi-ai/src/utils/transcript.ts";
-import { call, errorMessage, errorStack } from "./bridge.js";
-import { boundaryContext, createCommandContext, createContext, createToolContext, linkEndedMessage } from "./context.js";
+import { call, callAsync, errorMessage, errorStack, optional } from "./bridge.js";
+import { boundaryContext, createCommandContext, createContext, createModelRegistry, createSessionManagerView, createToolContext, linkEndedMessage } from "./context.js";
+import { plain } from "./sdk_mirror.js";
 
 export const STALE_MESSAGE =
 	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
@@ -61,6 +62,8 @@ function elicitationResult(type, value) {
 
 export class Runner {
 	extensions = [];
+	sessionManagers = new Map();
+	modelRegistries = new Map();
 	staleMessage;
 	promptDepth = 0;
 	activePrompt;
@@ -103,6 +106,42 @@ export class Runner {
 			for (const [type, handlers] of ext.handlers) if (handlers.length > 0) types.add(type);
 		}
 		return [...types];
+	}
+
+	assertTargetActive(target) {
+		if (target === this.runtime.target) this.assertActive();
+		if (target !== 0) call("ctx.assertActive", target);
+	}
+
+	sessionManagerFor(target) {
+		if (!this.sessionManagers.has(target)) {
+			this.sessionManagers.set(target, createSessionManagerView(target, () => this.assertTargetActive(target)));
+		}
+		return this.sessionManagers.get(target);
+	}
+
+	modelRegistryFor(target) {
+		if (!this.modelRegistries.has(target)) {
+			const registry = createModelRegistry(target, this.makeStream, "models", () => this.assertTargetActive(target));
+			const key = async (method, ...args) => {
+				this.assertTargetActive(target);
+				await callAsync(`models.${method}`, target, ...args);
+			};
+			const provider = (method, name, config) => {
+				this.assertTargetActive(target);
+				if (target === this.runtime.target) return this.runtime.contextProvider(method, name, config);
+				return optional(call("models.contextProvider", target, method, name, plain(config, method)));
+			};
+			registry.runtime = {
+				setRuntimeApiKey: (name, value) => key("setRuntimeApiKey", name, value),
+				removeRuntimeApiKey: (name) => key("removeRuntimeApiKey", name),
+			};
+			registry.getRegisteredProviderConfig = (name) => provider("get", name);
+			registry.registerProvider = (name, config) => provider("register", name, config);
+			registry.unregisterProvider = (name) => provider("unregister", name);
+			this.modelRegistries.set(target, registry);
+		}
+		return this.modelRegistries.get(target);
 	}
 
 	createContext() {

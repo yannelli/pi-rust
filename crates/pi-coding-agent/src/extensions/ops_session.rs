@@ -146,10 +146,17 @@ pub(super) fn read_models(
         }
         "getProvider" => {
             let provider = args.str(2)?;
+            let oauth = runtime.resolver().oauth(&provider);
             let registry = runtime.registry();
-            match registry.has_provider(&provider) {
-                true => json!({"id": provider, "name": registry.provider_name(&provider).unwrap_or(&provider)}),
-                false => Value::Null,
+            if registry.has_provider(&provider) || oauth.is_some() {
+                let mut auth = json!({});
+                if let Some(oauth) = oauth {
+                    auth["oauth"] = json!({"name": oauth.name(), "isSubscription": oauth.is_subscription(),
+                        "loginLabel": oauth.login_label()});
+                }
+                json!({"id": provider, "name": registry.provider_name(&provider).unwrap_or(&provider), "auth": auth})
+            } else {
+                Value::Null
             }
         }
         "getRegisteredProviderIds" => json!(registered()),
@@ -302,6 +309,10 @@ fn action(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, arg
 fn context(runner: &ExtensionRunner, session: &Arc<AgentSession>, name: &str, target: u64) -> Result<Value, JsError> {
     let runner = runner.target_runner(target);
     Ok(match name {
+        "assertActive" if runner.is_stale() => {
+            return Err(error("This extension ctx is stale after session replacement or reload."));
+        }
+        "assertActive" => Value::Null,
         "mode" => json!(runner.mode().as_str()),
         "hasUI" => json!(runner.mode().has_ui()),
         "cwd" => json!(session.cwd().display().to_string()),
@@ -381,6 +392,17 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             match group {
                 "ctx" => context(runner, &session, name, target)?,
                 "session" => read_session(&session, &args.str(1)?, args)?,
+                "models" if name == "contextProvider" => {
+                    // A withSession context can outlive its worker. Provider callbacks and the
+                    // registered config belong to the worker of the replacement session.
+                    let bound =
+                        session.extension_runner().ok_or_else(|| error("No extension runner for target session"))?;
+                    if std::ptr::eq(runner, bound.as_ref()) {
+                        return Err(error("Provider operation requires a different session worker"));
+                    }
+                    let call = bound.call_json("contextProvider", vec![args.json(1), args.json(2), args.json(3)]);
+                    block_on_fresh(call).ok_or_else(|| error("Could not call the target session worker"))??
+                }
                 "models" => {
                     let registered =
                         || session.extension_runner().map(|runner| runner.provider_ids()).unwrap_or_default();

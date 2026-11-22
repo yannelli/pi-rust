@@ -182,6 +182,10 @@ The flag works only in print mode: with `-p`, with `--mode json`, or when stdin 
 ## Extensions
 
 ```sh
+# Load a package for this run.
+pi -e ./path/to/package
+pi -e npm:@narumitw/pi-goal
+
 # List built-in and installed extensions, including disabled ones.
 pi extensions list
 pi extensions search todo
@@ -226,7 +230,7 @@ PI_NODE_PATH=/opt/node22/bin/node pi --extension-runtime node
 | --- | --- |
 | `quickjs` | The embedded QuickJS engine. This is the default. |
 | `node` | A `node` process. |
-| `auto` | Node when a loaded package sets `package.json` `pi.runtime: "node"` or ships a `.node` addon. Otherwise QuickJS. |
+| `auto` | Node when a loaded package requests `pi.runtime: "node"` or pi finds a `.node` addon in the package or its installed runtime dependencies. Otherwise QuickJS. |
 
 - pi reads the choice from `--extension-runtime`, then `PI_EXTENSION_RUNTIME`, then `extensionRuntime` in the project settings, then in the global settings.
 - pi finds `node` in `PI_NODE_PATH`, then on `PATH`.

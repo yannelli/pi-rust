@@ -176,9 +176,9 @@ pub const CLI_OPTIONS: &[CliOption] = &[
     valued(
         "--extension",
         Some("-e"),
-        "<path>",
+        "<source>",
         File,
-        &["Load an extension file or builtin:<name> (can be used multiple times)"],
+        &["Load an extension file, package, or builtin:<name> (can be used multiple times)"],
     ),
     flag(
         "--no-extensions",

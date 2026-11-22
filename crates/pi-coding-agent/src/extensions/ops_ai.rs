@@ -44,9 +44,21 @@ fn request_options(runner: &ExtensionRunner, options: &Value) -> RequestOptions 
     request
 }
 
-/// The built-in OAuth flow named by `{ provider, name?, gateway? }`; a gateway selects Radius.
-fn oauth_for(spec: &Value) -> Result<Arc<dyn OAuthAuth>, JsError> {
+/// The selected runtime's effective flow, or the standalone SDK's built-in flow.
+fn oauth_for(runner: &ExtensionRunner, spec: &Value) -> Result<Arc<dyn OAuthAuth>, JsError> {
     let provider = spec["provider"].as_str().unwrap_or_default();
+    if let Some(group) = spec["group"].as_str() {
+        let target = spec["target"].as_u64().ok_or_else(|| error("Missing model runtime target"))?;
+        let runtime = match group {
+            "models" => runner.target_session(target)?.model_runtime().clone(),
+            "modelRuntime" => runner.sdk_model_runtime(target)?,
+            _ => return Err(error(format!("Unknown model runtime group: {group}"))),
+        };
+        return runtime
+            .resolver()
+            .oauth(provider)
+            .ok_or_else(|| error(format!("Provider {provider} has no OAuth login")));
+    }
     if let Some(gateway) = spec["gateway"].as_str() {
         return Ok(radius_oauth(spec["name"].as_str().unwrap_or("Radius"), gateway));
     }
@@ -80,7 +92,7 @@ impl AuthInteraction for JsInteraction {
 }
 
 async fn oauth(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
-    let (method, oauth) = (args.str(0)?, oauth_for(&args.json(1))?);
+    let (method, oauth) = (args.str(0)?, oauth_for(runner, &args.json(1))?);
     let failed = |failure: AuthError| error(failure.to_string());
     Ok(match method.as_str() {
         "refresh" => {

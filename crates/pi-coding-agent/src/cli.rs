@@ -77,7 +77,7 @@ pub struct Args {
     pub exclude_tools: Vec<String>,
     pub no_tools: bool,
     pub no_builtin_tools: bool,
-    /// `-e/--extension` paths or `builtin:<name>` (extension stream).
+    /// `-e/--extension` files, package sources, or `builtin:<name>`.
     pub extensions: Vec<String>,
     /// `-ne/--no-extensions` (extension stream).
     pub no_extensions: bool,

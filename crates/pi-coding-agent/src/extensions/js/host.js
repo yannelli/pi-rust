@@ -7,7 +7,7 @@ import { nativeFactory } from "./native.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
 import { groupScope, parentOps } from "./sdk_extensions.js";
-import { childOps } from "./sdk_mirror.js";
+import { childOps, plain } from "./sdk_mirror.js";
 import { routeStderr } from "./stderr_route.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
@@ -193,6 +193,7 @@ export function createHost(config) {
 			return errors;
 		},
 		bindModels: () => runtime.bindModels(),
+		contextProvider: (method, name, config) => plain(runtime.contextProvider(method, name, config), method) ?? null,
 		flagValues: () => Object.fromEntries(runtime.flagValues),
 		bind() {
 			runtime.bind();

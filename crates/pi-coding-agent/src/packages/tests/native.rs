@@ -15,6 +15,24 @@ fn memory_settings(global: serde_json::Value) -> Arc<SettingsManager> {
     Arc::new(SettingsManager::from_storage(Arc::new(storage), SettingsOptions { project_trusted: true }))
 }
 
+#[test]
+fn cli_native_entries_keep_their_package_root() {
+    let fixture = Fixture::new();
+    let package = fixture.cwd.join("pkg");
+    write(&package.join("package.json"), MANIFEST);
+    let mut options = ResourceLoaderOptions::new(&fixture.cwd, &fixture.agent_dir);
+    options.extension_sources = vec!["./pkg".into()];
+    options.no_extensions = true;
+    let mut loader = ResourceLoader::new(options);
+    loader.reload();
+    let entries = crate::extensions::load_entries(&loader.resources().extensions);
+    assert_eq!(entries.len(), 2);
+    let program = crate::packages::manifest::native_program(&package, "bin/ext");
+    assert!(entries.iter().all(|entry| entry.resolved_path == program));
+    assert_eq!(entries[0].path, "native:@x/tools/todo");
+    assert_eq!(entries[1].path, "native:@x/tools/memo");
+}
+
 #[tokio::test]
 async fn native_entries_resolve_toggle_and_load_with_their_package() {
     let fixture = Fixture::new();

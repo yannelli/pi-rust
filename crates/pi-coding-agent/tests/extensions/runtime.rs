@@ -136,6 +136,176 @@ async fn reload_loads_changed_extensions_and_starts_them_again() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn session_manager_identity_follows_the_bound_session() {
+    let source = r#"export default function (pi) {
+	const started = new WeakMap();
+	pi.on("session_start", (event, ctx) => started.set(ctx.sessionManager, event.reason));
+	pi.registerCommand("owner", { handler: (_args, ctx) => {
+		ctx.ui.notify(`started: ${started.get(ctx.sessionManager)}`);
+	} });
+	pi.registerCommand("replace", { handler: async (_args, ctx) => {
+		const original = ctx.sessionManager;
+		const originalId = original.getSessionId();
+		await ctx.newSession({ withSession: async (next) => {
+			const manager = next.sessionManager;
+			const replaced = manager !== original && manager.getSessionId() !== originalId;
+			let stale = false;
+			try { void ctx.sessionManager; } catch (error) { stale = error.message.includes("stale"); }
+			next.ui.notify(`replaced=${replaced}, stable=${manager === next.sessionManager}, stale=${stale}`);
+		} });
+	} });
+}"#;
+    let r = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    r.runtime.session().prompt("/owner", Vec::new()).await.unwrap();
+    r.runtime.session().prompt("/replace", Vec::new()).await.unwrap();
+    r.runtime.session().prompt("/owner", Vec::new()).await.unwrap();
+    r.runtime.session().reload_extensions().await.unwrap();
+    r.runtime.session().prompt("/owner", Vec::new()).await.unwrap();
+    assert_eq!(
+        r.ui.calls(),
+        [
+            "notify(info): started: startup",
+            "notify(info): replaced=true, stable=true, stale=true",
+            "notify(info): started: new",
+            "notify(info): started: reload",
+        ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn account_selection_writes_entries_and_scopes_auth_and_provider_overlays() {
+    let source = r#"export default function (pi) {
+        const started = new WeakSet();
+        pi.on("session_start", (_, ctx) => started.add(ctx.modelRegistry.runtime));
+        pi.registerCommand("activate", { handler: async (_, ctx) => {
+            const registry = ctx.modelRegistry;
+            const headers = { "X-Account": "test" };
+            registry.registerProvider("local", { baseUrl: "http://selected.invalid", headers });
+            const config = registry.getRegisteredProviderConfig("local");
+            if (config.headers !== headers || !started.has(registry.runtime)) throw new Error("lost registry identity");
+            await registry.runtime.setRuntimeApiKey("local", "synthetic-key");
+            const model = registry.find("local", "tiny");
+            const auth = await registry.getApiKeyAndHeaders(model);
+            const header = Object.entries(auth.headers ?? {}).find(([key]) => key.toLowerCase() === "x-account");
+            if (!auth.ok || auth.apiKey !== "synthetic-key" || header?.[1] !== "test" || model.baseUrl !== config.baseUrl)
+                throw new Error("account override did not reach the request");
+            let rejected = false;
+            try { registry.registerProvider("local", { models: [{}] }); } catch { rejected = true; }
+            if (!rejected || registry.getRegisteredProviderConfig("local") !== config) throw new Error("invalid update changed registration");
+            const id = ctx.sessionManager.appendCustomEntry("account-selection", { account: "test" });
+            if (!id || ctx.sessionManager.getEntry(id)?.data.account !== "test") throw new Error("selection did not persist");
+            ctx.ui.notify(id);
+        } });
+        pi.registerCommand("clear-account", { handler: async (_, ctx) => {
+            ctx.modelRegistry.unregisterProvider("local");
+            await ctx.modelRegistry.runtime.removeRuntimeApiKey("local");
+            if (ctx.modelRegistry.getRegisteredProviderConfig("local") !== undefined) throw new Error("config survived removal");
+        } });
+    }"#;
+    let first = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    let other = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    let first_session = first.runtime.session();
+    let other_session = other.runtime.session();
+    first_session.prompt("/activate", Vec::new()).await.unwrap();
+    let selection = first_session
+        .session_manager()
+        .entries()
+        .iter()
+        .map(entry_json)
+        .find(|entry| entry["customType"] == "account-selection")
+        .expect("account selection");
+    assert_eq!(first.ui.calls(), vec![format!("notify(info): {}", selection["id"].as_str().unwrap())]);
+    assert_eq!(first_session.model_runtime().api_key_for("local").await.as_deref(), Some("synthetic-key"));
+    assert!(!other_session.model_runtime().has_runtime_api_key("local"));
+    assert_eq!(other_session.model_runtime().get_model("local", "tiny").unwrap().base_url, "http://unused");
+    first_session.prompt("/clear-account", Vec::new()).await.unwrap();
+    assert!(!first_session.model_runtime().has_runtime_api_key("local"));
+    assert_eq!(first_session.model_runtime().get_model("local", "tiny").unwrap().base_url, "http://unused");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn account_radius_oauth_uses_the_bound_provider() {
+    let source = r#"export default (pi) => {
+        const credential = { type: "oauth", access: "sample", refresh: "sample-refresh", expires: 4102444800000 };
+        pi.registerCommand("check-radius", { handler: async (_, ctx) => {
+            const registry = ctx.modelRegistry;
+            const flow = registry.getProvider("radius")?.auth.oauth;
+            if (typeof flow?.login !== "function" || typeof flow.refresh !== "function") throw new Error("missing Radius OAuth");
+            if ((await flow.toAuth(credential)).apiKey !== credential.access) throw new Error("wrong Radius conversion");
+            if (registry.getProvider("absent-account-provider") !== undefined) throw new Error("unknown provider returned a flow");
+            ctx.ui.notify("builtin Radius");
+        } });
+        pi.registerCommand("radius-overlay", { handler: async (_, ctx) => {
+            const registry = ctx.modelRegistry;
+            registry.registerProvider("radius", { oauth: {
+                name: "Test Radius",
+                login: async () => credential,
+                refreshToken: async (item) => ({ ...item, access: "refreshed" }),
+                getApiKey: (item) => "test-" + item.access,
+            } });
+            const oauth = registry.getProvider("radius").auth.oauth;
+            const loggedIn = await oauth.login({ prompt: async () => "", notify: () => {} });
+            const refreshed = await oauth.refresh(loggedIn);
+            if (oauth.name !== "Test Radius" || (await oauth.toAuth(refreshed)).apiKey !== "test-refreshed")
+                throw new Error("provider overlay did not handle OAuth");
+            ctx.ui.notify("overlaid Radius");
+        } });
+        pi.registerCommand("clear-radius", { handler: (_, ctx) => ctx.modelRegistry.unregisterProvider("radius") });
+    }"#;
+    let first = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    let other = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    let session = first.runtime.session();
+    session.prompt("/radius-overlay", Vec::new()).await.unwrap();
+    other.runtime.session().prompt("/check-radius", Vec::new()).await.unwrap();
+    session.prompt("/clear-radius", Vec::new()).await.unwrap();
+    session.prompt("/check-radius", Vec::new()).await.unwrap();
+    assert_eq!(first.ui.calls(), ["notify(info): overlaid Radius", "notify(info): builtin Radius"]);
+    assert_eq!(other.ui.calls(), ["notify(info): builtin Radius"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn account_context_writes_follow_session_replacement() {
+    let source = r#"export default function (pi) {
+        pi.registerCommand("change", { handler: async (_, ctx) => {
+            const old = ctx.modelRegistry, manager = ctx.sessionManager, oauth = old.getProvider("radius").auth.oauth;
+            await ctx.newSession({ withSession: async (next) => {
+                for (const write of [() => manager.appendCustomEntry("wrong-session"),
+                    () => old.runtime.setRuntimeApiKey("local", "wrong-session"),
+                    () => oauth.toAuth({ type: "oauth", access: "sample", refresh: "", expires: 1 }),
+                    () => old.registerProvider("local", { baseUrl: "http://wrong.invalid" })]) {
+                    try { await write(); } catch (error) { if (error.message.includes("stale")) continue; }
+                    throw new Error("stale session accepted a write");
+                }
+                next.sessionManager.appendCustomEntry("after-replacement");
+                await next.modelRegistry.runtime.setRuntimeApiKey("local", "replacement-key");
+                next.modelRegistry.registerProvider("local", { baseUrl: "http://replacement.invalid" });
+                if (next.modelRegistry.getRegisteredProviderConfig("local").baseUrl !== "http://replacement.invalid")
+                    throw new Error("missing replacement registration");
+                next.ui.notify("account selected");
+            } });
+        } });
+        pi.registerCommand("check-account", { handler: async (_, ctx) => {
+            const config = ctx.modelRegistry.getRegisteredProviderConfig("local");
+            if (config?.baseUrl !== "http://replacement.invalid") throw new Error("worker did not retain registration");
+            if (await ctx.modelRegistry.getApiKeyForProvider("local") !== "replacement-key") throw new Error("wrong key");
+            ctx.ui.notify("selection active");
+        } });
+    }"#;
+    let r = runtime(source, Vec::new(), ExtensionMode::Rpc).await;
+    let original = r.runtime.session();
+    original.prompt("/change", Vec::new()).await.unwrap();
+    let current = r.runtime.session();
+    current.prompt("/check-account", Vec::new()).await.unwrap();
+    assert_eq!(r.ui.calls(), ["notify(info): account selected", "notify(info): selection active"]);
+    assert!(
+        !original.session_manager().entries().iter().any(|entry| entry_json(entry)["customType"] == "wrong-session")
+    );
+    assert!(
+        current.session_manager().entries().iter().any(|entry| entry_json(entry)["customType"] == "after-replacement")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn without_a_ui_dialogs_return_their_defaults() {
     let source = r#"export default function (pi) {
 	pi.registerCommand("ask", { handler: async (_args, ctx) => {

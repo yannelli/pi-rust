@@ -2,6 +2,7 @@
 // the session `target` through Rust at call time; target 0 is this runtime's own session, other
 // targets are sessions that replaced it (`withSession`).
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor, signalId } from "./bridge.js";
+import { rustOAuth } from "./provider_oauth.js";
 import { createUiContext } from "./ui.js";
 
 // pi-rust: the entries of this runtime's own session (target 0), and the same objects by id.
@@ -71,10 +72,14 @@ export function boundaryContext(plan) {
 	return { contextEntries, contextMessages, llmMessages, pendingMessages: plan.pendingMessages, canContinue: plan.canContinue };
 }
 
-/** `ctx.sessionManager`: read-only views of the session tree. */
-export function createSessionManagerView(target) {
+/** The session tree and its concrete manager's custom-entry writer. */
+export function createSessionManagerView(target, assertActive) {
 	const read = (method, ...args) => optional(call("session.read", target, method, ...args));
 	return {
+		appendCustomEntry(customType, data) {
+			assertActive?.();
+			return call("session.write", target, "appendCustomEntry", customType, data ?? null);
+		},
 		getCwd: () => read("getCwd"),
 		getSessionDir: () => read("getSessionDir"),
 		getSessionId: () => read("getSessionId"),
@@ -95,7 +100,7 @@ export function createSessionManagerView(target) {
 }
 
 /** `ctx.modelRegistry`: the session's model runtime, or SDK runtime `target` under `group` "modelRuntime". */
-export function createModelRegistry(target, makeStream, group = "models") {
+export function createModelRegistry(target, makeStream, group = "models", assertActive) {
 	const read = (method, ...args) => optional(call(`${group}.read`, target, method, ...args));
 	return {
 		refresh: async (options) => {
@@ -117,7 +122,13 @@ export function createModelRegistry(target, makeStream, group = "models") {
 		isUsingOAuth: (model) => Boolean(read("isUsingOAuth", model?.provider)),
 		getProviderDisplayName: (provider) => read("getProviderDisplayName", provider) ?? provider,
 		getProviderAuthStatus: (provider) => read("getProviderAuthStatus", provider),
-		getProvider: (provider) => read("getProvider", provider),
+		getProvider(provider) {
+			const entry = read("getProvider", provider);
+			if (entry?.auth?.oauth) {
+				entry.auth.oauth = rustOAuth({ provider, group, target }, entry.auth.oauth, assertActive);
+			}
+			return entry;
+		},
 		getRegisteredProviderIds: () => read("getRegisteredProviderIds") ?? [],
 		getApiKeyAndHeaders: (model) => callAsync(`${group}.auth`, target, model),
 		getApiKeyForProvider: (provider) => callAsync(`${group}.apiKey`, target, provider).then(optional),
@@ -160,11 +171,11 @@ export function createContext(runner, target = 0) {
 		},
 		get sessionManager() {
 			active();
-			return createSessionManagerView(target);
+			return runner.sessionManagerFor(target);
 		},
 		get modelRegistry() {
 			active();
-			return createModelRegistry(target, runner.makeStream);
+			return runner.modelRegistryFor(target);
 		},
 		get model() {
 			return read("ctx.model");
@@ -233,7 +244,6 @@ function createWritableSessionManager(target) {
 	return {
 		...createSessionManagerView(target),
 		appendMessage: (message) => write("appendMessage", message),
-		appendCustomEntry: (customType, data) => write("appendCustomEntry", customType, data ?? null),
 		appendCustomMessageEntry: (customType, content, display, details) =>
 			write("appendCustomMessageEntry", customType, content, Boolean(display), details ?? null),
 		appendSessionInfo: (name) => write("appendSessionInfo", name),

@@ -1,12 +1,13 @@
 # Documentation index
 
-Created: 2026-10-29. Last updated: 2026-11-21.
+Created: 2026-10-29. Last updated: 2026-11-22.
 
 | Document | Use it when |
 | --- | --- |
 | [../crates/pi-coding-agent/docs/settings.md](../crates/pi-coding-agent/docs/settings.md) | You configure list overflow or reduced-motion behavior in selectable TUI lists. |
 | [parity/README.md](parity/README.md) | You look for gaps against upstream pi or port an upstream commit. |
 | [parity/GAPS.md](parity/GAPS.md) | You need the open parity gaps and the pi-rust extensions. |
+| [parity/extension-packages.md](parity/extension-packages.md) | You want to check which published Pi extensions run and repeat the checks against a local build. |
 | [parity/sdk-child-session.md](parity/sdk-child-session.md) | You change the SDK `AgentSession` of `createAgentSession`. It lists the members that run and the ones that still throw. |
 | [parity/jsdiff.md](parity/jsdiff.md) | You change the edit diffs, the unified patches, or the word highlights of the diff view, or upstream changes its `diff` package version. |
 | [agents/node-compat.md](agents/node-compat.md) | You close a Node API gap in the extension runtime. |

@@ -177,15 +177,44 @@ async function runShell(shell, command, cwd, execOptions = {}, options = {}) {
 	}
 }
 
-/** A built-in tool as a tool definition; `operations` replace how bash runs commands. */
+async function executeFileTool(name, operations, params, signal, execute) {
+	let failure;
+	const dispatch = async (method, ...args) => {
+		try {
+			if (method === "detectImageMimeType") return await operations.detectImageMimeType?.(...args);
+			return await operations[method](...args);
+		} catch (error) {
+			if (name === "edit" && method === "access") {
+				const reason = error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
+				error = new Error(`Could not edit file: ${params.path}. ${reason}.`);
+			}
+			failure = { error };
+			throw error;
+		}
+	};
+	try {
+		return await execute(dispatch);
+	} catch (error) {
+		// Keep the extension's original rejection and Node error properties across the host call.
+		if (failure && !signal?.aborted) throw failure.error;
+		throw error;
+	}
+}
+
+/** A built-in tool as a tool definition. */
 function builtinDefinition(name, cwd, options = {}) {
 	const info = call("tools.builtinInfo", name);
+	const fileTool = name === "read" || name === "write" || name === "edit";
 	const toolOptions = { commandPrefix: options.commandPrefix, shellPath: options.shellPath };
-	if (options.operations) {
+	if (name === "read") {
+		toolOptions.autoResizeImages = options.autoResizeImages;
+		toolOptions.resizeOptions = options.resizeOptions;
+	}
+	const operations = options.operations;
+	if (operations && !fileTool) {
 		if (name !== "bash" && name !== "powershell") {
-			throw new Error(`Custom operations are supported for the bash and powershell tools, not ${name}`);
+			throw new Error(`Custom operations are not supported for the ${name} tool`);
 		}
-		const operations = options.operations;
 		toolOptions.operations = registerCallback(async (command, commandCwd, execOptions) => {
 			const onData = execOptions.dataKey ? (data) => call("bash.data", execOptions.dataKey, String(data)) : () => {};
 			const result = await operations.exec(command, commandCwd, {
@@ -200,14 +229,19 @@ function builtinDefinition(name, cwd, options = {}) {
 	if (typeof options.spawnHook === "function") toolOptions.spawnHook = registerCallback(options.spawnHook);
 	return {
 		...info,
-		async execute(toolCallId, params, signal, onUpdate) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const updateKey = onUpdate ? registerCallback(onUpdate) : undefined;
 			try {
-				return await callAsync("tools.builtinExecute", name, cwd, toolCallId, params, {
+				const toolCwd = (fileTool && ctx?.cwd) || cwd;
+				const execute = (dispatch) => callAsync("tools.builtinExecute", name, toolCwd, toolCallId, params, {
 					...toolOptions,
 					signal: signalId(signal),
 					updateKey,
-				});
+					model: name === "read" ? ctx?.model : undefined,
+				}, dispatch);
+				return fileTool && operations
+					? await executeFileTool(name, operations, params, signal, execute)
+					: await execute();
 			} finally {
 				if (updateKey !== undefined) releaseCallback(updateKey);
 			}
@@ -219,7 +253,7 @@ function toolFactories(name) {
 	const definition = (cwd, options) => builtinDefinition(name, cwd, options);
 	const tool = (cwd, options) => {
 		const { execute, ...rest } = builtinDefinition(name, cwd, options);
-		return { ...rest, execute: (toolCallId, params, signal, onUpdate) => execute(toolCallId, params, signal, onUpdate) };
+		return { ...rest, execute: (toolCallId, params, signal, onUpdate, ctx) => execute(toolCallId, params, signal, onUpdate, ctx) };
 	};
 	return [tool, definition];
 }

@@ -4,17 +4,17 @@
 use std::path::{Path, PathBuf};
 
 use super::brand::project_config_path;
-use super::discovery::{ResourceAccumulator, ResourceType, collect_resource_files};
-use super::paths::{canonicalize, file_kind, is_local_path, is_under_path, normalize, resolve_path};
+use super::discovery::{ResourceAccumulator, ResourceType};
+use super::paths::{canonicalize, is_local_path, is_under_path, normalize, resolve_path};
 use super::source_info::{
     BUILTIN_PATH_PREFIX, PathMetadata, ResolvedPaths, SourceInfo, SourceOrigin, SourceScope, create_source_info,
     is_synthetic_path, synthetic_path_source,
 };
 
-/// Resources named by `-e`: `builtin:<name>` paths and local files or directories. Package
-/// sources (`npm:`, `git:`, a directory with a `pi` manifest) come resolved in `packages`.
+/// Local `-e` files, directories and built-ins, together with managed package sources.
 pub fn resolve_extension_sources(sources: &[String], cwd: &Path, packages: &ResolvedPaths) -> ResolvedPaths {
     let mut acc = ResourceAccumulator::default();
+    let lists = [&packages.extensions, &packages.skills, &packages.prompts, &packages.themes];
     for source in sources {
         if source.starts_with(BUILTIN_PATH_PREFIX) {
             let metadata = PathMetadata::new("builtin", SourceScope::Temporary, SourceOrigin::TopLevel);
@@ -22,47 +22,20 @@ pub fn resolve_extension_sources(sources: &[String], cwd: &Path, packages: &Reso
             continue;
         }
         if !is_local_path(source) {
+            for (kind, list) in ResourceType::ALL.into_iter().zip(lists) {
+                for resource in list.iter().filter(|resource| resource.metadata.source == *source) {
+                    acc.add(kind, resource.path.clone(), resource.metadata.clone(), resource.enabled);
+                }
+            }
             continue;
         }
-        let path = resolve_path(source, cwd);
-        let mut metadata = PathMetadata::new(source, SourceScope::Temporary, SourceOrigin::Package);
-        match file_kind(&path) {
-            Some((true, _)) => {
-                metadata.base_dir = path.parent().map(Path::to_path_buf);
-                acc.add(ResourceType::Extensions, path, metadata, true);
-            }
-            Some((_, true)) if !has_pi_manifest(&path) => {
-                metadata.base_dir = Some(path.clone());
-                metadata.package_root = Some(path.clone());
-                let mut found = false;
-                for kind in ResourceType::ALL {
-                    let dir = path.join(kind.dir_name());
-                    if dir.exists() {
-                        found = true;
-                        for file in collect_resource_files(&dir, kind) {
-                            acc.add(kind, file, metadata.clone(), true);
-                        }
-                    }
-                }
-                if !found {
-                    acc.add(ResourceType::Extensions, path, metadata, true);
-                }
-            }
-            _ => {}
-        }
+        let metadata = PathMetadata::new(source, SourceScope::Temporary, SourceOrigin::Package);
+        crate::packages::resolve_local_package(&mut acc, source, None, metadata, cwd);
     }
-    let lists = [&packages.extensions, &packages.skills, &packages.prompts, &packages.themes];
     for (kind, list) in ResourceType::ALL.into_iter().zip(lists) {
         acc.add_all(kind, list);
     }
     acc.into_resolved()
-}
-
-fn has_pi_manifest(dir: &Path) -> bool {
-    std::fs::read_to_string(dir.join("package.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')).ok())
-        .is_some_and(|manifest| manifest.get("pi").is_some_and(serde_json::Value::is_object))
 }
 
 /// Path metadata recorded during a reload, looked up to build each resource's [`SourceInfo`].

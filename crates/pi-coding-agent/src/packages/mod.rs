@@ -65,6 +65,7 @@ pub use git_url::{GitSource, parse_git_url};
 pub use manifest::{PiManifest, collect_extension_package_warnings, read_pi_manifest};
 pub use marketplace::{InstalledPackage, Marketplace, MarketplaceCatalog, MarketplaceEntry, MarketplaceIndex};
 pub use paths::extension_temp_folder;
+pub(crate) use resolve::resolve_local_package;
 pub use runner::{CommandRunner, CommandSpec, ProcessRunner};
 pub use source::{ArchiveSource, LocalSource, NpmSource, ParsedSource, parse_source};
 

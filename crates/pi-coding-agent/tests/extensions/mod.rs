@@ -8,6 +8,7 @@ mod events;
 mod examples;
 mod examples_more;
 mod exec;
+mod file_operations;
 pub(crate) mod harness;
 mod hook_events;
 mod host;

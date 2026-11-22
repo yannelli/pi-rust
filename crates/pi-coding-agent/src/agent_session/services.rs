@@ -190,6 +190,13 @@ pub async fn package_resources(
     }
     let manager = PackageManager::new(PackageManagerOptions::new(cwd, agent_dir, settings.clone()));
     let resolved = manager.resolve_package_resources(None).await;
+    package_result(&manager, resolved)
+}
+
+fn package_result(
+    manager: &PackageManager,
+    resolved: anyhow::Result<ResolvedPaths>,
+) -> (ResolvedPaths, Vec<RuntimeDiagnostic>) {
     let mut diagnostics: Vec<RuntimeDiagnostic> =
         manager.take_install_failures().iter().map(|failure| RuntimeDiagnostic::warning(failure.warning())).collect();
     match resolved {
@@ -199,6 +206,32 @@ pub async fn package_resources(
             (ResolvedPaths::default(), diagnostics)
         }
     }
+}
+
+pub(super) async fn resolve_loader_packages(
+    options: &mut ResourceLoaderOptions,
+    settings: &Arc<SettingsManager>,
+) -> Vec<RuntimeDiagnostic> {
+    let (configured, mut diagnostics) = package_resources(&options.cwd, &options.agent_dir, settings).await;
+    options.package_resources = configured;
+    let sources: Vec<_> = options
+        .extension_sources
+        .iter()
+        .filter(|source| {
+            !crate::resources::paths::is_local_path(source)
+                && !source.starts_with(crate::resources::source_info::BUILTIN_PATH_PREFIX)
+        })
+        .cloned()
+        .collect();
+    if !sources.is_empty() {
+        let manager =
+            PackageManager::new(PackageManagerOptions::new(&options.cwd, &options.agent_dir, settings.clone()));
+        let resolved = manager.resolve_extension_sources(&sources, false, true).await;
+        let (temporary, warnings) = package_result(&manager, resolved);
+        options.extension_source_resources = temporary;
+        diagnostics.extend(warnings);
+    }
+    diagnostics
 }
 
 /// Create settings, the model runtime, and the resource loader for `options.cwd`.
@@ -236,10 +269,8 @@ pub async fn create_agent_session_services(options: CreateServicesOptions) -> Ag
     if let Some(error) = model_runtime.load_error() {
         diagnostics.push(RuntimeDiagnostic::warning(format!("errors loading models.json:\n{error}")));
     }
-    let (packages, package_diagnostics) = package_resources(&cwd, &agent_dir, &settings).await;
-    diagnostics.extend(package_diagnostics);
     let mut loader_options = resource_loader_options(&cwd, &agent_dir, &settings, &options.resources);
-    loader_options.package_resources = packages;
+    diagnostics.extend(resolve_loader_packages(&mut loader_options, &settings).await);
     let mut loader = ResourceLoader::new(loader_options);
     loader.reload();
     diagnostics.extend(resource_diagnostics(&loader));

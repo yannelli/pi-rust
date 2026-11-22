@@ -122,6 +122,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
+  The [extension package audit](docs/parity/extension-packages.md) lists 25 tested packages and the engine each one used.
 - IPC handle retries use a pi-js-specific wrapper. Internal handle listeners receive an object with only `close()`. Cluster connections queued to a disconnected worker are not reclaimed. See [Extension runtime](docs/parity/GAPS.md#extension-runtime-pi-js).
 - On non-Linux Unix, a concurrent child spawn can inherit an IPC socket before QuickJS marks it close-on-exec. Node closes inherited descriptors in its macOS `posix_spawn` path. See [Platform](docs/parity/GAPS.md#platform).
 - In extensions, `ctx.sessionManager` reads return copies of entries, except `getEntries()` of the extension's own session. Upstream pi returns its own entry objects from all reads.

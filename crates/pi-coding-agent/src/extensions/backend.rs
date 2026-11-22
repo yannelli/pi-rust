@@ -1,7 +1,7 @@
 //! The engine that runs extensions: `--extension-runtime`, then `PI_EXTENSION_RUNTIME`, then the
 //! `extensionRuntime` setting. Node falls back to QuickJS with one warning per load.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ pub const RUNTIME_ENV: &str = "PI_EXTENSION_RUNTIME";
 const ADDON_SCAN_DEPTH: usize = 4;
 /// Directory levels above an entry file searched for its `package.json`.
 const MANIFEST_SEARCH_DEPTH: usize = 3;
-/// Directory entries one package scan reads at most.
+/// Directory entries and dependency lookups inspected per loaded package.
 const ADDON_SCAN_BUDGET: usize = 20_000;
 
 /// The requested runtime: `cli`, then `env`, then `settings`. An invalid `env` value is skipped
@@ -44,11 +44,10 @@ pub fn resolve_runtime(
     }
 }
 
-/// Whether a loaded extension package sets `package.json` `pi.runtime: "node"` or ships a
-/// `.node` addon. Entries outside a package do not count.
+/// Whether a loaded package requests Node or ships a native addon in its tree or its dependencies.
 pub fn wants_node(entries: &[LoadEntry]) -> bool {
     let roots: BTreeSet<PathBuf> = entries.iter().filter_map(package_root).collect();
-    roots.iter().any(|root| declares_node(root) || has_addon(root))
+    roots.iter().any(|root| package_wants_node(root))
 }
 
 fn package_root(entry: &LoadEntry) -> Option<PathBuf> {
@@ -62,18 +61,70 @@ fn package_root(entry: &LoadEntry) -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-fn declares_node(root: &Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(root.join("package.json")) else { return false };
-    let manifest: Value = serde_json::from_str(&text).unwrap_or_default();
-    manifest["pi"]["runtime"].as_str().is_some_and(|runtime| runtime.eq_ignore_ascii_case("node"))
-}
-
-fn has_addon(root: &Path) -> bool {
+fn package_wants_node(root: &Path) -> bool {
+    let root = pi_js::resolve::canonical(root);
+    let mut pending = VecDeque::from([root.clone()]);
+    let mut seen = BTreeSet::from([root.clone()]);
     let mut budget = ADDON_SCAN_BUDGET;
-    scan_for_addon(root, ADDON_SCAN_DEPTH, &mut budget)
+    while let Some(package) = pending.pop_front() {
+        let manifest: Value = std::fs::read_to_string(package.join("package.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        let extension = package == root;
+        if extension && manifest["pi"]["runtime"].as_str().is_some_and(|runtime| runtime.eq_ignore_ascii_case("node")) {
+            return true;
+        }
+        if scan_for_addon(&package, ADDON_SCAN_DEPTH, &mut budget, extension) {
+            return true;
+        }
+        for field in ["dependencies", "optionalDependencies"] {
+            let Some(deps) = manifest[field].as_object() else { continue };
+            for name in deps.keys() {
+                if budget == 0 {
+                    return false;
+                }
+                budget -= 1;
+                if let Some(dir) = installed_dependency(&package, name, &mut budget)
+                    && seen.insert(dir.clone())
+                {
+                    pending.push_back(dir);
+                }
+            }
+        }
+        if budget == 0 {
+            break;
+        }
+    }
+    false
 }
 
-fn scan_for_addon(dir: &Path, depth_left: usize, budget: &mut usize) -> bool {
+/// Resolve only a bare npm name, using the nearest installed package as Node does.
+fn installed_dependency(package: &Path, name: &str, budget: &mut usize) -> Option<PathBuf> {
+    let valid_part = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with('.')
+            && part != "node_modules"
+            && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.~".contains(&b))
+    };
+    let valid = match name.strip_prefix('@') {
+        Some(scoped) => scoped.split_once('/').is_some_and(|(scope, name)| valid_part(scope) && valid_part(name)),
+        None => valid_part(name),
+    };
+    if !valid {
+        return None;
+    }
+    for ancestor in package.ancestors().filter(|dir| dir.file_name().is_none_or(|last| last != "node_modules")) {
+        *budget = budget.checked_sub(1)?;
+        let dir = ancestor.join("node_modules").join(name);
+        if dir.is_dir() {
+            return dir.join("package.json").is_file().then(|| pi_js::resolve::canonical(&dir));
+        }
+    }
+    None
+}
+
+fn scan_for_addon(dir: &Path, depth_left: usize, budget: &mut usize, include_node_modules: bool) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     let mut subdirs = Vec::new();
     for entry in entries.flatten() {
@@ -86,15 +137,17 @@ fn scan_for_addon(dir: &Path, depth_left: usize, budget: &mut usize) -> bool {
         if kind.is_file() && path.extension().is_some_and(|extension| extension == "node") {
             return true;
         }
-        if kind.is_dir() && depth_left > 0 && !skip_dir(dir, &entry.file_name()) {
+        if kind.is_dir() && depth_left > 0 && !skip_dir(dir, &entry.file_name(), include_node_modules) {
             subdirs.push(path);
         }
     }
-    subdirs.iter().any(|subdir| scan_for_addon(subdir, depth_left - 1, budget))
+    subdirs.iter().any(|subdir| scan_for_addon(subdir, depth_left - 1, budget, include_node_modules))
 }
 
-fn skip_dir(parent: &Path, name: &std::ffi::OsStr) -> bool {
-    name == ".git" || (name == ".bin" && parent.file_name().is_some_and(|parent| parent == "node_modules"))
+fn skip_dir(parent: &Path, name: &std::ffi::OsStr, include_node_modules: bool) -> bool {
+    name == ".git"
+        || (!include_node_modules && name == "node_modules")
+        || (name == ".bin" && parent.file_name().is_some_and(|parent| parent == "node_modules"))
 }
 
 /// The backend for `runtime`, or why Node cannot run when it was asked for.
@@ -165,6 +218,50 @@ mod tests {
         let (runtime, warning) = resolve_runtime(None, Some("deno"), Node);
         assert_eq!(runtime, Node);
         assert!(warning.unwrap().contains("PI_EXTENSION_RUNTIME=\"deno\""));
+    }
+
+    #[test]
+    fn auto_follows_installed_dependencies_to_hoisted_native_addons() {
+        let root = tempfile::tempdir().unwrap();
+        let modules = root.path().join("node_modules");
+        let extension = modules.join("@scope/extension");
+        let entry = [LoadEntry::file(extension.join("dist/index.ts"))];
+        write(&entry[0].resolved_path, "");
+        write(&extension.join("package.json"), r#"{"dependencies":{"bridge":"1"},"devDependencies":{"unused":"1"}}"#);
+        let bridge = modules.join("bridge");
+        write(
+            &bridge.join("package.json"),
+            r#"{"dependencies":{"@scope/extension":"1"},"optionalDependencies":{"@native/driver":"1"}}"#,
+        );
+        write(&modules.join("unused/package.json"), "{}");
+        write(&modules.join("unused/unused.node"), "");
+        write(&bridge.join("node_modules/unrelated/unrelated.node"), "");
+        assert!(!wants_node(&entry), "ignore dev dependencies and unrelated siblings");
+
+        let driver = modules.join("@native/driver");
+        write(&driver.join("package.json"), "{}");
+        write(&driver.join("prebuilds/platform/native.node"), "");
+        assert!(wants_node(&entry), "the optional platform package is installed");
+
+        write(&bridge.join("node_modules/@native/driver/package.json"), "{}");
+        assert!(!wants_node(&entry), "the nearer pure JS package shadows the hoisted one");
+    }
+
+    #[test]
+    fn auto_rejects_dependency_paths_and_bounds_missing_package_lookups() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = root.path().join("outside");
+        write(&outside.join("package.json"), "{}");
+        let extension = root.path().join("extension");
+        std::fs::create_dir_all(extension.join("node_modules/@scope")).unwrap();
+        for name in [outside.to_str().unwrap(), "../../outside", "@scope/../../../outside", r"..\..\outside"] {
+            let mut budget = ADDON_SCAN_BUDGET;
+            assert!(installed_dependency(&extension, name, &mut budget).is_none());
+            assert_eq!(budget, ADDON_SCAN_BUDGET);
+        }
+        let mut budget = 1;
+        assert!(installed_dependency(&extension, "missing", &mut budget).is_none());
+        assert_eq!(budget, 0);
     }
 
     #[test]

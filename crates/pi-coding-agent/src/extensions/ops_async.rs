@@ -148,9 +148,14 @@ pub(super) async fn runtime_op(
     args: Args,
 ) -> Result<Value, JsError> {
     Ok(match name {
-        "refresh" => {
-            let result = runtime.refresh_catalogs(true, None, false).await;
-            json!({"aborted": result.aborted, "errors": result.errors})
+        "refresh" => super::ops_sdk_model_runtime::refresh(runner, &runtime, &args.json(1)).await,
+        "setRuntimeApiKey" => {
+            runtime.set_runtime_api_key(&args.str(1)?, &args.str(2)?);
+            Value::Null
+        }
+        "removeRuntimeApiKey" => {
+            runtime.remove_runtime_api_key(&args.str(1)?).await;
+            Value::Null
         }
         "auth" => match request_auth(&runtime, &model(args.json(1))?).await {
             Ok(request) => json!({"ok": true, "apiKey": request.auth.api_key, "headers": request.auth.headers}),
