@@ -282,6 +282,24 @@ return {
     assert_eq!(actual["error"], "ERR_MISSING_ARGS");
 }
 
+/// Undici reads the `File` global when it loads, as Node 20 and later define it.
+#[tokio::test]
+async fn file_is_a_global_like_node() {
+    let actual = run(r#"
+const { File: BufferFile } = require("buffer");
+const file = new File(["x", "yz"], "probe.txt", { type: "text/plain", lastModified: 5 });
+return {
+  global: [typeof File, File === BufferFile],
+  file: [file.size, file.name, file.type, file.lastModified, await file.text(), file instanceof Blob, Object.prototype.toString.call(file)],
+};
+"#)
+    .await;
+    assert_eq!(
+        actual,
+        json!({"global": ["function", true], "file": [3, "probe.txt", "text/plain", 5, "xyz", true, "[object File]"]})
+    );
+}
+
 #[tokio::test]
 async fn buffer_transcode_blob_urls_and_call_tracker() {
     let actual = run(r#"
