@@ -68,7 +68,8 @@ macro_rules! case {
     };
 }
 
-const CASES: [(&str, &str, &str); 4] = [case!("records"), case!("errors"), case!("transport"), case!("cancel")];
+const CASES: [(&str, &str, &str); 5] =
+    [case!("records"), case!("errors"), case!("transport"), case!("cancel"), case!("compat")];
 
 #[tokio::test]
 async fn dns_record_shapes_match_node() {
@@ -94,6 +95,12 @@ async fn dns_cancel_matches_node() {
     quickjs_case(name, body, golden).await;
 }
 
+#[tokio::test]
+async fn dns_aliases_server_selection_and_tcp_match_node() {
+    let (name, body, golden) = CASES[4];
+    quickjs_case(name, body, golden).await;
+}
+
 /// Reruns every case on real Node through the Node backend, so CI hosts (Windows included) recheck the
 /// goldens. Skips without Node 22, since other majors bundle other c-ares releases.
 #[tokio::test]
@@ -116,6 +123,31 @@ async fn dns_fixtures_match_the_node_backend() {
         run_cjs_within(&quickjs, &root, servers, 30).await,
         run_cjs_within(&runtime, &root, servers, 30).await,
         "system DNS servers differ from Node {version}"
+    );
+    let reverse = r#"
+        const { start } = require("./dns_server.cjs");
+        const server = await start(() => ({answers: [["@", "PTR", 60, "from-dns.test"]]}));
+        try {
+          const resolver = new (require("node:dns/promises").Resolver)({timeout: 1000, tries: 1});
+          resolver.setServers([server.address]);
+          const rows = [];
+          for (const host of ["127.0.0.1", "::1", "192.0.2.243"]) {
+            const before = server.log.length;
+            const names = await resolver.reverse(host).catch(error => error.code);
+            rows.push([names, server.log.slice(before).filter(entry => entry.type === "PTR").length]);
+          }
+          const pending = resolver.reverse("127.0.0.1").catch(error => error.code);
+          let changed = true;
+          try { resolver.setServers([server.address]); } catch (error) { changed = error.code; }
+          resolver.cancel();
+          rows.push([changed, await pending]);
+          return rows;
+        } finally { await server.close(); }
+    "#;
+    assert_eq!(
+        run_case(&quickjs, &root, reverse).await,
+        run_case(&runtime, &root, reverse).await,
+        "reverse results or DNS traffic differ from Node {version} on this host"
     );
     let mut failures = Vec::new();
     for (name, body, golden) in CASES {

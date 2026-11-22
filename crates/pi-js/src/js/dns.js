@@ -149,7 +149,7 @@ class PromiseResolver {
     return this._handle;
   }
   getServers() {
-    return this._channel().servers.slice();
+    return this._channel().getServers();
   }
   setServers(servers) {
     validate.array(servers, "servers");
@@ -158,7 +158,7 @@ class PromiseResolver {
       throw codeError(Error, "ERR_DNS_SET_SERVERS_FAILED",
         `c-ares failed to set servers: "There are pending queries." [${require("util").inspect(servers)}]`);
     }
-    if (this._handle) this._handle.servers = this._handle.setServers(parsed);
+    if (this._handle) this._handle.setServers(parsed);
     else this._channel(parsed);
   }
   setLocalAddress(ipv4, ipv6) {
@@ -167,11 +167,9 @@ class PromiseResolver {
     this._channel().setLocalAddress(ipv4, ipv6);
   }
   cancel() {
-    if (this._pending.size) {
-      this._handle.cancel();
-      for (const cancel of this._pending) cancel();
-      this._pending.clear();
-    }
+    this._handle?.cancel();
+    for (const cancel of this._pending) cancel();
+    this._pending.clear();
   }
   _query(type, name, ttl) {
     const syscall = type === "REVERSE" ? "getHostByAddr" : `query${type[0]}${type.slice(1).toLowerCase()}`;
@@ -182,6 +180,8 @@ class PromiseResolver {
       if (error.code === "EINVAL") throw Object.assign(dnsError("EINVAL", syscall, name), { errno: errnoOf("EINVAL") });
       throw error;
     }
+    if (Array.isArray(request)) return Promise.resolve(request);
+    if (typeof request === "string") return Promise.reject(dnsError(request, syscall, name));
     return new Promise((resolve, reject) => {
       const cancel = () => reject(dnsError("ECANCELLED", syscall, name));
       this._pending.add(cancel);

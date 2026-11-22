@@ -197,7 +197,7 @@ jobs:
           name="pi-$TAG-$TARGET"
           mkdir -p "dist/$name"
           cp README.md LICENSE THIRD-PARTY-LICENSES.md crates/pi-coding-agent/src/acp/LICENSE-pi-acp \
-            crates/pi-js/src/js/LICENSE-node crates/pi-js/src/js/LICENSE-v8 \
+            crates/pi-js/src/js/LICENSE-node crates/pi-js/src/js/LICENSE-v8 crates/pi-js/src/node/dns/LICENSE-c-ares \
             crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk \
             crates/pi-coding-agent/src/extensions/js/LICENSE-chalk \
             crates/pi-coding-agent/src/extensions/js/LICENSE-proper-lockfile \

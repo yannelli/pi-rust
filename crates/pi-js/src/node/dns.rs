@@ -1,10 +1,12 @@
 //! System address lookups and DNS record queries for `node:dns`.
 
 mod config;
+mod hosts;
+mod hosts_address;
+mod hosts_path;
 mod resolver;
 mod wire;
 
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::rc::Rc;
@@ -12,7 +14,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rquickjs::{Ctx, Object, Value};
+use rquickjs::{Ctx, IntoJs, Object, Value};
 use serde_json::{Value as Json, json};
 use tokio_util::sync::CancellationToken;
 
@@ -20,13 +22,16 @@ use super::set_fn;
 use crate::error::JsError;
 use crate::runtime::convert::{caught, from_json, throw};
 use crate::runtime::scope::spawn_op;
+use config::Lookup;
 use resolver::Resolver;
-use wire::Kind;
+use wire::{Kind, Question};
 
 struct Channel {
     resolver: Arc<Resolver>,
     local: (Ipv4Addr, Ipv6Addr),
     cancel: CancellationToken,
+    lookups: Arc<[Lookup]>,
+    hosts: Arc<hosts::Cache>,
 }
 
 impl Drop for Channel {
@@ -66,10 +71,11 @@ fn servers_json(servers: &[SocketAddr]) -> Vec<String> {
     servers
         .iter()
         .map(|server| {
-            if server.port() == 53 {
-                server.ip().to_string()
-            } else {
-                SocketAddr::new(server.ip(), server.port()).to_string()
+            // Node's `ares_get_servers_ports` list has no interface scope.
+            match (server.ip(), server.port()) {
+                (ip, 53) => ip.to_string(),
+                (IpAddr::V4(ip), port) => format!("{ip}:{port}"),
+                (IpAddr::V6(ip), port) => format!("[{ip}]:{port}"),
             }
         })
         .collect()
@@ -78,7 +84,8 @@ fn servers_json(servers: &[SocketAddr]) -> Vec<String> {
 fn parse_servers(ctx: &Ctx<'_>, list: Vec<(String, u16)>) -> rquickjs::Result<Vec<SocketAddr>> {
     let mut servers = Vec::with_capacity(list.len());
     for (address, port) in list {
-        let address = config::address(&address, port).ok_or_else(|| {
+        // Node passes servers to c-ares without their interface scope.
+        let address = ip_address(&address).map(|ip| SocketAddr::new(ip, port)).ok_or_else(|| {
             throw(
                 ctx,
                 &JsError::type_error(format!("Invalid IP address: {address}")).with_code("ERR_INVALID_IP_ADDRESS"),
@@ -111,6 +118,57 @@ fn reverse_name(ip: IpAddr) -> String {
             name
         }
     }
+}
+
+enum Step {
+    Found(Vec<String>),
+    Missed,
+    /// The PTR question to send, and the index of the source after DNS.
+    Query(Question, usize),
+}
+
+/// c-ares `next_lookup` for `ares_gethostbyaddr` up to the first DNS query it sends. A hosts
+/// file hit and a query that fails before it is sent finish at once, as they do in c-ares.
+fn next_lookup(resolver: &Resolver, hosts: &hosts::Cache, ip: IpAddr, lookups: &[Lookup]) -> Step {
+    for (at, lookup) in lookups.iter().enumerate() {
+        match lookup {
+            Lookup::Files => {
+                if let Some(aliases) = hosts.aliases(ip) {
+                    return Step::Found(aliases);
+                }
+            }
+            Lookup::Dns => {
+                if let Ok(question) = resolver.prepare(&reverse_name(ip), Kind::Reverse) {
+                    return Step::Query(question, at + 1);
+                }
+            }
+        }
+    }
+    Step::Missed
+}
+
+/// `addr_callback`: a DNS failure moves on to the hosts file sources after DNS, while an
+/// error from reading a successful reply ends the lookup.
+async fn reverse_query(
+    resolver: &Resolver,
+    hosts: Arc<hosts::Cache>,
+    ip: IpAddr,
+    question: &Question,
+    rest: &[Lookup],
+    local: (Ipv4Addr, Ipv6Addr),
+    cancel: CancellationToken,
+) -> Result<Json, &'static str> {
+    match resolver.resolve_question(question, false, local, cancel).await {
+        Err(code @ ("ECANCELLED" | "ENODATA" | "ENOMEM")) => return Err(code),
+        Err(_) => {}
+        found => return found,
+    }
+    if rest.contains(&Lookup::Files)
+        && let Ok(Some(aliases)) = tokio::task::spawn_blocking(move || hosts.aliases(ip)).await
+    {
+        return Ok(json!(aliases));
+    }
+    Err("ENOTFOUND")
 }
 
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
@@ -147,31 +205,32 @@ fn create_channel<'js>(
     max_timeout: u32,
 ) -> rquickjs::Result<Object<'js>> {
     let list: Option<Vec<(String, u16)>> = super::net::parse_options(&ctx, values)?;
-    let config =
-        if list.is_none() || timeout <= 0 { config::system(list.is_none()) } else { config::Config::default() };
+    // c-ares reads the system options for every channel, then applies the caller's servers.
+    let config = config::system(list.is_none());
     let servers = match list {
         Some(list) => parse_servers(&ctx, list)?,
         None => config.servers,
     };
-    let displayed = servers_json(&servers);
     let timeout = if timeout > 0 { Duration::from_millis(timeout as u64) } else { config.timeout };
     let max_timeout = (max_timeout > 0).then(|| Duration::from_millis(u64::from(max_timeout)));
-    let resolver = Resolver::new(servers, timeout, tries as usize, max_timeout);
+    let resolver = Resolver::new(servers, timeout, tries as usize, max_timeout).with_rotation(config.rotate);
     let channel = Channel {
         resolver: Arc::new(resolver),
         local: (Ipv4Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED),
         cancel: CancellationToken::new(),
+        lookups: config.lookups.into(),
+        hosts: Arc::default(),
     };
     let channel = Rc::new(RefCell::new(channel));
     let object = Object::new(ctx.clone())?;
-    object.set("servers", displayed)?;
+    let listed_channel = Rc::clone(&channel);
+    set_fn(&object, "getServers", move || servers_json(&listed_channel.borrow().resolver.ordered_servers()))?;
     let servers_channel = Rc::clone(&channel);
     set_fn(&object, "setServers", move |ctx: Ctx<'js>, values: Value<'js>| {
         let servers = parse_servers(&ctx, super::net::parse_options(&ctx, values)?)?;
-        let displayed = servers_json(&servers);
         let mut channel = servers_channel.borrow_mut();
         channel.resolver = Arc::new(channel.resolver.with_servers(servers));
-        Ok::<_, rquickjs::Error>(displayed)
+        Ok::<_, rquickjs::Error>(())
     })?;
     let local_channel = Rc::clone(&channel);
     set_fn(&object, "setLocalAddress", move |ctx: Ctx<'js>, first: String, other: Option<String>| {
@@ -205,34 +264,39 @@ fn create_channel<'js>(
     let cancel_channel = Rc::clone(&channel);
     set_fn(&object, "cancel", move || std::mem::take(&mut cancel_channel.borrow_mut().cancel).cancel())?;
     set_fn(&object, "query", move |ctx: Ctx<'js>, kind: String, host: String, ttl: bool| {
-        let (resolver, local, cancel) = {
+        let (resolver, local, cancel, lookups, hosts) = {
             let channel = channel.borrow();
-            (Arc::clone(&channel.resolver), channel.local, channel.cancel.clone())
+            let shared = (Arc::clone(&channel.resolver), Arc::clone(&channel.lookups), Arc::clone(&channel.hosts));
+            (shared.0, channel.local, channel.cancel.clone(), shared.1, shared.2)
         };
-        let (kind, query, syscall) = if kind == "REVERSE" {
+        if kind == "REVERSE" {
             let ip = ip_address(&host).ok_or_else(|| throw(&ctx, &dns_error("EINVAL", "getHostByAddr", &host)))?;
-            (Kind::Reverse, Some(reverse_name(ip)), "getHostByAddr".to_string())
-        } else {
-            let record_type =
-                Kind::parse(&kind).ok_or_else(|| throw(&ctx, &JsError::type_error("Unknown record type")))?;
-            let syscall = format!("query{}{}", &kind[..1], kind[1..].to_ascii_lowercase());
-            (record_type, None, syscall)
+            let (question, rest) = match next_lookup(&resolver, &hosts, ip, &lookups) {
+                Step::Found(aliases) => return from_json(&ctx, &json!(aliases)),
+                Step::Missed => return "ENOTFOUND".into_js(&ctx),
+                Step::Query(question, rest) => (question, lookups[rest..].to_vec()),
+            };
+            let work = async move {
+                let names = reverse_query(&resolver, hosts, ip, &question, &rest, local, cancel).await;
+                names.map_err(|code| dns_error(code, "getHostByAddr", &host))
+            };
+            let promise = spawn_op(&ctx, work, |ctx, names| from_json(ctx, &names).map_err(|error| caught(ctx, error)));
+            return promise.map(|promise| promise.into_value());
+        }
+        let record_type = Kind::parse(&kind).ok_or_else(|| throw(&ctx, &JsError::type_error("Unknown record type")))?;
+        let syscall = format!("query{}{}", &kind[..1], kind[1..].to_ascii_lowercase());
+        let name = idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::EMPTY).unwrap_or_default();
+        let question = match resolver.prepare(&name, record_type) {
+            Ok(question) => question,
+            Err(code) => return code.into_js(&ctx),
         };
         let work = async move {
-            let query = match query {
-                Some(ptr) => Cow::Owned(ptr),
-                None => idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::EMPTY).unwrap_or_default(),
-            };
-            resolver.resolve(&query, kind, ttl, local, cancel).await.map_err(|code| {
-                let code = if kind == Kind::Reverse && !matches!(code, "ECANCELLED" | "ENODATA" | "ENOMEM") {
-                    "ENOTFOUND"
-                } else {
-                    code
-                };
-                dns_error(code, &syscall, &host)
-            })
+            let found = resolver.resolve_question(&question, ttl, local, cancel).await;
+            found.map_err(|code| dns_error(code, &syscall, &host))
         };
-        spawn_op(&ctx, work, |ctx, value: Json| from_json(ctx, &value).map_err(|error| caught(ctx, error)))
+        let promise =
+            spawn_op(&ctx, work, |ctx, value: Json| from_json(ctx, &value).map_err(|error| caught(ctx, error)));
+        promise.map(|promise| promise.into_value())
     })?;
     Ok(object)
 }

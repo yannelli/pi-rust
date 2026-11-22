@@ -1,3 +1,5 @@
+mod tcp;
+
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -159,7 +161,7 @@ async fn malformed_reply_moves_to_the_next_server_at_once() {
 async fn timeouts_rotate_servers_and_respect_max_timeout() {
     let (first, one) = udp_server(Arc::new(|_| Vec::new())).await;
     let (second, two) = udp_server(Arc::new(|_| Vec::new())).await;
-    let capped = Resolver::new(vec![first, second], Duration::from_secs(5), 2, Some(Duration::from_millis(60)));
+    let capped = Resolver::new(vec![first, second], Duration::from_millis(80), 2, Some(Duration::from_millis(60)));
     let started = std::time::Instant::now();
     let found = capped.resolve("a.test", Kind::A, false, ANY, CancellationToken::new()).await;
     assert_eq!(found, Err("ETIMEOUT"));
@@ -169,7 +171,7 @@ async fn timeouts_rotate_servers_and_respect_max_timeout() {
 
 #[test]
 fn attempt_wait_follows_c_ares() {
-    let millis = |resolver: &Resolver, round| resolver.attempt_wait(round).unwrap().as_millis();
+    let millis = |resolver: &Resolver, round| resolver.attempt_wait(resolver.timeout, round).unwrap().as_millis();
     assert_eq!(millis(&resolver(Vec::new(), 100, 1), 0), 250);
     assert_eq!(millis(&resolver(Vec::new(), 10_000, 1), 0), 5000);
     let doubled = millis(&resolver(Vec::new(), 300, 1), 1);
@@ -180,41 +182,46 @@ fn attempt_wait_follows_c_ares() {
     assert_eq!((swapped.servers.len(), swapped.max_timeout, swapped.tries), (1, capped.max_timeout, 1));
 }
 
-#[tokio::test]
-async fn follows_aliases_and_stops_on_a_loop() {
-    let handler: Handler = Arc::new(|query| {
-        let answer = match first_label(query).as_str() {
-            "start" => Answer::Cname("end.test", 60),
-            "end" => Answer::A([4, 4, 4, 4]),
-            "loop" => Answer::Cname("back.test", 60),
-            _ => Answer::Cname("loop.test", 60),
-        };
-        vec![reply(query, 0, false, Some(answer))]
-    });
-    let (server, _) = udp_server(handler).await;
-    let resolver = resolver(vec![server], 1000, 1);
-    let found = resolver.resolve("start.test", Kind::A, false, ANY, CancellationToken::new()).await;
-    assert_eq!(found, Ok(json!(["4.4.4.4"])));
-    let looped = resolver.resolve("loop.test", Kind::A, false, ANY, CancellationToken::new()).await;
-    assert_eq!(looped, Err("ENODATA"));
+#[test]
+fn timeout_uses_only_measured_replies_after_the_third_sample() {
+    let server = super::health::Server::new(([127, 0, 0, 1], 53).into());
+    let initial = Duration::from_secs(3);
+    server.responded(Some(Duration::from_millis(100)));
+    server.responded(None);
+    server.failed();
+    server.responded(Some(Duration::from_millis(200)));
+    assert_eq!(server.timeout(initial), initial);
+    server.responded(Some(Duration::from_millis(300)));
+    assert_eq!(server.timeout(initial), Duration::from_secs(1));
 }
 
 #[tokio::test]
-async fn address_ttl_is_clamped_to_the_shortest_alias_ttl() {
-    let handler: Handler = Arc::new(|query| {
-        let answer = match first_label(query).as_str() {
-            "start" => Answer::Cname("mid.test", 100),
-            "mid" => Answer::Cname("end.test", 20),
-            _ => Answer::A([4, 4, 4, 4]),
-        };
-        vec![reply(query, 0, false, Some(answer))]
-    });
-    let (server, _) = udp_server(handler).await;
+async fn alias_only_address_replies_finish_without_a_second_query() {
+    let (server, hits) =
+        udp_server(Arc::new(|query| vec![reply(query, 0, false, Some(Answer::Cname("target.test", 20)))])).await;
     let resolver = resolver(vec![server], 1000, 1);
-    let found = resolver.resolve("start.test", Kind::A, true, ANY, CancellationToken::new()).await;
-    assert_eq!(found, Ok(json!([{ "address": "4.4.4.4", "ttl": 20 }])));
-    let direct = resolver.resolve("end.test", Kind::A, true, ANY, CancellationToken::new()).await;
-    assert_eq!(direct, Ok(json!([{ "address": "4.4.4.4", "ttl": 60 }])));
+    for ttl in [false, true] {
+        assert_eq!(resolver.resolve("alias.test", Kind::A, ttl, ANY, CancellationToken::new()).await, Ok(json!([])));
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn queries_and_get_servers_remember_failures_across_set_servers() {
+    let (broken, hits) = udp_server(Arc::new(|_| vec![vec![0]])).await;
+    let (good, _) = udp_server(Arc::new(|query| vec![reply(query, 0, false, Some(Answer::A([1, 2, 3, 4])))])).await;
+    let config = [broken, good];
+    let first = resolver(config.to_vec(), 300, 1);
+    let expected = Ok(json!(["1.2.3.4"]));
+    assert_eq!(first.ordered_servers(), config);
+    assert_eq!(first.resolve("one.test", Kind::A, false, ANY, CancellationToken::new()).await, expected);
+    assert_eq!(first.ordered_servers(), [good, broken]);
+    let next = first.with_servers(config.to_vec());
+    assert_eq!(next.ordered_servers(), [good, broken]);
+    assert_eq!(next.resolve("two.test", Kind::A, false, ANY, CancellationToken::new()).await, expected);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    let removed = next.with_servers(vec![good]).with_servers(config.to_vec());
+    assert_eq!(removed.ordered_servers(), config);
 }
 
 #[tokio::test]

@@ -1,23 +1,28 @@
-//! One exchange with one server: a connected UDP socket, or TCP with the RFC 1035 4.2.2
-//! two-byte length prefix. Each socket lives only for its exchange.
+//! One exchange with one server: a connected UDP socket that lives only for the exchange, or a
+//! question on the server's shared TCP stream.
 
-use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
+use std::cell::RefCell;
+use std::io::ErrorKind;
+use std::net::{IpAddr, SocketAddr, UdpSocket as StdUdpSocket};
 
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpSocket, UdpSocket};
-use tokio::time::{Instant, timeout_at};
+use socket2::{Domain, Protocol, Socket, Type};
+use tokio::io::Interest;
+use tokio::net::UdpSocket;
 
 use super::super::wire::{Question, Reply};
-use super::{BADRESP, CONNREFUSED, TIMEOUT};
+use super::CONNREFUSED;
+use super::tcp::TcpPool;
+use super::timer::Running;
 
-/// Largest UDP payload, so an oversized datagram is never cut short.
-const DATAGRAM: usize = 65_535;
+thread_local! {
+    // Only the synchronous receive and parse borrow this buffer. Pending queries share it on each worker.
+    static DATAGRAM: RefCell<BytesMut> = RefCell::new(BytesMut::with_capacity(usize::from(u16::MAX)));
+}
 
 pub(super) struct Attempt<'a> {
     pub(super) question: &'a Question,
-    pub(super) packet: Vec<u8>,
+    pub(super) packet: &'a [u8],
     pub(super) id: u16,
     pub(super) ttl: bool,
     pub(super) server: SocketAddr,
@@ -29,55 +34,47 @@ fn io_error(_: std::io::Error) -> &'static str {
 }
 
 impl Attempt<'_> {
-    /// Sends one datagram and waits until `wait` ends. Packets the codec reports as unrelated
-    /// (other ID or question) are dropped and do not move the deadline.
-    pub(super) async fn udp(&self, wait: Duration) -> Result<Reply, &'static str> {
-        let deadline = Instant::now() + wait;
-        let exchange = async {
-            let socket = UdpSocket::bind(SocketAddr::new(self.source, 0)).await.map_err(io_error)?;
-            socket.connect(self.server).await.map_err(io_error)?;
-            socket.send(&self.packet).await.map_err(io_error)?;
-            let mut buffer = BytesMut::with_capacity(DATAGRAM);
-            loop {
-                buffer.clear();
-                socket.recv_buf(&mut buffer).await.map_err(io_error)?;
-                match self.question.answer(self.id, &buffer, self.ttl)? {
-                    Reply::Unrelated => continue,
-                    reply => return Ok(reply),
+    /// Sends a connected datagram and ignores replies to other questions.
+    pub(super) async fn udp(&self, timer: &Running<'_>) -> Result<Reply, &'static str> {
+        let raw = Socket::new(Domain::for_address(self.server), Type::DGRAM, Some(Protocol::UDP)).map_err(io_error)?;
+        if !self.source.is_unspecified() {
+            raw.bind(&SocketAddr::new(self.source, 0).into()).map_err(io_error)?;
+        }
+        let socket = StdUdpSocket::from(raw);
+        socket.set_nonblocking(true).map_err(io_error)?;
+        socket.connect(self.server).map_err(io_error)?;
+        let sent = match socket.send(self.packet) {
+            Ok(_) => true,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => false,
+            Err(error) => return Err(io_error(error)),
+        };
+        let socket = UdpSocket::from_std(socket).map_err(io_error)?;
+        if !sent {
+            socket.send(self.packet).await.map_err(io_error)?;
+        }
+        loop {
+            let ready = socket.ready(Interest::READABLE | Interest::ERROR).await.map_err(io_error)?;
+            if ready.is_error() {
+                // Linux can report a connected UDP port refusal as EPOLLERR without EPOLLIN.
+                match socket.try_io(Interest::ERROR, || socket.take_error()?.ok_or(ErrorKind::WouldBlock.into())) {
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                    Ok(error) | Err(error) => return Err(io_error(error)),
                 }
             }
-        };
-        timeout_at(deadline, exchange).await.unwrap_or(Err(TIMEOUT))
+            let received = DATAGRAM.with_borrow_mut(|buffer| {
+                buffer.clear();
+                socket.try_recv_buf(buffer).map(|_| self.question.answer(self.id, buffer, self.ttl))
+            });
+            match received {
+                Ok(Ok(Reply::Unrelated)) => timer.activity(),
+                Ok(reply) => return reply,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+                Err(error) => return Err(io_error(error)),
+            }
+        }
     }
 
-    /// Connects, sends the framed query, and reads framed replies until `wait` ends.
-    pub(super) async fn tcp(&self, wait: Duration) -> Result<Reply, &'static str> {
-        let deadline = Instant::now() + wait;
-        let exchange = async {
-            let socket = match self.server {
-                SocketAddr::V4(_) => TcpSocket::new_v4(),
-                SocketAddr::V6(_) => TcpSocket::new_v6(),
-            }
-            .map_err(io_error)?;
-            socket.bind(SocketAddr::new(self.source, 0)).map_err(io_error)?;
-            let mut stream = socket.connect(self.server).await.map_err(io_error)?;
-            let length = u16::try_from(self.packet.len()).map_err(|_| "EBADQUERY")?;
-            let mut framed = Vec::with_capacity(self.packet.len() + 2);
-            framed.extend_from_slice(&length.to_be_bytes());
-            framed.extend_from_slice(&self.packet);
-            stream.write_all(&framed).await.map_err(io_error)?;
-            loop {
-                let mut prefix = [0u8; 2];
-                stream.read_exact(&mut prefix).await.map_err(io_error)?;
-                let mut body = vec![0u8; usize::from(u16::from_be_bytes(prefix))];
-                stream.read_exact(&mut body).await.map_err(io_error)?;
-                match self.question.answer(self.id, &body, self.ttl)? {
-                    Reply::Unrelated => continue,
-                    Reply::Truncated => return Err(BADRESP),
-                    reply => return Ok(reply),
-                }
-            }
-        };
-        timeout_at(deadline, exchange).await.unwrap_or(Err(TIMEOUT))
+    pub(super) async fn tcp(&self, pool: &TcpPool) -> Result<Reply, &'static str> {
+        pool.send(self)?.reply().await
     }
 }

@@ -13,11 +13,12 @@ use name::Name;
 
 const BADNAME: &str = "EBADNAME";
 const BADRESP: &str = "EBADRESP";
+const FORMERR: &str = "EFORMERR";
 const NODATA: &str = "ENODATA";
+const NOTFOUND: &str = "ENOTFOUND";
 
 const HEADER: usize = 12;
 const CLASS_IN: u16 = 1;
-const FLAG_QR: u16 = 0x8000;
 const MASK_OPCODE: u16 = 0x7800;
 const FLAG_TC: u16 = 0x0200;
 const FLAG_RD: u16 = 0x0100;
@@ -34,7 +35,8 @@ pub(crate) enum Kind {
     Naptr,
     Ns,
     Ptr,
-    /// A PTR question for `reverse`; Node reports an empty answer as `ENOTFOUND`.
+    /// A PTR question for `reverse`. A NOERROR reply without records is `ENOTFOUND` here, so
+    /// the caller moves to its next lookup source as `ares_gethostbyaddr` does.
     Reverse,
     Soa,
     Srv,
@@ -84,37 +86,27 @@ impl Kind {
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum Reply {
-    /// Not a reply to this question: wrong ID, not a response, other opcode or question.
+    /// A well-formed message for another query: an empty datagram, wrong ID, or other question.
     Unrelated,
-    /// TC is set; ask again over TCP.
+    /// TC is set on a UDP reply; ask again over TCP.
     Truncated,
-    Answer(Json),
-    /// The answer ends in a CNAME chain without records of the asked type. Ask `name` with
-    /// `Question::with_ttl_cap(ttl)`; `ttl` is the lowest CNAME TTL seen so far.
-    Alias {
-        name: String,
-        ttl: u32,
-    },
+    /// Only NOERROR and NXDOMAIN contribute response-time samples, regardless of the API result.
+    Answer { value: Json, measure: bool },
+    /// The RCODE or the record parser's error for a valid reply.
+    Error { code: &'static str, measure: bool },
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Question {
     name: Name,
     kind: Kind,
-    ttl_cap: u32,
 }
 
 impl Question {
-    /// Fails with `EBADNAME` as c-ares does: empty or long labels, names over 255 wire bytes,
-    /// bad escapes, and bytes outside `[A-Za-z0-9-._/*]`. IDNA conversion happens before.
+    /// Fails as c-ares does. `EBADNAME`: empty or long labels, over 255 bytes of labels and
+    /// dots, bad escapes, bytes outside `[A-Za-z0-9-._/*]`. `EFORMERR`: over 255 characters.
     pub(crate) fn new(host: &str, kind: Kind) -> Result<Self, &'static str> {
-        Ok(Self { name: Name::from_text(host)?, kind, ttl_cap: u32::MAX })
-    }
-
-    /// Limits A and AAAA TTLs in the answer, for a question that follows an `Alias`.
-    pub(crate) fn with_ttl_cap(mut self, ttl: u32) -> Self {
-        self.ttl_cap = self.ttl_cap.min(ttl);
-        self
+        Ok(Self { name: Name::from_text(host)?, kind })
     }
 
     /// A recursive query (RD set) with one question and no EDNS record, as Node 22 sends.
@@ -129,44 +121,67 @@ impl Question {
         packet
     }
 
-    /// Checks one response to the query sent with `id`. `Err` carries the Node error code:
-    /// `EBADRESP` for a malformed reply to this question, or the code for its RCODE.
+    /// Checks one UDP datagram against the query sent with `id`. `Err("EBADRESP")` is a
+    /// message c-ares cannot parse; like c-ares, this check comes before the ID check.
     pub(crate) fn answer(&self, id: u16, bytes: &[u8], ttl: bool) -> Result<Reply, &'static str> {
-        // c-ares fails a datagram too short for a header before it looks at the ID.
+        self.check(id, bytes, ttl, true)
+    }
+
+    /// Checks one TCP message. c-ares ignores TC on TCP.
+    pub(crate) fn answer_tcp(&self, id: u16, bytes: &[u8], ttl: bool) -> Result<Reply, &'static str> {
+        self.check(id, bytes, ttl, false)
+    }
+
+    /// The order of c-ares `process_answer`: parse all sections, match the ID and the
+    /// question, switch to TCP on TC, then map the RCODE and run Node's parser.
+    fn check(&self, id: u16, bytes: &[u8], ttl: bool, udp: bool) -> Result<Reply, &'static str> {
+        if bytes.is_empty() {
+            return Ok(Reply::Unrelated);
+        }
         if bytes.len() < HEADER {
             return Err(BADRESP);
         }
-        if u16::from_be_bytes([bytes[0], bytes[1]]) != id {
-            return Ok(Reply::Unrelated);
-        }
         let word = |index: usize| u16::from_be_bytes([bytes[index * 2], bytes[index * 2 + 1]]);
         let flags = word(1);
-        if flags & FLAG_QR == 0 || flags & MASK_OPCODE != 0 {
-            return Ok(Reply::Unrelated);
-        }
-        if word(2) != 1 {
+        // c-ares accepts QUERY, IQUERY, STATUS, NOTIFY and UPDATE and does not read QR.
+        if !matches!((flags & MASK_OPCODE) >> 11, 0 | 1 | 2 | 4 | 5) || word(2) != 1 {
             return Err(BADRESP);
         }
-        let (asked, at) = Name::read(bytes, HEADER)?;
+        let (asked, at) = Name::read(bytes, HEADER, true)?;
         let (qtype, qclass) = (record::u16_at(bytes, at)?, record::u16_at(bytes, at + 2)?);
-        if !asked.same(&self.name) || qtype != self.kind.code() || qclass != CLASS_IN {
+        if !matches!(qclass, 1 | 3 | 4 | 254 | 255) {
+            return Err(BADRESP);
+        }
+        let sections = record::sections(bytes, at + 4, [word(3), word(4), word(5)])?;
+        if word(0) != id || !asked.same(&self.name) || qtype != self.kind.code() || qclass != CLASS_IN {
             return Ok(Reply::Unrelated);
         }
-        // Checked before the sections: servers cut truncated replies anywhere.
-        if flags & FLAG_TC != 0 {
+        if udp && flags & FLAG_TC != 0 {
             return Ok(Reply::Truncated);
         }
-        let answers = record::sections(bytes, at + 4, [word(3), word(4), word(5)])?;
-        // c-ares maps RCODEs 6 to 11 like NOERROR and 12 to 15 like SERVFAIL.
-        match flags & MASK_RCODE {
-            1 => Err("EFORMERR"),
-            2 | 12.. => Err("ESERVFAIL"),
-            3 => Err("ENOTFOUND"),
-            4 => Err("ENOTIMP"),
-            5 => Err("EREFUSED"),
-            _ if answers.is_empty() && self.kind == Kind::Reverse => Err("ENOTFOUND"),
-            _ if answers.is_empty() => Err(NODATA),
-            _ => format::reply(self.kind, &self.name, &answers, ttl, self.ttl_cap),
-        }
+        // c-ares reads an RCODE it does not know as SERVFAIL; 6 to 11 and 16 to 23 pass on
+        // to Node's parser like NOERROR, with or without records.
+        let rcode = match flags & MASK_RCODE | sections.extended_rcode {
+            known @ (0..=11 | 16..=23) => known,
+            _ => 2,
+        };
+        let measure = matches!(rcode, 0 | 3);
+        let code = match rcode {
+            0 if sections.answers.is_empty() && self.kind == Kind::Reverse => NOTFOUND,
+            0 if sections.answers.is_empty() => NODATA,
+            1 => FORMERR,
+            2 => "ESERVFAIL",
+            3 => NOTFOUND,
+            4 => "ENOTIMP",
+            5 => "EREFUSED",
+            // Node's parsers get no message when c-ares cannot write it again. `reverse`
+            // reads the parsed reply instead.
+            _ if !sections.rewritable && self.kind != Kind::Reverse => FORMERR,
+            _ => match format::reply(self.kind, &asked, &sections.answers, ttl) {
+                Ok(value) => return Ok(Reply::Answer { value, measure }),
+                Err(code) => code,
+            },
+        };
+        Ok(Reply::Error { code, measure })
     }
 }

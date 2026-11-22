@@ -1,9 +1,9 @@
-//! Record shapes, CNAME chains and `resolveAny` order, checked against Node 22.23.5 output.
+//! Record shapes, strings and `resolveAny` order, checked against Node 22.23.5 output.
 
 use serde_json::json;
 
-use super::{RESPONSE, answer, ask, packet, record, record_raw, wire_name};
-use crate::node::dns::wire::{Kind, Reply};
+use super::{answer, ok, record, record_raw, wire_name};
+use crate::node::dns::wire::Kind;
 
 const A: u16 = 1;
 const NS: u16 = 2;
@@ -17,13 +17,6 @@ const SRV: u16 = 33;
 const NAPTR: u16 = 35;
 const TLSA: u16 = 52;
 const CAA: u16 = 257;
-
-fn ok(reply: Result<Reply, &'static str>) -> serde_json::Value {
-    match reply {
-        Ok(Reply::Answer(value)) => value,
-        other => panic!("expected an answer, got {other:?}"),
-    }
-}
 
 fn text(parts: &[&[u8]]) -> Vec<u8> {
     parts.iter().flat_map(|part| std::iter::once(part.len() as u8).chain(part.iter().copied())).collect()
@@ -82,53 +75,6 @@ fn addresses_with_and_without_ttl() {
 }
 
 #[test]
-fn cname_chain_inside_one_reply() {
-    let records = [
-        record_raw(&wire_name("q.example"), CNAME, 1, 10, &wire_name("a.example")),
-        record_raw(&wire_name("A.EXAMPLE"), CNAME, 1, 20, &wire_name("b.example")),
-        record_raw(&wire_name("b.example"), A, 1, 100, &[1, 1, 1, 1]),
-        record("other.example", A, &[9, 9, 9, 9]),
-    ];
-    assert_eq!(ok(answer(Kind::A, &records, true)), json!([{ "address": "1.1.1.1", "ttl": 10 }]));
-    assert_eq!(ok(answer(Kind::Cname, &records, false)), json!(["a.example"]));
-    // pi differs: Node 22 returns the question name, here `["q.example"]`.
-    assert_eq!(answer(Kind::Cname, &records[2..], false), Err("ENODATA"));
-}
-
-#[test]
-fn cname_without_records_is_an_alias() {
-    let only =
-        [record("q.example", CNAME, &wire_name("a.example")), record("a.example", CNAME, &wire_name("b.example"))];
-    for kind in [Kind::A, Kind::Aaaa, Kind::Mx, Kind::Txt, Kind::Soa, Kind::Ptr, Kind::Tlsa] {
-        assert_eq!(answer(kind, &only, false), Ok(Reply::Alias { name: "b.example".into(), ttl: 300 }), "{kind:?}");
-    }
-    let looped =
-        [record("q.example", CNAME, &wire_name("a.example")), record("a.example", CNAME, &wire_name("Q.example"))];
-    assert_eq!(answer(Kind::A, &looped, false), Ok(Reply::Alias { name: "a.example".into(), ttl: 300 }));
-    let long: Vec<Vec<u8>> = (0..20)
-        .map(|hop| record(&format!("h{hop}.example"), CNAME, &wire_name(&format!("h{}.example", hop + 1))))
-        .collect();
-    let question = ask("h0.example", Kind::A);
-    let reply = question.answer(super::ID, &packet(&question, RESPONSE, [&long, &[], &[]]), false);
-    assert_eq!(reply, Ok(Reply::Alias { name: "h16.example".into(), ttl: 300 }));
-}
-
-#[test]
-fn empty_results_match_node_per_type() {
-    let a_only = [record("q.example", A, &[1, 1, 1, 1])];
-    for kind in [Kind::Mx, Kind::Txt, Kind::Srv, Kind::Naptr, Kind::Caa, Kind::Tlsa] {
-        assert_eq!(ok(answer(kind, &a_only, false)), json!([]), "{kind:?}");
-    }
-    for kind in [Kind::Aaaa, Kind::Ns, Kind::Ptr] {
-        assert_eq!(answer(kind, &a_only, false), Err("ENODATA"), "{kind:?}");
-    }
-    assert_eq!(answer(Kind::Soa, &a_only, false), Err("EBADRESP"));
-    assert_eq!(answer(Kind::A, &[record("q.example", MX, &cat(&[&[0, 1], &wire_name("m")]))], false), Err("ENODATA"));
-    // Node 22 also returns A records owned by unrelated names; pi keeps only the CNAME chain.
-    assert_eq!(answer(Kind::A, &[record("other.example", A, &[9, 9, 9, 9])], false), Err("ENODATA"));
-}
-
-#[test]
 fn every_record_shape() {
     let all = every_type();
     assert_eq!(ok(answer(Kind::Mx, &all, false)), json!([{ "exchange": "mx.example", "priority": 10 }]));
@@ -161,6 +107,38 @@ fn any_lists_types_in_node_order() {
     let two_soa = [record("q.example", SOA, &soa_data(5)), record("q.example", SOA, &soa_data(6))];
     assert_eq!(ok(answer(Kind::Any, &two_soa, false)).as_array().map(Vec::len), Some(1));
     assert_eq!(ok(answer(Kind::Any, &[record("q.example", 99, &[1])], false)), json!([]));
+}
+
+#[test]
+fn any_drops_a_records_when_the_answer_has_a_cname() {
+    let v6 = [1; 16];
+    let records = [
+        record_raw(&wire_name("q.example"), A, 1, 50, &[1, 1, 1, 1]),
+        record_raw(&wire_name("q.example"), CNAME, 1, 7, &wire_name("t.example")),
+        record_raw(&wire_name("q.example"), AAAA, 1, 90, &v6),
+        record("q.example", MX, &cat(&[&[0, 1], &wire_name("mx.example")])),
+        record("q.example", TLSA, &[1, 2, 3, 0xAB]),
+        record("q.example", SOA, &soa_data(5)),
+    ];
+    let expected = r#"[{"value":"t.example","type":"CNAME"},{"address":"101:101:101:101:101:101:101:101","ttl":7,"type":"AAAA"},{"exchange":"mx.example","priority":1,"type":"MX"},{"nsname":"ns1.example","hostmaster":"host.example","serial":1,"refresh":2,"retry":3,"expire":4,"minttl":5,"type":"SOA"},null,null,null,null,{"certUsage":1,"selector":2,"match":3,"data":[171]}]"#;
+    assert_eq!(ok(answer(Kind::Any, &records, false)).to_string(), expected);
+    assert_eq!(
+        ok(answer(Kind::Aaaa, &records, true)),
+        json!([{ "address": "101:101:101:101:101:101:101:101", "ttl": 7 }])
+    );
+}
+
+#[test]
+fn soa_numbers_and_caa_values_follow_node_conversions() {
+    let numbers: Vec<u8> = [u32::MAX, 0x8000_0001, u32::MAX, 0x9000_0000, u32::MAX]
+        .iter()
+        .flat_map(|number| number.to_be_bytes())
+        .collect();
+    let data = cat(&[&wire_name("ns1.example"), &wire_name("host.example"), &numbers]);
+    let expected = r#"{"nsname":"ns1.example","hostmaster":"host.example","serial":4294967295,"refresh":-2147483647,"retry":-1,"expire":-1879048192,"minttl":4294967295}"#;
+    assert_eq!(ok(answer(Kind::Soa, &[record("q.example", SOA, &data)], false)).to_string(), expected);
+    let caa = [record("q.example", CAA, &cat(&[&[0, 5], b"issue", b"a\x00b"]))];
+    assert_eq!(ok(answer(Kind::Caa, &caa, false)), json!([{ "critical": 0, "issue": "a" }]));
 }
 
 #[test]
@@ -197,6 +175,7 @@ fn malformed_rdata_fails() {
     bad(Kind::Caa, CAA, &[0, 0]);
     bad(Kind::Caa, CAA, &[0, 9, b'a']);
     bad(Kind::Caa, CAA, &cat(&[&[0, 5], b"issue"]));
+    bad(Kind::Caa, CAA, &cat(&[&[0, 5], b"is\x01ue", b"ab"]));
     bad(Kind::Naptr, NAPTR, &cat(&[&[0, 1, 0, 2], &text(&[b"\xE9", b"x", b"y"]), &[0]]));
     bad(Kind::Naptr, NAPTR, &cat(&[&[0, 1, 0, 2], &text(&[b"a\x01", b"b", b"c"]), &[0]]));
     bad(Kind::Mx, MX, &[0, 1, 3, b'a']);
@@ -209,12 +188,11 @@ fn malformed_rdata_fails() {
 
 #[test]
 fn tlsa_keeps_node_answer_index_slots() {
-    // pi differs: Node 22 also lists the TLSA owned by `other.example`.
     let records = [
         record("q.example", CNAME, &wire_name("c.example")),
         record("c.example", TLSA, &[1, 2, 3, 4, 5]),
-        record("other.example", TLSA, &[0, 0, 0, 9]),
-        record("c.example", TLSA, &[3, 1, 1, 0xAB]),
+        record("c.example", A, &[1, 1, 1, 1]),
+        record("other.example", TLSA, &[3, 1, 1, 0xAB]),
     ];
     let expected = json!([null, { "certUsage": 1, "selector": 2, "match": 3, "data": [4, 5] }, null, { "certUsage": 3, "selector": 1, "match": 1, "data": [171] }]);
     assert_eq!(ok(answer(Kind::Tlsa, &records, false)), expected);
@@ -222,39 +200,4 @@ fn tlsa_keeps_node_answer_index_slots() {
     assert_eq!(ok(answer(Kind::Any, &records, false)), any);
     assert_eq!(answer(Kind::Tlsa, &[record("q.example", TLSA, &[3, 1, 1])], false), Err("EBADRESP"));
     assert_eq!(answer(Kind::Tlsa, &[record("q.example", TLSA, &[3, 1])], false), Err("EBADRESP"));
-}
-
-#[test]
-fn cname_ttl_survives_across_responses() {
-    let hop = [record_raw(&wire_name("q.example"), CNAME, 1, 30, &wire_name("a.example"))];
-    assert_eq!(answer(Kind::A, &hop, true), Ok(Reply::Alias { name: "a.example".into(), ttl: 30 }));
-    let next = ask("a.example", Kind::A).with_ttl_cap(30);
-    let second = [record_raw(&wire_name("a.example"), CNAME, 1, 60, &wire_name("b.example"))];
-    let reply = next.answer(super::ID, &packet(&next, RESPONSE, [&second, &[], &[]]), true);
-    assert_eq!(reply, Ok(Reply::Alias { name: "b.example".into(), ttl: 30 }));
-    let last = ask("b.example", Kind::A).with_ttl_cap(30);
-    let records = [
-        record_raw(&wire_name("b.example"), A, 1, 100, &[1, 1, 1, 1]),
-        record_raw(&wire_name("b.example"), A, 1, 5, &[2, 2, 2, 2]),
-    ];
-    let reply = last.answer(super::ID, &packet(&last, RESPONSE, [&records, &[], &[]]), true);
-    assert_eq!(
-        reply,
-        Ok(Reply::Answer(json!([{ "address": "1.1.1.1", "ttl": 30 }, { "address": "2.2.2.2", "ttl": 5 }])))
-    );
-    let plain = last.answer(super::ID, &packet(&last, RESPONSE, [&records, &[], &[]]), false);
-    assert_eq!(plain, Ok(Reply::Answer(json!(["1.1.1.1", "2.2.2.2"]))));
-}
-
-#[test]
-fn reverse_reads_ptr_records() {
-    let question = ask("37.2.0.192.in-addr.arpa", Kind::Reverse);
-    assert_eq!(question.encode(1)[question.encode(1).len() - 4..], [0, 12, 0, 1]);
-    let reply =
-        |records: &[Vec<u8>]| question.answer(super::ID, &packet(&question, RESPONSE, [records, &[], &[]]), false);
-    assert_eq!(reply(&[]), Err("ENOTFOUND"));
-    assert_eq!(reply(&[record("37.2.0.192.in-addr.arpa", TXT, &text(&[b"x"]))]), Err("ENODATA"));
-    let ptr = [record("37.2.0.192.in-addr.arpa", PTR, &wire_name("host.example"))];
-    assert_eq!(reply(&ptr), Ok(Reply::Answer(json!(["host.example"]))));
-    assert_eq!(answer(Kind::Ptr, &[], false), Err("ENODATA"));
 }
