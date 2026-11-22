@@ -1,5 +1,5 @@
-//! `/bug` upload: the report files as multipart form data to the Radius gateway, anonymous or
-//! with the user's Radius token (upstream `core/bug-report-upload.ts`, `core/radius.ts`).
+//! `/bug` upload (upstream `core/bug-report-upload.ts`): multipart report files to pi-rust.com,
+//! or to `PI_BUG_REPORT_URL`. Upstream posts them to its Radius gateway.
 
 use pi_ai::auth::oauth::{DEFAULT_RADIUS_GATEWAY, normalize_radius_gateway_url};
 use serde_json::Value;
@@ -8,11 +8,20 @@ use tokio_util::sync::CancellationToken;
 use super::bug_report::{BugReportBundle, bug_report_files};
 
 pub const ENV_RADIUS_GATEWAY: &str = "PI_RADIUS_GATEWAY";
+pub const ENV_BUG_REPORT_URL: &str = "PI_BUG_REPORT_URL";
+pub const DEFAULT_BUG_REPORT_URL: &str = "https://pi-rust.com";
 
 /// The Radius gateway origin, honoring `PI_RADIUS_GATEWAY`.
 pub fn radius_gateway_url() -> String {
     let configured = pi_ai::env::process_env_value(ENV_RADIUS_GATEWAY).filter(|value| !value.is_empty());
     normalize_radius_gateway_url(configured.as_deref().unwrap_or(DEFAULT_RADIUS_GATEWAY))
+}
+
+/// The bug report server origin, honoring `PI_BUG_REPORT_URL`.
+pub fn bug_report_url() -> String {
+    pi_ai::env::process_env_value(ENV_BUG_REPORT_URL)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_BUG_REPORT_URL.to_string())
 }
 
 /// A multipart body with one file part per report file, and its content type.
@@ -36,9 +45,7 @@ pub fn multipart_body(bundle: &BugReportBundle, boundary: &str) -> (Vec<u8>, Str
 
 #[derive(Clone, Debug, Default)]
 pub struct UploadBugReportOptions {
-    /// Radius token; anonymous without it.
-    pub token: Option<String>,
-    /// The gateway origin; [`radius_gateway_url`] by default.
+    /// The server origin; [`bug_report_url`] by default.
     pub gateway_url: Option<String>,
     pub client: Option<reqwest::Client>,
 }
@@ -49,17 +56,14 @@ pub async fn upload_bug_report(
     options: &UploadBugReportOptions,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
-    let gateway = options.gateway_url.clone().unwrap_or_else(radius_gateway_url);
+    let gateway = options.gateway_url.clone().unwrap_or_else(bug_report_url);
     let url = reqwest::Url::parse(&gateway)
         .and_then(|base| base.join("/v1/bug-reports"))
         .map_err(|error| format!("Bug report upload failed: {error}"))?;
     let boundary = format!("pi-bug-report-{}", crate::session::ids::uuid_v4().replace('-', ""));
     let (body, content_type) = multipart_body(bundle, &boundary);
     let client = options.client.clone().unwrap_or_else(pi_ai::http::shared_client);
-    let mut request = client.post(url).header("Content-Type", content_type).body(body);
-    if let Some(token) = options.token.as_deref().filter(|token| !token.is_empty()) {
-        request = request.header("Authorization", format!("Bearer {token}"));
-    }
+    let request = client.post(url).header("Content-Type", content_type).body(body);
     let exchange = async {
         let response = request.send().await.map_err(|error| format!("Bug report upload failed: {error}"))?;
         let status = response.status();
@@ -100,25 +104,21 @@ mod tests {
         }
     }
 
-    fn options(server: &TestServer, token: Option<&str>) -> UploadBugReportOptions {
-        UploadBugReportOptions {
-            token: token.map(String::from),
-            gateway_url: Some(format!("{}/ignored-path", server.url)),
-            client: Some(client()),
-        }
+    fn options(server: &TestServer) -> UploadBugReportOptions {
+        UploadBugReportOptions { gateway_url: Some(format!("{}/ignored-path", server.url)), client: Some(client()) }
     }
 
     #[tokio::test]
-    async fn uploads_multipart_files_with_the_radius_token() {
+    async fn uploads_multipart_files_without_authorization() {
         let server = TestServer::start(|request| {
             assert_eq!(request.path(), "/v1/bug-reports");
             TestReply::json(&json!({"ok": true, "bug_report": {"id": "bug-42"}}))
         })
         .await;
-        let id = upload_bug_report(&bundle(), &options(&server, Some("tok")), &CancellationToken::new()).await.unwrap();
+        let id = upload_bug_report(&bundle(), &options(&server), &CancellationToken::new()).await.unwrap();
         assert_eq!(id, "bug-42");
         let request = &server.requests()[0];
-        assert_eq!(request.header("authorization"), Some("Bearer tok"));
+        assert_eq!(request.header("authorization"), None);
         let content_type = request.header("content-type").unwrap();
         let boundary = content_type.strip_prefix("multipart/form-data; boundary=").unwrap();
         let body = String::from_utf8(request.body.clone()).unwrap();
@@ -131,25 +131,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reports_gateway_errors_and_stays_anonymous_without_a_token() {
-        let server = TestServer::start(|request| match request.header("x-case") {
-            _ if request.header("authorization").is_some() => TestReply::status(500, "unexpected"),
-            _ => TestReply::bytes(
-                413,
-                br#"{"ok": false, "error": "too_large", "description": "Report too large"}"#.to_vec(),
-            ),
+    async fn reports_server_errors() {
+        let server = TestServer::start(|_| {
+            TestReply::bytes(413, br#"{"ok": false, "error": "too_large", "description": "Report too large"}"#.to_vec())
         })
         .await;
-        let error = upload_bug_report(&bundle(), &options(&server, None), &CancellationToken::new()).await.unwrap_err();
+        let error = upload_bug_report(&bundle(), &options(&server), &CancellationToken::new()).await.unwrap_err();
         assert_eq!(error, "Bug report upload failed: Report too large");
 
         let plain = TestServer::start(|_| TestReply::status(500, "oops")).await;
-        let error =
-            upload_bug_report(&bundle(), &options(&plain, Some("")), &CancellationToken::new()).await.unwrap_err();
+        let error = upload_bug_report(&bundle(), &options(&plain), &CancellationToken::new()).await.unwrap_err();
         assert_eq!(error, "Bug report upload failed: Internal Server Error");
         let missing_id = TestServer::start(|_| TestReply::json(&json!({"ok": true}))).await;
-        let error =
-            upload_bug_report(&bundle(), &options(&missing_id, None), &CancellationToken::new()).await.unwrap_err();
+        let error = upload_bug_report(&bundle(), &options(&missing_id), &CancellationToken::new()).await.unwrap_err();
         assert_eq!(error, "Bug report upload failed: OK");
     }
 }
