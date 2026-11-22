@@ -63,7 +63,19 @@ pub fn generate_unified_patch(path: &str, old: &str, new: &str, context: usize) 
 
 /// Adds `{sign}{number:>width$} {line}` and a line break, with the line without its `\n`.
 fn push_numbered(out: &mut String, sign: char, number: usize, width: usize, line: &str) {
-    let _ = writeln!(out, "{sign}{number:>width$} {}", line.strip_suffix('\n').unwrap_or(line));
+    let mut digits = [b' '; 20];
+    let mut first = digits.len();
+    let mut rest = number;
+    while first == digits.len() || rest > 0 {
+        first -= 1;
+        digits[first] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+    }
+    out.push(sign);
+    out.extend(digits[first.min(digits.len().saturating_sub(width))..].iter().map(|&digit| char::from(digit)));
+    out.push(' ');
+    out.push_str(line.strip_suffix('\n').unwrap_or(line));
+    out.push('\n');
 }
 
 fn display_diff(lines: &LineDiff, context: usize) -> (String, Option<usize>) {
@@ -171,10 +183,11 @@ fn unified_patch(lines: &LineDiff, path: &str, context: usize) -> String {
                 let new_start = if new_lines == 0 { new_range_start - 1 } else { new_range_start };
                 let _ = writeln!(out, "@@ -{old_start},{old_lines} +{new_start},{new_lines} @@");
                 for (sign, line) in hunk.drain(..) {
-                    let _ = match line.strip_suffix('\n') {
-                        Some(line) => writeln!(out, "{sign}{line}"),
-                        None => writeln!(out, "{sign}{line}\n\\ No newline at end of file"),
-                    };
+                    out.push(sign);
+                    out.push_str(line);
+                    if !line.ends_with('\n') {
+                        out.push_str("\n\\ No newline at end of file\n");
+                    }
                 }
                 old_range_start = 0;
                 new_range_start = 0;
