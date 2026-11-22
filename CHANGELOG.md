@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.23] - 2026-11-21
+
+### Added
+
+- **coding-agent:** send /bug reports to pi-rust.com instead of upstream ([2e63d36](https://github.com/yannelli/pi-rust/commit/2e63d36a490ce32f29507ce0681d020f0d4884a9))
+
 ## [0.12.22] - 2026-11-21
 
 ### Added
