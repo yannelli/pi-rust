@@ -1,4 +1,4 @@
-//! Sections 2 to 5, 7, and 9: surface lists read from source text on both sides.
+//! Parity checks that compare source files and package manifests.
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -25,6 +25,26 @@ pub fn read_upstream(upstream: &Path, rel: &str) -> Result<String, String> {
 
 pub fn read_local(root: &Path, rel: &str) -> Result<String, String> {
     std::fs::read_to_string(root.join(rel)).map_err(|error| format!("{rel}: {error}"))
+}
+
+pub fn jsdiff(upstream: &Path, ported: &str) -> Section {
+    const PACKAGE: &str = "packages/coding-agent/package.json";
+    build("jsdiff", "Edit diff dependency", |section| {
+        let text = read_upstream(upstream, PACKAGE)?;
+        let manifest: serde_json::Value = serde_json::from_str(&text).map_err(|error| format!("{PACKAGE}: {error}"))?;
+        section.notes.push(format!("pi-rust ports `diff@{ported}`."));
+        match manifest.pointer("/dependencies/diff") {
+            Some(value) => {
+                let version =
+                    value.as_str().ok_or_else(|| format!("dependencies.diff in {PACKAGE} is not a string"))?;
+                if version != ported {
+                    section.missing.push(Item::new(format!("diff@{version}")).detail("Compare the port with jsdiff."));
+                }
+            }
+            None => section.extra.push(Item::new(format!("diff@{ported}")).detail("Upstream does not declare diff.")),
+        }
+        Ok(())
+    })
 }
 
 /// Items only upstream, then items only in pi-rust.

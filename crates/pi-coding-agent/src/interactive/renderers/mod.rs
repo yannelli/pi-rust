@@ -12,6 +12,7 @@ mod write;
 use std::any::Any;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use pi_ai::ContentBlock;
 use pi_tui::terminal_image::{get_capabilities, get_image_dimensions, hyperlink, image_fallback, path_to_file_url};
@@ -53,14 +54,21 @@ impl ToolResultView {
 
 /// Per-call state a renderer keeps between updates (upstream `context.state`).
 #[derive(Default)]
-pub struct RendererState(Option<Box<dyn Any>>);
+pub struct RendererState {
+    value: Option<Box<dyn Any>>,
+    redraw_from_worker: Option<Arc<dyn Fn() + Send + Sync>>,
+}
 
 impl RendererState {
+    pub(super) fn live(redraw: impl Fn() + Send + Sync + 'static) -> Self {
+        Self { value: None, redraw_from_worker: Some(Arc::new(redraw)) }
+    }
+
     pub fn get_or_default<T: Default + 'static>(&mut self) -> &mut T {
-        if !self.0.as_ref().is_some_and(|state| state.is::<T>()) {
-            self.0 = Some(Box::new(T::default()));
+        if !self.value.as_ref().is_some_and(|state| state.is::<T>()) {
+            self.value = Some(Box::new(T::default()));
         }
-        self.0.as_mut().and_then(|state| state.downcast_mut::<T>()).expect("state was just set")
+        self.value.as_mut().and_then(|state| state.downcast_mut::<T>()).expect("state was just set")
     }
 }
 

@@ -51,6 +51,13 @@ impl Drop for SdkState {
     }
 }
 
+/// The `contextLines` argument; `coding_utils.js` checks it and gives `Infinity` as `MAX_SAFE_INTEGER`.
+fn context_lines(args: &Args, index: usize) -> usize {
+    args.json(index)
+        .as_u64()
+        .map_or(crate::tools::edit_diff::DEFAULT_CONTEXT_LINES, |n| usize::try_from(n).unwrap_or(usize::MAX))
+}
+
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
     let value = match name {
         "renderDiff" => json!(crate::interactive::components::diff::render_diff(&args.str(0)?)),
@@ -83,12 +90,15 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         }
         "generateDiffString" => {
             let (diff, first_changed_line) =
-                crate::tools::edit_diff::generate_diff_string(&args.str(0)?, &args.str(1)?);
+                crate::tools::edit_diff::generate_diff_string(&args.str(0)?, &args.str(1)?, context_lines(args, 2));
             json!({"diff": diff, "firstChangedLine": first_changed_line})
         }
-        "generateUnifiedPatch" => {
-            json!(crate::tools::edit_diff::generate_unified_patch(&args.str(0)?, &args.str(1)?, &args.str(2)?))
-        }
+        "generateUnifiedPatch" => json!(crate::tools::edit_diff::generate_unified_patch(
+            &args.str(0)?,
+            &args.str(1)?,
+            &args.str(2)?,
+            context_lines(args, 3)
+        )),
         "dispose" => {
             let removed = lock(&runner.sdk.children).remove(&args.u64(0));
             if let Some(child) = removed {
