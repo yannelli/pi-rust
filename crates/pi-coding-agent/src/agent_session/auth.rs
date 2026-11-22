@@ -18,6 +18,7 @@ use super::model_runtime::ModelRuntime;
 use super::runtime_virtual::RouteOptions;
 use crate::app::{format_no_api_key_found_message, oauth_failed_message};
 use crate::platform::VERSION;
+use crate::platform::telemetry::install_telemetry_enabled;
 use crate::settings::SettingsManager;
 use crate::virtual_models::{ModelRouteReason, is_virtual_model};
 
@@ -88,16 +89,8 @@ pub async fn request_auth_as(
 #[path = "auth_kimi_tests.rs"]
 mod kimi_tests;
 
-/// Install telemetry: `PI_TELEMETRY` when set, else the `enableInstallTelemetry` setting.
-pub fn install_telemetry_enabled(settings: &SettingsManager) -> bool {
-    match pi_ai::env::process_env_value("PI_TELEMETRY") {
-        Some(value) => matches!(value.to_lowercase().as_str(), "1" | "true" | "yes"),
-        None => settings.enable_install_telemetry(),
-    }
-}
-
 /// How pi's requests identify it to providers (upstream `getClientIdentity`): a detailed
-/// `User-Agent` with pi's version, and attribution to pi while install telemetry is enabled.
+/// `User-Agent` with pi's version, and attribution to pi-rust while install telemetry is enabled.
 pub fn client_identity(settings: &SettingsManager) -> ClientIdentity {
     ClientIdentity {
         user_agent: Some(UserAgentMode::Detailed),

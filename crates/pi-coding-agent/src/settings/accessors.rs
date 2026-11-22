@@ -118,7 +118,7 @@ impl SettingsManager {
         set_enable_install_telemetry,
         "enableInstallTelemetry",
         enable_install_telemetry,
-        true
+        false
     );
     flag!(enable_skill_commands, set_enable_skill_commands, "enableSkillCommands", enable_skill_commands, true);
     flag!(remember_last_model, set_remember_last_model, "rememberLastModel", remember_last_model, true);

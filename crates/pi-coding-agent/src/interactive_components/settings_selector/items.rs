@@ -231,7 +231,7 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
         item(
             "install-telemetry",
             "Install telemetry",
-            "Send an anonymous version/update ping after changelog-detected updates",
+            "Send an anonymous version/update ping to pi-rust.com after changelog-detected updates",
             bool_str(config.enable_install_telemetry),
             BOOL,
         ),
