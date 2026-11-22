@@ -13,7 +13,7 @@ use crate::settings::defaults::{
 };
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
-    ProviderIdentity, SessionShareDestination, TreeFilterMode, TuiMode,
+    ProviderIdentity, SessionShareDestination, SessionShareViewer, TreeFilterMode, TuiMode,
 };
 use crate::settings::{ProviderRetryConfig, QuietStartup, RetryConfig};
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
@@ -87,6 +87,7 @@ pub struct SettingsConfig {
     pub follow_up_mode: QueueMode,
     pub transport: Transport,
     pub session_share_destination: SessionShareDestination,
+    pub session_share_viewer: SessionShareViewer,
     pub http_idle_timeout_ms: u64,
     pub cache_warming_mode: CacheWarmingMode,
     pub retry: RetryConfig,
@@ -146,6 +147,7 @@ impl Default for SettingsConfig {
             follow_up_mode: QueueMode::OneAtATime,
             transport: Transport::Auto,
             session_share_destination: SessionShareDestination::Auto,
+            session_share_viewer: SessionShareViewer::PiRust,
             http_idle_timeout_ms: DEFAULT_HTTP_IDLE_TIMEOUT_MS,
             cache_warming_mode: CacheWarmingMode::Streaming,
             retry: RetryConfig {
@@ -215,6 +217,7 @@ pub struct SettingsCallbacks {
     pub on_follow_up_mode_change: OnChange<QueueMode>,
     pub on_transport_change: OnChange<Transport>,
     pub on_session_share_destination_change: OnChange<SessionShareDestination>,
+    pub on_session_share_viewer_change: OnChange<SessionShareViewer>,
     pub on_http_idle_timeout_ms_change: OnChange<u64>,
     pub on_cache_warming_mode_change: OnChange<CacheWarmingMode>,
     pub on_retry_enabled_change: OnChange<bool>,
@@ -279,6 +282,7 @@ impl Default for SettingsCallbacks {
             on_follow_up_mode_change: ignore(),
             on_transport_change: ignore(),
             on_session_share_destination_change: ignore(),
+            on_session_share_viewer_change: ignore(),
             on_http_idle_timeout_ms_change: ignore(),
             on_cache_warming_mode_change: ignore(),
             on_retry_enabled_change: ignore(),

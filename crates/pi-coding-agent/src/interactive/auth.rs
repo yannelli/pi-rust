@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use pi_ai::Model;
-use pi_ai::auth::{AuthError, AuthType, LoginOptions};
+use pi_ai::auth::{AuthCheck, AuthError, AuthType, LoginOptions};
 use pi_tui::fuzzy::fuzzy_filter;
 use pi_tui::program_status::BlockedKind;
 use pi_tui::{AutocompleteItem, Component, component};
@@ -14,7 +14,8 @@ use pi_tui::{AutocompleteItem, Component, component};
 use super::mode::InteractiveMode;
 use super::model_refresh::{login_refresh_warning, refresh_after_login};
 use super::selector::SelectorSpec;
-use crate::agent_session::login::{NO_STORED_CREDENTIALS, logout_message};
+use crate::agent_session::login::{LoginProvider, NO_STORED_CREDENTIALS, logout_message};
+use crate::export::pi_rust_share::{ACCOUNT_FILE, ACCOUNT_LABEL, load_account};
 use crate::interactive_components::login::{
     AuthSelectorMode, AuthSelectorProvider, LoginDialog, LoginMethodChoice, LoginMethodMenu, OAuthSelector,
     RadiusLoginMenu, ambient_auth_dialog, api_key_login_details, format_auth_selector_provider_type,
@@ -50,6 +51,19 @@ fn login_completion_options(providers: &[AuthSelectorProvider]) -> Vec<(AuthSele
     }
     options.sort_by_key(|(provider, _)| provider.name.to_lowercase());
     options
+}
+
+/// The `/logout` entry of the pi-rust.com account that `/share` signed in to.
+fn pi_rust_logout_entry() -> LoginProvider {
+    LoginProvider {
+        id: ACCOUNT_LABEL.into(),
+        name: ACCOUNT_LABEL.into(),
+        auth_type: AuthType::OAuth,
+        login_label: None,
+        subscription: false,
+        status: Some(AuthCheck { auth_type: AuthType::OAuth, source: ACCOUNT_FILE.into() }),
+        ambient: false,
+    }
 }
 
 fn auth_type_key(auth_type: AuthType) -> &'static str {
@@ -450,16 +464,22 @@ impl InteractiveMode {
         }
     }
 
-    /// `/logout`: remove a credential saved by `/login`.
+    /// `/logout`: remove a credential saved by `/login`, or the pi-rust.com account that `/share`
+    /// signed in to (pi-rust extension).
     pub(super) fn show_logout_selector(&self) {
         let runtime = self.session().model_runtime().clone();
+        let pi_rust = load_account(&self.agent_dir);
         self.spawn(move |mode| async move {
             let listing = runtime.clone();
-            let providers = match tokio::spawn(async move { listing.logout_providers().await }).await {
+            let mut providers = match tokio::spawn(async move { listing.logout_providers().await }).await {
                 Ok(Ok(providers)) => providers,
                 Ok(Err(error)) => return mode.show_error(&format!("Could not read stored credentials: {error}")),
                 Err(error) => return mode.show_error(&format!("Could not read stored credentials: {error}")),
             };
+            if pi_rust.is_some() {
+                providers.push(pi_rust_logout_entry());
+                providers.sort_by_key(|provider| provider.name.to_lowercase());
+            }
             if providers.is_empty() {
                 return mode.show_status(NO_STORED_CREDENTIALS);
             }
@@ -475,6 +495,9 @@ impl InteractiveMode {
                         select_done();
                         let Some(mode) = select_weak.upgrade() else { return };
                         let Some(provider) = options.iter().find(|p| p.id == provider_id).cloned() else { return };
+                        if let Some(account) = pi_rust.clone().filter(|_| provider == pi_rust_logout_entry()) {
+                            return mode.spawn(move |mode| async move { mode.sign_out_of_pi_rust(account).await });
+                        }
                         let runtime = runtime.clone();
                         mode.spawn(move |mode| async move {
                             let id = provider.id.clone();
