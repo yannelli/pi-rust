@@ -1,5 +1,5 @@
 //! Account-scoped catalogs: each network refresh narrows the catalog (bundled models plus a newer
-//! pi.dev catalog) to the models the credential may use and saves the result, which then replaces
+//! pi-rust.com catalog) to the models the credential may use and saves the result, which then replaces
 //! the catalog, offline too (upstream `withPersonalizedCatalog`).
 
 use std::sync::{Arc, RwLock};
@@ -70,7 +70,7 @@ impl PersonalizedCatalog {
         }
     }
 
-    /// The pi.dev catalog server, and the generation time of the bundled models.
+    /// The catalog server, and the generation time of the bundled models.
     pub fn with_catalog(mut self, base_url: Option<&str>, local_generated_at: Option<i64>) -> Self {
         self.catalog_base_url = base_url.unwrap_or(DEFAULT_CATALOG_BASE_URL).trim_end_matches('/').to_string();
         self.local_generated_at = local_generated_at;
@@ -89,7 +89,7 @@ impl PersonalizedCatalog {
         self
     }
 
-    /// The client of the pi.dev catalog request.
+    /// The client of the catalog request.
     pub fn with_client(mut self, client: reqwest::Client) -> Self {
         self.client = client;
         self
@@ -112,7 +112,7 @@ impl PersonalizedCatalog {
         *self.personal.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = models;
     }
 
-    /// Whether the saved list is recent enough to skip this refresh. Entries with pi.dev
+    /// Whether the saved list is recent enough to skip this refresh. Entries with catalog server
     /// validators were saved by the plain overlay and are always refreshed.
     fn is_fresh(&self, context: &RefreshContext<'_>) -> bool {
         let (Some(interval), Some(entry)) = (self.interval, context.stored) else { return false };

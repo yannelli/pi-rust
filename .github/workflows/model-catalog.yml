@@ -1,0 +1,128 @@
+name: Model catalog
+
+# Publishes the model catalog that pi-rust.com serves at /api/models/providers/<id>, in place of
+# upstream's pi.dev. The catalog comes from upstream's generator at the upstream commit of the
+# latest pi-rust release, so it only needs code that release has ported. Revisions go to the
+# `model-catalog` branch as a single commit, so the branch adds no history to clones.
+# See docs/model-catalog.md.
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  # A release made with GITHUB_TOKEN does not fire `release` events, so follow the workflow.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: model-catalog
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      upstream-commit: ${{ steps.pick.outputs.upstream-commit }}
+      minimum-version: ${{ steps.pick.outputs.minimum-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The catalog applies to every release that shares the latest release's upstream commit.
+      - id: pick
+        run: |
+          synced() { git show "$1:docs/parity/upstream.json" 2>/dev/null | jq -r '.syncedCommit // empty'; }
+          tags=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$')
+          latest=$(echo "$tags" | head -n 1)
+          commit=$(synced "$latest")
+          test -n "$commit"
+          minimum=$latest
+          for tag in $tags; do
+            [ "$(synced "$tag")" = "$commit" ] || break
+            minimum=$tag
+          done
+          echo "Latest release $latest, upstream $commit, minimum $minimum"
+          echo "upstream-commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "minimum-version=${minimum#v}" >> "$GITHUB_OUTPUT"
+
+  # Runs upstream's npm scripts, so it gets no write permissions and no stored credentials.
+  generate:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: earendil-works/pi
+          ref: ${{ needs.release.outputs.upstream-commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate and validate the catalog
+        run: |
+          npm ci --ignore-scripts
+          npm run generate:model-catalog
+          npm run check:model-catalog
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-catalog
+          path: .artifacts/model-catalog
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [release, generate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pi-rust
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: model-catalog
+          path: generated
+      - name: Check out the model-catalog branch
+        working-directory: pi-rust
+        run: |
+          if git ls-remote --exit-code --heads origin model-catalog >/dev/null; then
+            git fetch --depth 1 origin model-catalog
+            git worktree add ../catalog FETCH_HEAD
+            git -C ../catalog switch -c model-catalog
+          else
+            git worktree add --orphan -b model-catalog ../catalog
+          fi
+      - name: Publish
+        run: |
+          node --test pi-rust/scripts/publish-model-catalog.test.mjs
+          node pi-rust/scripts/publish-model-catalog.mjs --input generated --output catalog \
+            --minimum-version "${{ needs.release.outputs.minimum-version }}" \
+            --upstream-commit "${{ needs.release.outputs.upstream-commit }}"
+      - name: Commit and push
+        working-directory: catalog
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Catalog unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -q --orphan snapshot
+          git commit -q -m "chore(catalog): publish $(jq -r .defaultRevision models/v1/index.json | cut -c1-19)"
+          git push --force origin snapshot:model-catalog

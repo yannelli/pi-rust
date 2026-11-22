@@ -13,6 +13,7 @@ Created: 2026-10-29. Last updated: 2026-11-22.
 | [agents/node-compat.md](agents/node-compat.md) | You close a Node API gap in the extension runtime. |
 | [agents/ci-triage.md](agents/ci-triage.md) | You diagnose a CI failure or a flaky test. |
 | [agents/release.md](agents/release.md) | You ship a change. |
+| [model-catalog.md](model-catalog.md) | You change the model catalog server, the Model catalog workflow, or `scripts/publish-model-catalog.mjs`. |
 | [agents/daily-gap-check.md](agents/daily-gap-check.md) | You run the scheduled gap review. |
 | [providers/usage.md](providers/usage.md) | You change `/usage`, `pi usage`, or `usage.get`. It records the usage endpoints of each provider and their sources. |
 | [providers/subscription-providers.md](providers/subscription-providers.md) | You change the Cursor or Google Antigravity provider. It records their login flows and wire protocols. |

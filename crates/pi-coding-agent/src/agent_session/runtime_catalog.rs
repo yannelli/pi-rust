@@ -1,4 +1,4 @@
-//! Dynamic model catalogs in the model runtime: the pi.dev overlay, Radius gateways, and the
+//! Dynamic model catalogs in the model runtime: the pi-rust.com overlay, Radius gateways, and the
 //! llama.cpp router restored from `models-store.json` at startup and refreshed in the background
 //! (upstream `ModelRuntime.create`, `refresh`, and the llama.cpp built-in extension).
 
@@ -58,7 +58,7 @@ impl ProviderAuth for LlamaAuth {
     }
 }
 
-/// Where dynamic catalogs persist and which pi.dev mirror they use.
+/// Where dynamic catalogs persist and which catalog server they use.
 #[derive(Clone)]
 pub struct CatalogSetup {
     pub store: Arc<dyn ModelsStore>,
@@ -66,7 +66,7 @@ pub struct CatalogSetup {
 }
 
 impl CatalogSetup {
-    /// `models-store.json` in `agent_dir`; `PI_CATALOG_URL` replaces pi.dev when set.
+    /// `models-store.json` in `agent_dir`; `PI_CATALOG_URL` replaces pi-rust.com when set.
     pub fn for_agent_dir(agent_dir: &Path) -> Self {
         let store = CachedFileModelsStore::new(crate::catalog::models_store_path(agent_dir));
         Self {
@@ -76,7 +76,7 @@ impl CatalogSetup {
     }
 }
 
-/// `PI_CATALOG_URL`, a mirror of the pi.dev model catalog API.
+/// `PI_CATALOG_URL`, a server of the model catalog API in place of pi-rust.com.
 pub fn catalog_base_url() -> Option<String> {
     process_env("PI_CATALOG_URL").filter(|url| !url.trim().is_empty())
 }
@@ -110,7 +110,7 @@ pub(crate) struct OfflineRefreshes {
 }
 
 impl ModelRuntime {
-    /// Compose the catalog from the bundled models, the pi.dev overlay, and Radius gateways, and
+    /// Compose the catalog from the bundled models, the pi-rust.com overlay, and Radius gateways, and
     /// restore their last lists from the store without network access.
     pub async fn enable_dynamic_catalogs(&self, setup: CatalogSetup) {
         let mut config = setup.config.clone();
