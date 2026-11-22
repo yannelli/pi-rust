@@ -2,8 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn tcp_discards_an_unrelated_frame_and_reads_the_whole_next_frame() {
-    let (address, _) = udp_server(Arc::new(|query| vec![reply(query, 0, true, None)])).await;
-    let listener = TcpListener::bind(address).await.unwrap();
+    let (address, _, listener) = udp_and_tcp_server(Arc::new(|query| vec![reply(query, 0, true, None)])).await;
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let len = stream.read_u16().await.unwrap();
@@ -26,8 +25,7 @@ async fn tcp_discards_an_unrelated_frame_and_reads_the_whole_next_frame() {
 
 #[tokio::test]
 async fn cancelled_tcp_waiter_does_not_drop_another_query_on_the_same_stream() {
-    let (address, _) = udp_server(Arc::new(|query| vec![reply(query, 0, true, None)])).await;
-    let listener = TcpListener::bind(address).await.unwrap();
+    let (address, _, listener) = udp_and_tcp_server(Arc::new(|query| vec![reply(query, 0, true, None)])).await;
     let cancel = CancellationToken::new();
     let trigger = cancel.clone();
     let server = tokio::spawn(async move {

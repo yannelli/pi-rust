@@ -63,7 +63,27 @@ type Handler = Arc<dyn Fn(&[u8]) -> Vec<Vec<u8>> + Send + Sync>;
 
 /// UDP server on 127.0.0.1 that sends every datagram `handler` returns; counts queries.
 async fn udp_server(handler: Handler) -> (SocketAddr, Arc<AtomicUsize>) {
-    let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    serve_udp(UdpSocket::bind("127.0.0.1:0").await.unwrap(), handler)
+}
+
+/// [`udp_server`] plus a TCP listener on the same port. A free UDP port can be taken for TCP,
+/// so this tries new ports until both bind, like `bindPair` in `dns_server.cjs`.
+async fn udp_and_tcp_server(handler: Handler) -> (SocketAddr, Arc<AtomicUsize>, TcpListener) {
+    let mut attempt = 0;
+    loop {
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        match TcpListener::bind(socket.local_addr().unwrap()).await {
+            Ok(listener) => {
+                let (address, hits) = serve_udp(socket, handler);
+                return (address, hits, listener);
+            }
+            Err(error) if attempt == 20 => panic!("no port free for both UDP and TCP: {error}"),
+            Err(_) => attempt += 1,
+        }
+    }
+}
+
+fn serve_udp(socket: UdpSocket, handler: Handler) -> (SocketAddr, Arc<AtomicUsize>) {
     let address = socket.local_addr().unwrap();
     let hits = Arc::new(AtomicUsize::new(0));
     let counter = hits.clone();
@@ -115,8 +135,8 @@ async fn mismatched_packets_do_not_extend_the_deadline() {
 
 #[tokio::test]
 async fn truncated_reply_falls_back_to_tcp_on_the_same_server() {
-    let (server, hits) = udp_server(Arc::new(|query| vec![reply(query, 0, true, Some(Answer::A([9, 9, 9, 9])))])).await;
-    let listener = TcpListener::bind(server).await.unwrap();
+    let (server, hits, listener) =
+        udp_and_tcp_server(Arc::new(|query| vec![reply(query, 0, true, Some(Answer::A([9, 9, 9, 9])))])).await;
     tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let mut prefix = [0u8; 2];
