@@ -114,7 +114,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 - Extensions run on an embedded QuickJS engine, so pi-rust does not need Node.js. All Node built-in modules load. These include:
   - `zlib` with gzip, brotli, and zstd.
   - `async_hooks` with `AsyncLocalStorage`, and `v8` serialization.
-  - The network modules `net`, `tls`, `dgram`, `dns`, `http`, `https`, and `http2`.
+  - The network modules `net`, `tls`, `dgram`, `dns`, `http`, `https`, and `http2`. On QuickJS, DNS record queries start with the first configured server. A reply containing only an alias triggers a query for its target. `dns.reverse()` sends a PTR query even for addresses in the local hosts file.
   - `vm` contexts with timeouts, `worker_threads`, and `cluster`. They can send socket and server handles over inter-process communication (IPC).
   - `node:sqlite` on the bundled SQLite, `node:test` with TAP and spec output, and `repl` over any streams.
   - In-process `inspector` sessions, and `wasi` with a `WebAssembly` global on the wasmi interpreter.

@@ -80,8 +80,9 @@ pub const DIFFERENCES: &[&str] = &[
     "v8: heap statistics come from QuickJS memory use, heap snapshots have no nodes, setFlagsFromString \
      and promiseHooks do nothing, and strings with only Latin-1 characters always count as one-byte",
     "dns: lookup filters getaddrinfo results by family and hints after the call, and every failure other \
-     than a temporary one is ENOTFOUND; the resolve family uses hickory-resolver instead of c-ares, \
-     never uses search domains, and Resolver.setLocalAddress does nothing",
+     than a temporary one is ENOTFOUND. Record queries start at the first configured server. Reverse uses DNS PTR \
+     even for local hosts-file entries. Queries use absolute names of up to 255 wire bytes. The resolver checks \
+     the response header, owner and class, follows alias-only replies, and retries truncated UDP replies over TCP",
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
      returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
      and other OpenSSL tuning options are ignored; a session Buffer is an opaque handle that works only in \

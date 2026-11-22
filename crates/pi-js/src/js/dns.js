@@ -1,6 +1,6 @@
 // node:dns and dns/promises: lookup through the system resolver, the resolve family through
 // native DNS channels (one per Resolver), and the default result order.
-const { codeError, invalidArgType, invalidArgValue, validate } = require("internal/errors");
+const { codeError, errnoOf, invalidArgType, invalidArgValue, validate } = require("internal/errors");
 const { isIP } = require("internal/net_address");
 const nativeDns = native.dns;
 const kCustomPromisify = Symbol.for("nodejs.util.promisify.custom");
@@ -116,123 +116,150 @@ function parseServer(server, index) {
   if (!match && isIP(server)) match = [server, server, undefined];
   if (!match) match = server.match(/^([^:]+):(\d+)$/);
   if (!match || !isIP(match[1])) throw codeError(TypeError, "ERR_INVALID_IP_ADDRESS", `Invalid IP address: ${server}`);
-  return [match[1], match[2] ? Number(match[2]) : 53];
+  return [match[1], (Number(match[2]) & 0xffff) || 53];
 }
 
-const RECORD_TYPES = { A: "resolve4", AAAA: "resolve6", ANY: "resolveAny", CAA: "resolveCaa", CNAME: "resolveCname", MX: "resolveMx", NAPTR: "resolveNaptr", NS: "resolveNs", PTR: "resolvePtr", SOA: "resolveSoa", SRV: "resolveSrv", TXT: "resolveTxt" };
+const RECORD_TYPES = { A: "resolve4", AAAA: "resolve6", ANY: "resolveAny", CAA: "resolveCaa", CNAME: "resolveCname", MX: "resolveMx", NAPTR: "resolveNaptr", NS: "resolveNs", PTR: "resolvePtr", SOA: "resolveSoa", SRV: "resolveSrv", TLSA: "resolveTlsa", TXT: "resolveTxt" };
 
-// The promise-based resolver; `dns.Resolver` wraps it with callbacks.
+function validateName(value, name) {
+  validate.string(value, name);
+  if (value.includes("\0")) throw invalidArgValue(name, value, "must be a string without null bytes");
+}
+
+function methodFor(rrtype) {
+  if (typeof rrtype !== "string") throw invalidArgType("rrtype", "of type string", rrtype);
+  if (!Object.hasOwn(RECORD_TYPES, rrtype)) throw invalidArgValue("rrtype", rrtype);
+  return RECORD_TYPES[rrtype];
+}
+
 class PromiseResolver {
   constructor(options) {
-    if (options !== undefined) validate.object(options, "options");
-    const { timeout = -1, tries = 4 } = options || {};
+    const { timeout = -1, tries = 4, maxTimeout = 0 } = options || {};
     validate.integer(timeout, "options.timeout", -1, 2 ** 31 - 1);
     validate.integer(tries, "options.tries", 1, 2 ** 31 - 1);
-    Object.assign(this, { _timeout: timeout, _tries: tries, _servers: undefined, _id: 0, _list: [], _pending: new Set() });
+    validate.integer(maxTimeout, "options.maxTimeout", 0, 2 ** 32 - 1);
+    this._timeout = timeout;
+    this._tries = tries;
+    this._maxTimeout = maxTimeout;
+    this._handle = null;
+    this._pending = new Set();
   }
-  _channel() {
-    if (!this._id) {
-      const created = nativeDns.createChannel(this._servers, this._timeout, this._tries);
-      this._id = created.id;
-      this._list = created.servers;
-    }
-    return this._id;
+  _channel(servers) {
+    this._handle ??= nativeDns.createChannel(servers, this._timeout, this._tries, this._maxTimeout);
+    return this._handle;
   }
   getServers() {
-    this._channel();
-    return this._list.map(([ip, port]) => {
-      const host = isIP(ip) === 6 ? `[${ip}]` : ip;
-      return port === "53" ? ip : `${host}:${port}`;
-    });
+    return this._channel().servers.slice();
   }
   setServers(servers) {
     validate.array(servers, "servers");
     const parsed = servers.map(parseServer);
-    if (this._id) nativeDns.closeChannel(this._id);
-    this._id = 0;
-    this._servers = parsed;
+    if (this._pending.size) {
+      throw codeError(Error, "ERR_DNS_SET_SERVERS_FAILED",
+        `c-ares failed to set servers: "There are pending queries." [${require("util").inspect(servers)}]`);
+    }
+    if (this._handle) this._handle.servers = this._handle.setServers(parsed);
+    else this._channel(parsed);
   }
   setLocalAddress(ipv4, ipv6) {
-    validate.string(ipv4, "ipv4");
-    if (!isIP(ipv4) || (ipv6 !== undefined && !isIP(ipv6))) throw codeError(TypeError, "ERR_INVALID_IP_ADDRESS", `Invalid IP address: ${ipv4}`);
+    validateName(ipv4, "ipv4");
+    if (ipv6 !== undefined) validateName(ipv6, "ipv6");
+    this._channel().setLocalAddress(ipv4, ipv6);
   }
   cancel() {
-    for (const entry of this._pending) entry();
-    this._pending.clear();
+    if (this._pending.size) {
+      this._handle.cancel();
+      for (const cancel of this._pending) cancel();
+      this._pending.clear();
+    }
   }
-  _run(syscall, name, start) {
+  _query(type, name, ttl) {
+    const syscall = type === "REVERSE" ? "getHostByAddr" : `query${type[0]}${type.slice(1).toLowerCase()}`;
+    let request;
+    try {
+      request = this._channel().query(type, name, ttl);
+    } catch (error) {
+      if (error.code === "EINVAL") throw Object.assign(dnsError("EINVAL", syscall, name), { errno: errnoOf("EINVAL") });
+      throw error;
+    }
     return new Promise((resolve, reject) => {
       const cancel = () => reject(dnsError("ECANCELLED", syscall, name));
       this._pending.add(cancel);
-      start().then(
-        (value) => (this._pending.delete(cancel), resolve(value)),
-        (error) => (this._pending.delete(cancel), reject(error)),
-      );
+      request.then((value) => {
+        if (!this._pending.delete(cancel)) return;
+        if (type === "TLSA" || type === "ANY") {
+          for (let i = 0; i < value.length; i++) {
+            const record = value[i];
+            if (record === null) delete value[i];
+            else if (Array.isArray(record.data)) record.data = Uint8Array.from(record.data).buffer;
+          }
+        }
+        resolve(value);
+      }, (error) => {
+        if (this._pending.delete(cancel)) reject(dnsError(error.code, syscall, name));
+      });
     });
   }
   resolve(hostname, rrtype = "A") {
-    validate.string(hostname, "name");
-    if (typeof rrtype !== "string") throw invalidArgType("rrtype", "of type string", rrtype);
-    const method = RECORD_TYPES[rrtype];
-    if (!method) throw invalidArgValue("rrtype", rrtype);
-    return this[method](hostname);
-  }
-  reverse(ip) {
-    validate.string(ip, "ip");
-    return this._run("getHostByAddr", ip, () => nativeDns.reverse(this._channel(), ip));
+    return PromiseResolver.prototype[methodFor(rrtype)].call(this, hostname);
   }
 }
 
-for (const [type, method] of Object.entries(RECORD_TYPES)) {
-  PromiseResolver.prototype[method] = function (hostname, options) {
-    validate.string(hostname, "name");
-    const ttl = !!(options && options.ttl);
-    const syscall = `query${type[0]}${type.slice(1).toLowerCase()}`;
-    return this._run(syscall, hostname, () => nativeDns.query(this._channel(), type, hostname, ttl).catch((error) => {
-      throw Object.assign(error, { message: `${syscall} ${error.code} ${hostname}`, syscall });
-    }));
+class Resolver extends PromiseResolver {
+  resolve(hostname, rrtype, callback) {
+    if (typeof rrtype === "function") return this.resolve4(hostname, rrtype);
+    return Resolver.prototype[methodFor(rrtype === undefined ? "A" : rrtype)].call(this, hostname, callback);
+  }
+}
+
+for (const [type, method] of Object.entries({ ...RECORD_TYPES, REVERSE: "reverse" })) {
+  PromiseResolver.prototype[method] = function (name, options) {
+    validateName(name, "name");
+    try {
+      return this._query(type, name, !!options?.ttl);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   };
-}
-
-function callbackify(method) {
-  return function (...args) {
-    const callback = args.pop();
+  Resolver.prototype[method] = function (name, options, callback) {
+    validateName(name, "name");
+    if (typeof options === "function") {
+      callback = options;
+      options = undefined;
+    }
     validate.function(callback, "callback");
-    PromiseResolver.prototype[method].apply(this, args).then((value) => callback(null, value), (error) => callback(error));
+    this._query(type, name, !!options?.ttl).then((value) => callback(null, value), (error) => callback(error));
     return {};
   };
 }
-
-class Resolver extends PromiseResolver {}
-for (const method of [...Object.values(RECORD_TYPES), "resolve", "reverse"]) Resolver.prototype[method] = callbackify(method);
-
-const defaultResolver = new Resolver();
 
 function setDefaultResultOrder(order) {
   if (!ORDERS.includes(order)) throw invalidArgValue("dnsOrder", order, "must be one of: 'verbatim', 'ipv4first', 'ipv6first'");
   defaultOrder = order;
 }
 
-function bindAll(target, resolver, names) {
-  for (const name of names) target[name] = resolver[name].bind(resolver);
-  return target;
+const methods = [...Object.values(RECORD_TYPES), "resolve", "reverse", "getServers"];
+function bindQueries(target, prototype, resolver) {
+  for (const method of methods) target[method] = prototype[method].bind(resolver);
 }
 
-const methods = [...Object.values(RECORD_TYPES), "resolve", "reverse", "getServers", "setServers"];
 const codes = Object.fromEntries(CODES.map((name) => [name, name === "CANCELLED" ? "ECANCELLED" : `E${name}`]));
+const order = { setDefaultResultOrder, getDefaultResultOrder: () => defaultOrder };
+const promises = { ...codes, ...order, Resolver: PromiseResolver, lookup: lookupPromise, lookupService: lookupServicePromise };
+const dns = { ...codes, ...order, ADDRCONFIG, V4MAPPED, ALL, Resolver, lookup, lookupService, promises };
+const defaultResolver = new Resolver();
+bindQueries(dns, Resolver.prototype, defaultResolver);
+bindQueries(promises, PromiseResolver.prototype, defaultResolver);
+dns.setServers = (servers) => {
+  const resolver = new Resolver();
+  resolver.setServers(servers);
+  bindQueries(dns, Resolver.prototype, resolver);
+  bindQueries(promises, PromiseResolver.prototype, resolver);
+};
+promises.setServers = (servers) => {
+  const resolver = new PromiseResolver();
+  resolver.setServers(servers);
+  bindQueries(promises, PromiseResolver.prototype, resolver);
+};
 
-const promises = { ...codes, Resolver: PromiseResolver, lookup: lookupPromise, lookupService: lookupServicePromise, setDefaultResultOrder, getDefaultResultOrder: () => defaultOrder };
-for (const name of methods) promises[name] = (...args) => PromiseResolver.prototype[name].apply(defaultResolver, args);
-
-module.exports = bindAll({
-  ...codes,
-  ADDRCONFIG,
-  V4MAPPED,
-  ALL,
-  Resolver,
-  lookup,
-  lookupService,
-  setDefaultResultOrder,
-  getDefaultResultOrder: () => defaultOrder,
-  promises,
-}, defaultResolver, methods);
+module.exports = dns;

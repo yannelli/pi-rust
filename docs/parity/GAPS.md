@@ -46,6 +46,8 @@ These commits are older than the synced commit, so the report no longer lists th
 
 ## Extension runtime (pi-js)
 
+The QuickJS DNS resolver starts each query at the first configured server. Node can rank servers using earlier queries. QuickJS follows an alias-only reply and accepts records on that alias chain. It checks the DNS header, record class and 255-byte wire name limit. Reverse lookups always send a PTR query. Node can also read the local hosts file.
+
 IPC handle retries use a flat wrapper instead of Node's nested `net.Native` wrapper. Internal listeners receive descriptors with only `close()`, stray acknowledgements are ignored, and failed retries release their copies and queues. A cluster connection queued to a worker that disconnects is not reclaimed. These limits are listed in `crates/pi-js/src/unsupported.rs`.
 
 `crates/pi-js/src/unsupported.rs` is the full list. Open items that need a decision:

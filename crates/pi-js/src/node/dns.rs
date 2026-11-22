@@ -1,30 +1,38 @@
-//! Natives for `node:dns`: `lookup` and `lookupService` through the system resolver
-//! (getaddrinfo and getnameinfo), and DNS queries for the resolve family on hickory-resolver.
+//! System address lookups and DNS record queries for `node:dns`.
 
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+mod config;
+mod resolver;
+mod wire;
+
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hickory_resolver::config::{NameServerConfigGroup, ResolverConfig, ResolverOpts};
-use hickory_resolver::name_server::TokioConnectionProvider;
-use hickory_resolver::proto::op::ResponseCode;
-use hickory_resolver::proto::rr::{RData, Record, RecordType};
-use hickory_resolver::proto::{ProtoError, ProtoErrorKind};
-use hickory_resolver::{Name, ResolveError, ResolveErrorKind, TokioResolver};
-use rquickjs::function::Opt;
 use rquickjs::{Ctx, Object, Value};
 use serde_json::{Value as Json, json};
+use tokio_util::sync::CancellationToken;
 
 use super::set_fn;
 use crate::error::JsError;
-use crate::runtime::convert::{from_json, throw};
+use crate::runtime::convert::{caught, from_json, throw};
 use crate::runtime::scope::spawn_op;
-use crate::runtime::state::state;
+use resolver::Resolver;
+use wire::Kind;
 
 struct Channel {
-    resolver: Arc<TokioResolver>,
-    servers: Vec<SocketAddr>,
+    resolver: Arc<Resolver>,
+    local: (Ipv4Addr, Ipv6Addr),
+    cancel: CancellationToken,
+}
+
+impl Drop for Channel {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+    }
 }
 
 fn dns_error(code: &str, syscall: &str, hostname: &str) -> JsError {
@@ -54,127 +62,55 @@ fn lookup(host: String) -> Result<Vec<(String, u8)>, JsError> {
     Ok(list)
 }
 
-fn system_config() -> (ResolverConfig, ResolverOpts) {
-    hickory_resolver::system_conf::read_system_conf()
-        .unwrap_or_else(|_| (ResolverConfig::from_parts(None, Vec::new(), Vec::new()), ResolverOpts::default()))
-}
-
-fn build(servers: Option<Vec<SocketAddr>>, timeout: Option<u64>, tries: Option<usize>) -> Channel {
-    let (system, mut options) = system_config();
-    let servers = servers.unwrap_or_else(|| {
-        let mut list: Vec<SocketAddr> = system.name_servers().iter().map(|server| server.socket_addr).collect();
-        list.dedup();
-        list
-    });
-    let mut group = NameServerConfigGroup::new();
-    for server in &servers {
-        group.merge(NameServerConfigGroup::from_ips_clear(&[server.ip()], server.port(), true));
-    }
-    let config = ResolverConfig::from_parts(None, Vec::new(), group);
-    options.cache_size = 0;
-    options.use_hosts_file = hickory_resolver::config::ResolveHosts::Never;
-    if let Some(timeout) = timeout {
-        options.timeout = Duration::from_millis(timeout);
-    }
-    if let Some(tries) = tries {
-        options.attempts = tries.max(1);
-    }
-    let resolver =
-        TokioResolver::builder_with_config(config, TokioConnectionProvider::default()).with_options(options).build();
-    Channel { resolver: Arc::new(resolver), servers }
-}
-
-fn query_error(error: &ResolveError, syscall: &str, hostname: &str) -> JsError {
-    let proto: Option<&ProtoError> = match error.kind() {
-        ResolveErrorKind::Proto(proto) => Some(proto),
-        _ => None,
-    };
-    let code = match proto.map(ProtoError::kind) {
-        Some(ProtoErrorKind::NoRecordsFound { response_code, .. }) => match *response_code {
-            ResponseCode::NXDomain => "ENOTFOUND",
-            ResponseCode::NoError => "ENODATA",
-            ResponseCode::Refused => "EREFUSED",
-            ResponseCode::NotImp => "ENOTIMP",
-            ResponseCode::FormErr => "EFORMERR",
-            _ => "ESERVFAIL",
-        },
-        Some(ProtoErrorKind::Timeout) => "ETIMEOUT",
-        Some(ProtoErrorKind::NoConnections | ProtoErrorKind::Io(_)) => "ECONNREFUSED",
-        _ => "EBADRESP",
-    };
-    dns_error(code, syscall, hostname)
-}
-
-fn name_text(name: &Name) -> String {
-    name.to_utf8().trim_end_matches('.').to_string()
-}
-
-fn bytes_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
-/// One record in Node's shape for `resolve<type>`; `any` adds the `type` key.
-fn record_json(record: &Record, ttl: bool, any: bool) -> Option<Json> {
-    let mut value = match record.data() {
-        RData::A(address) if ttl || any => json!({ "address": address.0.to_string(), "ttl": record.ttl() }),
-        RData::AAAA(address) if ttl || any => json!({ "address": address.0.to_string(), "ttl": record.ttl() }),
-        RData::A(address) => json!(address.0.to_string()),
-        RData::AAAA(address) => json!(address.0.to_string()),
-        RData::MX(mx) => json!({ "exchange": name_text(mx.exchange()), "priority": mx.preference() }),
-        RData::TXT(txt) => {
-            let chunks: Vec<String> = txt.txt_data().iter().map(|chunk| bytes_text(chunk)).collect();
-            if any { json!({ "entries": chunks }) } else { json!(chunks) }
-        }
-        RData::SRV(srv) => json!({
-            "name": name_text(srv.target()), "port": srv.port(), "priority": srv.priority(), "weight": srv.weight(),
-        }),
-        RData::NS(ns) if any => json!({ "value": name_text(&ns.0) }),
-        RData::CNAME(cname) if any => json!({ "value": name_text(&cname.0) }),
-        RData::PTR(ptr) if any => json!({ "value": name_text(&ptr.0) }),
-        RData::NS(ns) => json!(name_text(&ns.0)),
-        RData::CNAME(cname) => json!(name_text(&cname.0)),
-        RData::PTR(ptr) => json!(name_text(&ptr.0)),
-        RData::SOA(soa) => json!({
-            "nsname": name_text(soa.mname()), "hostmaster": name_text(soa.rname()), "serial": soa.serial(),
-            "refresh": soa.refresh(), "retry": soa.retry(), "expire": soa.expire(), "minttl": soa.minimum(),
-        }),
-        RData::CAA(caa) => {
-            let mut object = serde_json::Map::new();
-            object.insert("critical".into(), json!(if caa.issuer_critical() { 128 } else { 0 }));
-            object.insert(caa.tag().as_str().to_string(), json!(bytes_text(caa.raw_value())));
-            Json::Object(object)
-        }
-        RData::NAPTR(naptr) => json!({
-            "flags": bytes_text(naptr.flags()), "service": bytes_text(naptr.services()),
-            "regexp": bytes_text(naptr.regexp()), "replacement": name_text(naptr.replacement()),
-            "order": naptr.order(), "preference": naptr.preference(),
-        }),
-        _ => return None,
-    };
-    if any {
-        value["type"] = json!(record.record_type().to_string());
-    }
-    Some(value)
-}
-
-fn channel(ctx: &Ctx<'_>, id: u64) -> rquickjs::Result<Arc<TokioResolver>> {
-    state().with_resource(id, |channel: &mut Channel| channel.resolver.clone()).map_err(|error| throw(ctx, &error))
-}
-
-fn servers_json(servers: &[SocketAddr]) -> Json {
-    json!(servers.iter().map(|server| [server.ip().to_string(), server.port().to_string()]).collect::<Vec<_>>())
+fn servers_json(servers: &[SocketAddr]) -> Vec<String> {
+    servers
+        .iter()
+        .map(|server| {
+            if server.port() == 53 {
+                server.ip().to_string()
+            } else {
+                SocketAddr::new(server.ip(), server.port()).to_string()
+            }
+        })
+        .collect()
 }
 
 fn parse_servers(ctx: &Ctx<'_>, list: Vec<(String, u16)>) -> rquickjs::Result<Vec<SocketAddr>> {
-    let parse = |(address, port): (String, u16)| {
-        IpAddr::from_str(&address).map(|ip| SocketAddr::new(ip, port)).map_err(|_| {
+    let mut servers = Vec::with_capacity(list.len());
+    for (address, port) in list {
+        let address = config::address(&address, port).ok_or_else(|| {
             throw(
                 ctx,
                 &JsError::type_error(format!("Invalid IP address: {address}")).with_code("ERR_INVALID_IP_ADDRESS"),
             )
-        })
-    };
-    list.into_iter().map(parse).collect()
+        })?;
+        if !servers.contains(&address) {
+            servers.push(address);
+        }
+    }
+    Ok(servers)
+}
+
+fn ip_address(text: &str) -> Option<IpAddr> {
+    text.parse().ok().or_else(|| text.split_once('%')?.0.parse::<Ipv6Addr>().ok().map(IpAddr::V6))
+}
+
+fn reverse_name(ip: IpAddr) -> String {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, c, d] = ip.octets();
+            format!("{d}.{c}.{b}.{a}.in-addr.arpa")
+        }
+        IpAddr::V6(ip) => {
+            let mut name = String::with_capacity(72);
+            for digit in format!("{:032x}", ip.to_bits()).chars().rev() {
+                name.push(digit);
+                name.push('.');
+            }
+            name.push_str("ip6.arpa");
+            name
+        }
+    }
 }
 
 pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
@@ -199,55 +135,103 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
             from_json(ctx, &json!(pair)).map_err(|error| crate::runtime::convert::caught(ctx, error))
         })
     })?;
-    set_fn(&object, "createChannel", |ctx: Ctx<'js>, servers: Value<'js>, timeout: Opt<f64>, tries: Opt<f64>| {
-        let servers: Option<Vec<(String, u16)>> = super::net::parse_options(&ctx, servers)?;
-        let servers = servers.map(|list| parse_servers(&ctx, list)).transpose()?;
-        let timeout = timeout.0.filter(|value| *value >= 0.0).map(|value| value as u64);
-        let channel = build(servers, timeout, tries.0.filter(|value| *value > 0.0).map(|value| value as usize));
-        let servers = servers_json(&channel.servers);
-        let id = state().insert_resource(Box::new(channel));
-        from_json(&ctx, &json!({ "id": id, "servers": servers }))
+    set_fn(&object, "createChannel", create_channel)?;
+    Ok(object)
+}
+
+fn create_channel<'js>(
+    ctx: Ctx<'js>,
+    values: Value<'js>,
+    timeout: i32,
+    tries: u32,
+    max_timeout: u32,
+) -> rquickjs::Result<Object<'js>> {
+    let list: Option<Vec<(String, u16)>> = super::net::parse_options(&ctx, values)?;
+    let config = if list.is_none() || timeout <= 0 { config::system() } else { config::Config::default() };
+    let servers = match list {
+        Some(list) => parse_servers(&ctx, list)?,
+        None => config.servers,
+    };
+    let displayed = servers_json(&servers);
+    let timeout = if timeout > 0 { Duration::from_millis(timeout as u64) } else { config.timeout };
+    let max_timeout = (max_timeout > 0).then(|| Duration::from_millis(u64::from(max_timeout)));
+    let resolver = Resolver::new(servers, timeout, tries as usize, max_timeout);
+    let channel = Channel {
+        resolver: Arc::new(resolver),
+        local: (Ipv4Addr::UNSPECIFIED, Ipv6Addr::UNSPECIFIED),
+        cancel: CancellationToken::new(),
+    };
+    let channel = Rc::new(RefCell::new(channel));
+    let object = Object::new(ctx.clone())?;
+    object.set("servers", displayed)?;
+    let servers_channel = Rc::clone(&channel);
+    set_fn(&object, "setServers", move |ctx: Ctx<'js>, values: Value<'js>| {
+        let servers = parse_servers(&ctx, super::net::parse_options(&ctx, values)?)?;
+        let displayed = servers_json(&servers);
+        let mut channel = servers_channel.borrow_mut();
+        channel.resolver = Arc::new(channel.resolver.with_servers(servers));
+        Ok::<_, rquickjs::Error>(displayed)
     })?;
-    set_fn(&object, "closeChannel", |id: u64| {
-        state().resources.borrow_mut().remove(&id);
-    })?;
-    set_fn(&object, "query", |ctx: Ctx<'js>, id: u64, kind: String, name: String, ttl: bool| {
-        let resolver = channel(&ctx, id)?;
-        let syscall = format!("query{}", if kind == "ANY" { "Any".to_string() } else { kind.clone() });
-        let record_type = RecordType::from_str(&kind)
-            .map_err(|_| throw(&ctx, &JsError::type_error(format!("Unknown type {kind}"))))?;
-        let work = async move {
-            let fqdn = if name.ends_with('.') { name.clone() } else { format!("{name}.") };
-            let found =
-                resolver.lookup(fqdn, record_type).await.map_err(|error| query_error(&error, &syscall, &name))?;
-            let any = record_type == RecordType::ANY;
-            let records: Vec<Json> = found
-                .record_iter()
-                .filter(|record| any || record.record_type() == record_type)
-                .filter_map(|record| record_json(record, ttl, any))
-                .collect();
-            if records.is_empty() {
-                return Err(dns_error("ENODATA", &syscall, &name));
+    let local_channel = Rc::clone(&channel);
+    set_fn(&object, "setLocalAddress", move |ctx: Ctx<'js>, first: String, other: Option<String>| {
+        let parse = |text: &str| {
+            ip_address(text).ok_or_else(|| {
+                throw(&ctx, &JsError::type_error("Invalid IP address.").with_code("ERR_INVALID_ARG_VALUE"))
+            })
+        };
+        let first = parse(&first)?;
+        // Node applies the first address even when the second address is invalid.
+        match first {
+            IpAddr::V4(ip) => local_channel.borrow_mut().local.0 = ip,
+            IpAddr::V6(ip) => local_channel.borrow_mut().local.1 = ip,
+        }
+        let local = match (first, other.as_deref().map(parse).transpose()?) {
+            (IpAddr::V4(v4), Some(IpAddr::V6(v6))) | (IpAddr::V6(v6), Some(IpAddr::V4(v4))) => (v4, v6),
+            (IpAddr::V4(v4), None) => (v4, Ipv6Addr::UNSPECIFIED),
+            (IpAddr::V6(v6), None) => (Ipv4Addr::UNSPECIFIED, v6),
+            _ => {
+                let family = if first.is_ipv4() { "IPv4" } else { "IPv6" };
+                return Err(throw(
+                    &ctx,
+                    &JsError::type_error(format!("Cannot specify two {family} addresses."))
+                        .with_code("ERR_INVALID_ARG_VALUE"),
+                ));
             }
-            Ok(if record_type == RecordType::SOA { records[0].clone() } else { json!(records) })
         };
-        spawn_op(&ctx, work, |ctx, value| {
-            from_json(ctx, &value).map_err(|error| crate::runtime::convert::caught(ctx, error))
-        })
+        local_channel.borrow_mut().local = local;
+        Ok(())
     })?;
-    set_fn(&object, "reverse", |ctx: Ctx<'js>, id: u64, address: String| -> rquickjs::Result<Value<'js>> {
-        let resolver = channel(&ctx, id)?;
-        let ip = IpAddr::from_str(&address)
-            .map_err(|_| throw(&ctx, &JsError::new(format!("getHostByAddr EINVAL {address}")).with_code("EINVAL")))?;
-        let work = async move {
-            let found =
-                resolver.reverse_lookup(ip).await.map_err(|error| query_error(&error, "getHostByAddr", &address))?;
-            Ok(found.iter().map(|ptr| name_text(&ptr.0)).collect::<Vec<_>>())
+    let cancel_channel = Rc::clone(&channel);
+    set_fn(&object, "cancel", move || std::mem::take(&mut cancel_channel.borrow_mut().cancel).cancel())?;
+    set_fn(&object, "query", move |ctx: Ctx<'js>, kind: String, host: String, ttl: bool| {
+        let (resolver, local, cancel) = {
+            let channel = channel.borrow();
+            (Arc::clone(&channel.resolver), channel.local, channel.cancel.clone())
         };
-        spawn_op(&ctx, work, |ctx, list| {
-            from_json(ctx, &json!(list)).map_err(|error| crate::runtime::convert::caught(ctx, error))
-        })
-        .map(|promise| promise.into_value())
+        let (kind, query, syscall) = if kind == "REVERSE" {
+            let ip = ip_address(&host).ok_or_else(|| throw(&ctx, &dns_error("EINVAL", "getHostByAddr", &host)))?;
+            (Kind::Reverse, Some(reverse_name(ip)), "getHostByAddr".to_string())
+        } else {
+            let record_type =
+                Kind::parse(&kind).ok_or_else(|| throw(&ctx, &JsError::type_error("Unknown record type")))?;
+            let syscall = format!("query{}{}", &kind[..1], kind[1..].to_ascii_lowercase());
+            (record_type, None, syscall)
+        };
+        let work = async move {
+            let query = match query {
+                Some(ptr) => Cow::Owned(ptr),
+                None => idna::domain_to_ascii_cow(host.as_bytes(), idna::AsciiDenyList::EMPTY).unwrap_or_default(),
+            };
+            resolver.resolve(&query, kind, ttl, local, cancel).await.map_err(|code| {
+                let code = if kind == Kind::Reverse && !matches!(code, "ECANCELLED" | "ENODATA" | "ENOMEM") {
+                    "ENOTFOUND"
+                } else {
+                    code
+                };
+                dns_error(code, &syscall, &host)
+            })
+        };
+        spawn_op(&ctx, work, |ctx, value: Json| from_json(ctx, &value).map_err(|error| caught(ctx, error)))
     })?;
     Ok(object)
 }

@@ -24,6 +24,7 @@ mod node_crypto;
 mod node_crypto_keys;
 mod node_crypto_modes;
 mod node_dgram_dns;
+mod node_dns_owned;
 mod node_fs;
 mod node_http;
 mod node_inspector;
