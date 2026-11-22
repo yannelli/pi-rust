@@ -228,3 +228,43 @@ pub fn apply_edits_to_normalized_content(
     }
     Ok((content.to_string(), new_content))
 }
+
+/// Computes the patch and display diff outside the caller's executor.
+pub async fn spawn_edit_diff(path: String, old: String, new: String) -> EditDiff {
+    let work = move || generate_edit_diff(&path, &old, &new);
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || send.send(work()));
+        return receive.await.expect("edit diff worker stopped");
+    };
+    match runtime.spawn_blocking(work).await {
+        Ok(diff) => diff,
+        Err(error) => std::panic::resume_unwind(error.into_panic()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_diff_runs_without_a_tokio_runtime() {
+        let diff = futures::executor::block_on(spawn_edit_diff("f".into(), "a".into(), "b".into()));
+        assert_eq!(diff, generate_edit_diff("f", "a", "b"));
+    }
+
+    #[test]
+    fn spawn_edit_diff_waits_for_a_blocking_worker_and_matches_the_inline_diff() {
+        let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).build().unwrap();
+        runtime.block_on(async {
+            let (release, gate) = std::sync::mpsc::channel::<()>();
+            let occupied = tokio::task::spawn_blocking(move || gate.recv());
+            let (old, new) = ("alpha\nbeta\ngamma\n", "alpha\nBETA\ngamma\n");
+            let mut diff = std::pin::pin!(spawn_edit_diff("f.txt".into(), old.into(), new.into()));
+            assert!(futures::poll!(diff.as_mut()).is_pending());
+            release.send(()).unwrap();
+            occupied.await.unwrap().unwrap();
+            assert_eq!(diff.await, generate_edit_diff("f.txt", old, new));
+        });
+    }
+}

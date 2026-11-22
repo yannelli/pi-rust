@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::edit_diff::{
-    Edit, EditDiff, apply_edits_to_normalized_content, detect_line_ending, generate_edit_diff, normalize_to_lf,
-    restore_line_endings, strip_bom,
+    Edit, EditDiff, apply_edits_to_normalized_content, detect_line_ending, normalize_to_lf, restore_line_endings,
+    spawn_edit_diff, strip_bom,
 };
 use super::file_mutation_queue::with_file_mutation_queue;
 use super::path_utils::resolve_tool_path;
@@ -132,7 +132,7 @@ pub async fn execute_edit(
             .map_err(|error| edit_access_error(&path, error))?;
         check_aborted(&context)?;
 
-        let EditDiff { diff, first_changed_line, patch } = generate_edit_diff(&path, &base, &new_content);
+        let EditDiff { diff, first_changed_line, patch } = spawn_edit_diff(path.clone(), base, new_content).await;
         let details = EditToolDetails { diff, patch, first_changed_line };
         Ok(ToolExecutionResult {
             details: Some(serde_json::to_value(details)?.into()),

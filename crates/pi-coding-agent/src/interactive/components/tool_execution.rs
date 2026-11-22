@@ -4,7 +4,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pi_ai::ContentBlock;
 use pi_tui::components::StyleFn;
@@ -81,11 +83,9 @@ pub struct ToolExecutionComponent {
     self_height: Cell<usize>,
     images: Vec<ImageEntry>,
     /// Set by the render context's `invalidate`, consumed on the next render.
-    dirty: Rc<Cell<bool>>,
+    dirty: Arc<AtomicBool>,
     clicked: Rc<Cell<bool>>,
     has_result: Rc<Cell<bool>>,
-    /// Weak handle to `dirty` for timers, so they do not keep the component alive.
-    self_dirty: Weak<Cell<bool>>,
     /// Draws the expanded body of a final result when an extension claims it.
     expander: Option<Rc<dyn ToolResultExpander>>,
     /// First line in view of the expanded body; back to 0 on collapse.
@@ -106,8 +106,15 @@ impl ToolExecutionComponent {
         tui: &Tui,
         cwd: PathBuf,
     ) -> Self {
-        let dirty = Rc::new(Cell::new(false));
-        let self_dirty = Rc::downgrade(&dirty);
+        let dirty = Arc::new(AtomicBool::new(false));
+        let redraw_dirty = Arc::downgrade(&dirty);
+        let waker = pi_tui::ui_loop::waker();
+        let state = RendererState::live(move || {
+            if let Some(dirty) = redraw_dirty.upgrade() {
+                dirty.store(true, Ordering::Relaxed);
+                waker.request_render();
+            }
+        });
         let mut component = Self {
             tool_name: tool_name.to_string(),
             tool_call_id: tool_call_id.to_string(),
@@ -122,7 +129,7 @@ impl ToolExecutionComponent {
             is_partial: true,
             expanded: false,
             result: None,
-            state: RendererState::default(),
+            state,
             content_box: component(BoxComponent::new(1, 1, Some(bg(ThemeBg::ToolPendingBg)))),
             content_text: component(Text::new("", 1, 1).with_custom_bg_fn(Some(bg(ThemeBg::ToolPendingBg)))),
             self_container: component(Container::new()),
@@ -131,7 +138,6 @@ impl ToolExecutionComponent {
             dirty,
             clicked: Rc::default(),
             has_result: Rc::default(),
-            self_dirty,
             expander: None,
             expanded_offset: Rc::default(),
         };
@@ -260,14 +266,14 @@ impl ToolExecutionComponent {
         args: &'a Value,
         cwd: &'a std::path::Path,
     ) -> ToolRenderContext<'a> {
-        let dirty = self.self_dirty.clone();
+        let dirty = Arc::downgrade(&self.dirty);
         let tui = self.tui.downgrade();
         ToolRenderContext {
             args,
             tool_call_id: &self.tool_call_id,
             invalidate: Rc::new(move || {
                 if let Some(dirty) = dirty.upgrade() {
-                    dirty.set(true);
+                    dirty.store(true, Ordering::Relaxed);
                 }
                 if let Some(tui) = tui.upgrade() {
                     tui.request_render(false);
@@ -410,7 +416,7 @@ impl Component for ToolExecutionComponent {
     }
 
     fn render_chunks(&mut self, width: usize, out: &mut LineChunks) {
-        if self.dirty.take() || self.args_pending {
+        if self.dirty.swap(false, Ordering::Relaxed) || self.args_pending {
             self.update_display();
         }
         if self.is_self_shell() {

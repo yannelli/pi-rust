@@ -189,6 +189,37 @@ fn edit_previews_the_diff_and_reports_errors() {
 }
 
 #[test]
+fn pending_edit_previews_yield_to_new_arguments_and_applied_results() {
+    let runtime = tokio::runtime::Builder::new_current_thread().max_blocking_threads(1).build().unwrap();
+    runtime.block_on(async {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("f"), "one\ntwo\n").unwrap();
+        let edit = |old, new| json!({"path": "f", "oldText": old, "newText": new});
+        let mut updated = Call::new("edit", edit("one", "ONE"), root.path());
+        let ready = std::sync::Arc::new(tokio::sync::Notify::new());
+        let notify = ready.clone();
+        updated.state = RendererState::live(move || notify.notify_one());
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        let occupied = tokio::task::spawn_blocking(move || gate.recv());
+        let pending = ["", " edit f", ""];
+        assert_eq!(updated.header(), pending);
+        updated.args = edit("two", "TWO");
+        assert_eq!(updated.header(), pending);
+
+        let mut applied = Call::new("edit", updated.args.clone(), root.path());
+        applied.state = RendererState::live(|| {});
+        assert_eq!(applied.header(), pending);
+        let result = ToolResultView { details: Some(json!({"diff": "+1 applied"})), ..Default::default() };
+        applied.result(&result);
+        release.send(()).unwrap();
+        occupied.await.unwrap().unwrap();
+        ready.notified().await;
+        assert_eq!(updated.header(), Call::new("edit", updated.args.clone(), root.path()).header());
+        assert!(applied.header().iter().any(|line| line.trim() == "+1 applied"));
+    });
+}
+
+#[test]
 fn generic_headers_list_arguments() {
     let collapsed = format_tool_call_with_args("mcp_tool", &json!({"query": "rust", "limit": 3}), false);
     assert_eq!(pi_tui::strip_terminal_sequences(&collapsed), "mcp_tool query=\"rust\" limit=3");
