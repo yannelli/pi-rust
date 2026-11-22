@@ -1,9 +1,10 @@
 //! The GFM rules of `marked` 18, translated from the JavaScript regex sources.
 //! JavaScript's ASCII `\d` and `\w` are spelled out; `\b_` in the text rule is redundant and dropped.
 
+use std::borrow::Cow;
 use std::sync::LazyLock;
 
-use fancy_regex::{Regex as FancyRegex, RegexInput};
+use fancy_regex::{Regex as FancyRegex, RegexInput, Replacer};
 use regex::Regex;
 
 fn fancy(pattern: &str) -> FancyRegex {
@@ -251,4 +252,26 @@ pub(crate) fn is_match(regex: &FancyRegex, text: &str) -> bool {
 /// The first match anywhere in `text`.
 pub(crate) fn captures_anywhere<'t>(regex: &FancyRegex, text: &'t str) -> Option<fancy_regex::Captures<'t, str>> {
     regex.captures(text).ok().flatten()
+}
+
+/// `replace_all` that returns `text` unchanged on an engine error, where fancy-regex panics.
+pub(crate) fn replace_all(regex: &FancyRegex, text: &str, replacer: impl Replacer) -> String {
+    regex.try_replacen(text, 0, replacer).map_or_else(|_| text.to_string(), Cow::into_owned)
+}
+
+#[cfg(test)]
+mod tests {
+    use fancy_regex::{Captures, RegexBuilder};
+
+    use super::*;
+
+    #[test]
+    fn replace_all_returns_the_original_text_on_an_engine_error() {
+        let low_limit = RegexBuilder::new(BLOCK_SKIP.as_str()).backtrack_limit(10).build().expect("rule");
+        let text = format!("{}`code`", "plain prose ".repeat(10));
+        let mask = |_: &Captures<'_, str>| String::from("masked");
+        assert_ne!(replace_all(&BLOCK_SKIP, &text, mask), text);
+        assert!(low_limit.try_replacen(&text, 0, mask).is_err());
+        assert_eq!(replace_all(&low_limit, &text, mask), text);
+    }
 }
