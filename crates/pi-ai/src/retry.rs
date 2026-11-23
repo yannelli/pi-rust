@@ -261,6 +261,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "terminated",
     "websocket.?closed",
     "websocket.?error",
+    // The Codex 60-minute WebSocket lifetime limit; a retry opens a fresh connection.
+    "websocket.?connection.?limit.?reached",
     "ended without",
     "stream ended before message_stop",
     "stream ended before a terminal response event",

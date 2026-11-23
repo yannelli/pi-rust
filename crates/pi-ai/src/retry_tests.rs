@@ -190,6 +190,17 @@ fn retries_bare_node_socket_error_codes() {
 }
 
 #[test]
+fn retries_the_codex_websocket_connection_limit() {
+    for text in [
+        "Codex error: Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+        "Codex error: websocket_connection_limit_reached",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    assert!(!is_retryable_assistant_error(&error_message("connection limit reached")));
+}
+
+#[test]
 fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
     let text = r#"OpenAI API error (429): {"code":"subscription_sharing_workplace_individual_usage_limit_exceeded","message":"Usage limit reached."}"#;
     assert!(!is_retryable_assistant_error(&error_message(text)));
