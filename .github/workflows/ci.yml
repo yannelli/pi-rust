@@ -89,11 +89,18 @@ jobs:
       # nextest gives each test its own process. Without PI_ENV_DAEMON, each pi-env test process runs
       # cargo build, which relinks the daemon while another test starts it.
       - run: cargo build --workspace --locked --bin pi-env
+      # The pi-coding-agent unit tests take 3.7 GB to compile. Built first, they do not overlap the
+      # 2.8 GB lib and integration test builds on the 7 GB macOS runners.
+      - if: runner.os == 'macOS'
+        run: cargo test --workspace --locked --no-run --lib
       # nextest runs the tests of every binary in parallel; .config/nextest.toml lists the
       # binaries with their own main, which run with cargo test.
       - run: cargo nextest run --workspace --locked --profile ci --partition slice:${{ matrix.shard }}/${{ matrix.shards }}
         env:
           PI_ENV_DAEMON: ${{ github.workspace }}/target/debug/pi-env${{ runner.os == 'Windows' && '.exe' || '' }}
+      - name: swap use after the build (temporary)
+        if: runner.os == 'macOS'
+        run: sysctl vm.swapusage hw.memsize hw.ncpu
       - name: tests with their own harness
         if: matrix.shard == 1
         run: >-
