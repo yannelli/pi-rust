@@ -8,7 +8,7 @@ use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::paths::{basename, build_completion_value, join, locale_compare, to_display_path};
+use super::paths::{basename, build_completion_value, join_native, locale_compare, to_display_path};
 use super::{AbortSignal, AutocompleteItem, LocalBoxFuture, files::expand_home_path};
 
 const MAX_RESULTS: usize = 100;
@@ -232,7 +232,7 @@ fn resolve_scoped_query(base_path: &str, raw_query: &str) -> Option<ScopedQuery>
     } else if display_base.starts_with('/') {
         display_base.clone()
     } else {
-        join(&[base_path, &display_base])
+        join_native(base_path, &display_base)
     };
     fs::metadata(&base_dir).ok()?.is_dir().then_some(ScopedQuery { base_dir, query, display_base })
 }

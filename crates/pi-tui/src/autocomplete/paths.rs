@@ -171,6 +171,25 @@ pub(crate) fn normalize(path: &str) -> String {
     if absolute { format!("/{result}") } else { result }
 }
 
+/// Node `path.join(base, relative)` for a filesystem directory such as the working directory:
+/// lexical like [`join`], but with the platform's roots and separators, so `..` cannot remove a
+/// Windows drive or UNC share the way it removes a `/`-separated segment.
+pub(crate) fn join_native(base: &str, relative: &str) -> String {
+    use std::path::{Component, Path, PathBuf};
+    let mut joined = PathBuf::new();
+    for component in Path::new(base).join(relative).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir if matches!(joined.components().next_back(), Some(Component::Normal(_))) => {
+                joined.pop();
+            }
+            Component::ParentDir if joined.has_root() => {}
+            other => joined.push(other),
+        }
+    }
+    if joined.as_os_str().is_empty() { ".".to_string() } else { joined.to_string_lossy().into_owned() }
+}
+
 /// Node `path.posix.join`.
 pub(crate) fn join(parts: &[&str]) -> String {
     let joined: Vec<&str> = parts.iter().copied().filter(|part| !part.is_empty()).collect();
@@ -246,6 +265,29 @@ pub(crate) fn locale_compare(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_join_keeps_platform_roots() {
+        #[cfg(windows)]
+        for (base, relative, expected) in [
+            (r"C:\work\cwd", "../outside/", r"C:\work\outside"),
+            (r"C:\work", "../../..", r"C:\"),
+            (r"C:\work", "./src/../lib", r"C:\work\lib"),
+            (r"\\server\share\cwd", "../x", r"\\server\share\x"),
+            (r"\\server\share", "..", r"\\server\share\"),
+        ] {
+            assert_eq!(join_native(base, relative), expected, "{base} + {relative}");
+        }
+        #[cfg(unix)]
+        for (base, relative, expected) in [
+            ("/work/cwd", "../outside/", "/work/outside"),
+            ("/work", "../../..", "/"),
+            ("/work", "./src/../lib", "/work/lib"),
+            ("a", "../..", ".."),
+        ] {
+            assert_eq!(join_native(base, relative), expected, "{base} + {relative}");
+        }
+    }
 
     #[test]
     fn posix_helpers_match_node() {
