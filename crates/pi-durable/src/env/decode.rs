@@ -119,7 +119,7 @@ impl StreamDecoder {
             return bytes.len();
         }
         let (first, complete) = self.split(bytes);
-        first.map_or(0, char::len_utf8) + lossy_len(complete)
+        first.map_or(0, char::len_utf8) + super::utf8::lossy_len(complete)
     }
 
     /// Counts what finish would emit without consuming the pending character.
@@ -270,17 +270,4 @@ fn push_pieces(text: &mut Vec<u8>, mut bytes: &[u8]) {
         }
         bytes = rest;
     }
-}
-
-fn lossy_len(bytes: &[u8]) -> usize {
-    if super::utf8::is_utf8(bytes) {
-        return bytes.len();
-    }
-    bytes
-        .utf8_chunks()
-        .map(|chunk| {
-            let replacement = if chunk.invalid().is_empty() { 0 } else { char::REPLACEMENT_CHARACTER.len_utf8() };
-            chunk.valid().len() + replacement
-        })
-        .sum()
 }

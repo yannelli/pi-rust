@@ -9,7 +9,7 @@ const SOURCE: &str = "crates/pi-durable/src/env/utf8.rs";
 
 /// The kernel's loops, by a part of their function's v0 symbol name: the largest-byte pass and the three rule sets.
 const LOOPS: [(&str, &str); 4] = [
-    ("largest byte", "6kernel7is_utf8"),
+    ("largest byte", "6kernel12valid_prefix"),
     ("2-byte rules", "6kernel12block_breaksKj2_"),
     ("3-byte rules", "6kernel12block_breaksKj3_"),
     ("4-byte rules", "6kernel12block_breaksKj4_"),
@@ -59,7 +59,7 @@ pub fn asm(args: &[String], root: &Path) -> Result<(), String> {
             continue;
         }
         if !(target.starts_with("x86_64") || target.starts_with("aarch64")) {
-            println!("ok      {target}: no kernel on this architecture, `std` validates");
+            println!("ok      {target}: no kernel on this architecture; the DFA or `std` validates");
             continue;
         }
         let text = std::fs::read_to_string(&listing).map_err(|error| format!("{}: {error}", listing.display()))?;
@@ -258,9 +258,9 @@ mod tests {
 
     #[test]
     fn finds_the_innermost_loops_and_their_vector_instructions() {
-        let arm = "_RNvNtCs1_4utf86kernel7is_utf8:\n\tcbz\tx1, LBB0_3\nLBB0_1: ; outer\n\tldrb\tw8, [x0]\nLBB0_2:\n\
+        let arm = "_RNvNtCs1_4utf86kernel12valid_prefix:\n\tcbz\tx1, LBB0_3\nLBB0_1: ; outer\n\tldrb\tw8, [x0]\nLBB0_2:\n\
                    \tldp\tq0, q1, [x0], #32\n\tumax.16b\tv0, v0, v1\n\tsubs\tx1, x1, #32\n\tb.ne\tLBB0_2\n\tb\tLBB0_1\n\
-                   LBB0_3:\n\tret\n_RNvNtCs1_4utf86kernel7is_utf80:\n\tret\n";
+                   LBB0_3:\n\tret\n_RNvNtCs1_4utf86kernel12valid_prefix0:\n\tret\n";
         let found = functions(arm, false);
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].1, vec![Loop { instructions: 4, vector: 2 }]);

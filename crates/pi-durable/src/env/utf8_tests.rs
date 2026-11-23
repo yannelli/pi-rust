@@ -1,23 +1,37 @@
-//! The kernel against `std::str::from_utf8`. The tests call the kernel itself, because an unoptimized build chooses
-//! `std` at first use.
+//! The candidates against `std::str::from_utf8`. The tests call each candidate itself, because which one `is_utf8` uses
+//! depends on the build and the machine.
 
 use std::hint::black_box;
 use std::time::Instant;
 
-use super::{is_utf8, kernel};
+use super::{Prefix, choice, counted_len, dfa, is_utf8, lossy_len, std_prefix};
 
-/// Both ends of every byte class that UTF-8 or a kernel rule tells apart. A byte between two members of a class
-/// behaves like them in both validators.
+/// Both ends of every byte class that UTF-8 or a candidate's rules tell apart. A byte between two members of a class
+/// behaves like them in every validator.
 const ALPHABET: [u8; 27] = [
     0x00, 0x0a, 0x41, 0x7f, 0x80, 0x8f, 0x90, 0x9f, 0xa0, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xe1, 0xec, 0xed, 0xee,
     0xef, 0xf0, 0xf1, 0xf3, 0xf4, 0xf5, 0xfb, 0xff,
 ];
 
-/// Text of each character width: the widest lead byte in a block selects the rules the kernel applies to it.
+/// Text of each character width: the widest lead byte in a block selects the kernel's rules, and the share of
+/// non-ASCII bytes selects how the DFA runs the block.
 const FILLS: [&str; 4] = ["a", "я", "日", "😀"];
 
+fn validators() -> Vec<(&'static str, Prefix)> {
+    let mut validators: Vec<(&'static str, Prefix)> = vec![("dfa", dfa::valid_prefix)];
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+    validators.push(("kernel", super::kernel::valid_prefix));
+    validators
+}
+
+/// Each validator returns a valid prefix that ends a character, all of `bytes` exactly when std accepts them.
 fn agrees(bytes: &[u8]) {
-    assert_eq!(kernel::is_utf8(bytes), std::str::from_utf8(bytes).is_ok(), "{bytes:02x?}");
+    let valid = std::str::from_utf8(bytes).is_ok();
+    for (name, validator) in validators() {
+        let prefix = validator(bytes);
+        assert!(prefix <= bytes.len() && std::str::from_utf8(&bytes[..prefix]).is_ok(), "{name} {prefix} {bytes:02x?}");
+        assert_eq!(prefix == bytes.len(), valid, "{name} {bytes:02x?}");
+    }
 }
 
 /// Every sequence of `length` bytes from `alphabet`.
@@ -50,6 +64,41 @@ impl Rng {
     }
 }
 
+/// Runs of each width, cut at character starts, three quarters of them damaged.
+fn damaged_pieces(count: usize) -> impl Iterator<Item = Vec<u8>> {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let mut text = Vec::new();
+    while text.len() < 16 * 1024 {
+        text.extend(FILLS[rng.below(FILLS.len())].repeat(1 + rng.below(600)).bytes());
+    }
+    (0..count).map(move |_| {
+        let mut start = rng.below(text.len() - 5000);
+        let mut end = start + 64 + rng.below(4000);
+        while (text[start] as i8) < -64 {
+            start += 1;
+        }
+        while (text[end] as i8) < -64 {
+            end -= 1;
+        }
+        let mut bytes = text[start..end].to_vec();
+        let at = rng.below(bytes.len());
+        match rng.below(4) {
+            0 => {}
+            1 => bytes[at] = ALPHABET[rng.below(ALPHABET.len())],
+            2 => {
+                bytes.remove(at);
+            }
+            _ => bytes.insert(at, ALPHABET[rng.below(ALPHABET.len())]),
+        }
+        bytes
+    })
+}
+
+#[test]
+fn every_dfa_row_reads_back_each_next_state() {
+    assert!(dfa::table_is_exact());
+}
+
 #[test]
 fn sequences_of_up_to_three_bytes_match_std() {
     for length in 0..=3 {
@@ -80,12 +129,13 @@ fn sequences_of_four_and_five_bytes_match_std() {
 }
 
 #[test]
-fn sequences_across_a_block_edge_match_std() {
-    // The second block starts at byte 1027, and the three bytes before it take part in choosing its rules.
+fn sequences_across_block_and_stream_edges_match_std() {
+    // The kernel's second block starts at byte 1027 and reads the three bytes before it. The DFA cuts its first block
+    // in two near byte 512 and starts its second block at byte 1024.
     for fill in FILLS {
         // Unoptimized, a block of wider text takes longer, so wider text gets sequences of up to two bytes.
         let longest = if fill.len() == 1 { 3 } else { 2 };
-        for start in 1024..=1027 {
+        for start in (510..=514).chain(1022..=1027) {
             let mut prefix = vec![b'a'; start % fill.len()];
             prefix.extend(fill.repeat(start / fill.len()).bytes());
             for length in 1..=longest {
@@ -99,37 +149,32 @@ fn sequences_across_a_block_edge_match_std() {
 
 #[test]
 fn damaged_mixed_text_over_many_blocks_matches_std() {
-    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-    let mut text = Vec::new();
-    while text.len() < 16 * 1024 {
-        text.extend(FILLS[rng.below(FILLS.len())].repeat(1 + rng.below(600)).bytes());
-    }
-    for _ in 0..1000 {
-        // Cut at character starts, so that undamaged pieces are valid.
-        let mut start = rng.below(text.len() - 5000);
-        let mut end = start + 64 + rng.below(4000);
-        while (text[start] as i8) < -64 {
-            start += 1;
-        }
-        while (text[end] as i8) < -64 {
-            end -= 1;
-        }
-        let mut bytes = text[start..end].to_vec();
-        let at = rng.below(bytes.len());
-        match rng.below(4) {
-            0 => {}
-            1 => bytes[at] = ALPHABET[rng.below(ALPHABET.len())],
-            2 => {
-                bytes.remove(at);
-            }
-            _ => bytes.insert(at, ALPHABET[rng.below(ALPHABET.len())]),
-        }
+    for bytes in damaged_pieces(1000) {
         agrees(&bytes);
     }
 }
 
 #[test]
-fn is_utf8_matches_std_on_both_sides_of_the_switch_to_the_chosen_validator() {
+fn sparse_text_with_characters_across_chunk_edges_matches_std() {
+    // A few characters in ASCII run as one stream over 16-byte chunks; put each width across every chunk offset.
+    for fill in &FILLS[1..] {
+        for at in 0..32 {
+            let mut bytes = vec![b'x'; 2048];
+            bytes.splice(at..at, fill.bytes());
+            bytes.splice(1500 + at..1500 + at, fill.bytes());
+            agrees(&bytes);
+            bytes.truncate(at + 1);
+            agrees(&bytes);
+        }
+    }
+}
+
+#[test]
+fn is_utf8_and_lossy_len_match_std_through_the_choice() {
+    for bytes in damaged_pieces(300) {
+        assert_eq!(is_utf8(&bytes), std::str::from_utf8(&bytes).is_ok(), "{bytes:02x?}");
+        assert_eq!(lossy_len(&bytes), String::from_utf8_lossy(&bytes).len(), "{bytes:02x?}");
+    }
     for fill in FILLS {
         let text = fill.repeat(100);
         for length in 56..=72 {
@@ -137,21 +182,29 @@ fn is_utf8_matches_std_on_both_sides_of_the_switch_to_the_chosen_validator() {
             assert_eq!(is_utf8(&bytes), std::str::from_utf8(&bytes).is_ok(), "{bytes:02x?}");
             bytes[length / 2] = 0xff;
             assert!(!is_utf8(&bytes), "{bytes:02x?}");
+            assert_eq!(lossy_len(&bytes), String::from_utf8_lossy(&bytes).len(), "{bytes:02x?}");
         }
     }
 }
 
-/// GB/s of `std`, the kernel, and `is_utf8` on 8 MiB of each input in 64 KiB pieces, the median of 15 runs. The inputs
-/// are those of the review's `xbench`, plus CJK with a bad byte every 70 KB.
+/// The name of a validator `choice()` picked.
+fn name(prefix: Prefix) -> &'static str {
+    let named = validators().into_iter().chain([("std", std_prefix as Prefix)]);
+    named.into_iter().find(|(_, validator)| std::ptr::fn_addr_eq(*validator, prefix)).map_or("?", |(name, _)| name)
+}
+
+/// GB/s of each validator, of `is_utf8`, of the old length count and of `lossy_len` on 8 MiB of each input in 64 KiB
+/// pieces, the median of 15 runs. The inputs are those of the review's `xbench`, plus CJK with a bad byte every 70 KB.
 #[test]
 #[ignore = "benchmark for an optimized build: cargo xtask utf8-bench"]
 fn benchmark() {
     const SIZE: usize = 8 << 20;
     let start = Instant::now();
-    let kernel_chosen = std::ptr::fn_addr_eq(kernel::chosen(), kernel::is_utf8 as fn(&[u8]) -> bool);
+    let chosen = choice();
     let elapsed = start.elapsed();
     let (arch, os) = (std::env::consts::ARCH, std::env::consts::OS);
-    println!("{arch} {os}: is_utf8 chose {} in {elapsed:?}", if kernel_chosen { "the kernel" } else { "std" });
+    let count = chosen.count.map_or("the count alone", name);
+    println!("{arch} {os}: is_utf8 chose {}, lossy_len chose {count}, in {elapsed:?}", name(chosen.validate));
 
     let mut rng = Rng(0x2545_f491_4f6c_dd1d);
     let mut log = String::new();
@@ -189,8 +242,21 @@ fn benchmark() {
         ("CJK, bad byte per 70 KB", damaged),
     ];
 
-    let validators: [fn(&[u8]) -> bool; 3] = [super::std_is_utf8, kernel::is_utf8, is_utf8];
-    println!("{:<24}{:>10}{:>10}{:>10}", "GB/s", "std", "kernel", "is_utf8");
+    // Validation columns report whether the whole piece is valid; length columns report the lossy length.
+    let mut columns: Vec<(&str, Prefix)> = vec![("std", |bytes| usize::from(std_prefix(bytes) == bytes.len()))];
+    for (name, validator) in validators() {
+        columns.push((name, validator));
+    }
+    columns.extend([
+        ("is_utf8", (|bytes| usize::from(is_utf8(bytes))) as Prefix),
+        ("count", |bytes| if bytes.is_ascii() { bytes.len() } else { counted_len(bytes) }),
+        ("lossy_len", lossy_len),
+    ]);
+    print!("{:<24}", "GB/s");
+    for (name, _) in &columns {
+        print!("{name:>11}");
+    }
+    println!();
     for (name, data) in inputs {
         // 64 KiB pieces that end before a character, as the decoder cuts them.
         let mut pieces: Vec<&[u8]> = Vec::new();
@@ -203,17 +269,17 @@ fn benchmark() {
             pieces.push(&rest[..end]);
             rest = &rest[end..];
         }
-        let expected: Vec<bool> = pieces.iter().map(|piece| super::std_is_utf8(piece)).collect();
-        for validator in validators {
-            assert_eq!(pieces.iter().map(|piece| validator(piece)).collect::<Vec<_>>(), expected, "{name}");
+        for piece in &pieces {
+            assert_eq!(is_utf8(piece), std::str::from_utf8(piece).is_ok(), "{name}");
+            assert_eq!(lossy_len(piece), String::from_utf8_lossy(piece).len(), "{name}");
         }
-        let mut seconds = [const { Vec::new() }; 3];
+        let mut seconds = vec![Vec::new(); columns.len()];
         for round in 0..15 {
-            for offset in 0..validators.len() {
-                let index = (round + offset) % validators.len();
+            for offset in 0..columns.len() {
+                let index = (round + offset) % columns.len();
                 let start = Instant::now();
                 for piece in &pieces {
-                    black_box(validators[index](black_box(piece)));
+                    black_box((columns[index].1)(black_box(piece)));
                 }
                 seconds[index].push(start.elapsed().as_secs_f64());
             }
@@ -221,7 +287,7 @@ fn benchmark() {
         print!("{name:<24}");
         for mut runs in seconds {
             runs.sort_by(f64::total_cmp);
-            print!("{:>10.2}", data.len() as f64 / runs[runs.len() / 2] / 1e9);
+            print!("{:>11.2}", data.len() as f64 / runs[runs.len() / 2] / 1e9);
         }
         println!();
     }
