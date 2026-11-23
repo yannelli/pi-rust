@@ -223,6 +223,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "admission ceiling",
     "rate.?limit",
     "too many requests",
+    // OpenAI 429 `slow_down` (Codex) and Alibaba Qwen throttling.
+    "rate increased too quickly",
     // Status codes must not be part of a longer word or number, e.g. a request id or byte count.
     // The regex crate has no lookaround, so the boundaries are matched as characters.
     // 520, 524 and 525 are Cloudflare's errors between it and the provider's origin.

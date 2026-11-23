@@ -135,6 +135,8 @@ fn classifies_retryable_assistant_errors() {
         "525 <!DOCTYPE html><title>SSL handshake failed</title>",
         "Claude Code's stream from Anthropic was cut short after the reply had begun",
         r#"{"type":"error","error":{"type":"api_error","message":"Connection closed."}}"#,
+        "Your request rate increased too quickly",
+        "Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.",
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }
