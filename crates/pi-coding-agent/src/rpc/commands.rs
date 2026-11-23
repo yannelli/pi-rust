@@ -272,8 +272,12 @@ impl RpcServer {
             }
             RpcCommand::GetCommands => {
                 // Upstream binds extensions before it reads input, so the list has the skills and
-                // prompts of `resources_discover`.
-                session.wait_extensions_bound().await;
+                // prompts of `resources_discover`. A bind that waits for a dialog does not hold
+                // the list back.
+                tokio::select! {
+                    () = session.wait_extensions_bound() => {}
+                    () = self.ui.wait_for_dialog() => {}
+                }
                 // A built-in command that an extension command replaces is not listed.
                 let mut commands = super::builtins::builtin_commands(session);
                 commands.retain(|command| !session.is_extension_command(&format!("/{}", command.name)));

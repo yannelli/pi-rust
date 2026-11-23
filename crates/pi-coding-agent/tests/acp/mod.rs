@@ -408,6 +408,8 @@ impl pi_coding_agent::rpc::RpcExtensionHost for DialogHost {
     }
 }
 
+/// A dialog opened while the session starts reaches the client after the `session/new` response,
+/// so the client knows its session.
 #[tokio::test(flavor = "multi_thread")]
 async fn extension_dialogs_become_permission_requests() {
     let mut setup = setup(Vec::new());
@@ -417,10 +419,12 @@ async fn extension_dialogs_become_permission_requests() {
     let work = setup.root.path().join("work");
     let created = client.send_request("session/new", json!({"cwd": work, "mcpServers": []})).await;
     let request = client.until(|record| record["method"] == "session/request_permission").await;
+    let response = client.seen.iter().find(|record| record["id"] == created && record.get("method").is_none());
+    let session_id = response.map(|response| response["result"]["sessionId"].clone());
+    assert_eq!(session_id.as_ref(), Some(&request["params"]["sessionId"]), "the response comes first");
     assert_eq!(request["params"]["toolCall"]["title"], "Pick one");
     assert_eq!(request["params"]["toolCall"]["rawInput"]["options"], json!(["Alpha", "Beta"]));
     client.respond(request["id"].clone(), json!({"outcome": {"outcome": "selected", "optionId": "choice-1"}})).await;
-    assert!(client.response(created).await.get("result").is_some());
     for _ in 0..100 {
         if answer.lock().unwrap().is_some() {
             break;

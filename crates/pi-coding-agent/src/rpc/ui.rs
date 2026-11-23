@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use super::output::RpcOutput;
 use crate::agent_session::lock;
@@ -20,6 +20,10 @@ type Response = Map<String, Value>;
 pub struct RpcExtensionUi {
     output: RpcOutput,
     pending: Mutex<HashMap<String, oneshot::Sender<Response>>>,
+    /// The number of dialogs that wait for the client, sent or held.
+    waiting: watch::Sender<usize>,
+    /// False while dialogs are held until [`Self::open_dialogs`].
+    open: watch::Sender<bool>,
 }
 
 fn request(method: &str, fields: Value) -> Map<String, Value> {
@@ -60,15 +64,46 @@ fn response_value(response: Option<Response>) -> Option<String> {
 
 impl RpcExtensionUi {
     pub fn new(output: RpcOutput) -> Arc<Self> {
-        Arc::new(Self { output, pending: Mutex::new(HashMap::new()) })
+        Self::with_dialogs_open(output, true)
+    }
+
+    /// [`Self::new`], but dialogs wait for [`Self::open_dialogs`] before they are sent.
+    pub(crate) fn held(output: RpcOutput) -> Arc<Self> {
+        Self::with_dialogs_open(output, false)
+    }
+
+    fn with_dialogs_open(output: RpcOutput, open: bool) -> Arc<Self> {
+        Arc::new(Self {
+            output,
+            pending: Mutex::new(HashMap::new()),
+            waiting: watch::channel(0).0,
+            open: watch::channel(open).0,
+        })
+    }
+
+    /// Send the held dialogs, and later dialogs at once.
+    pub(crate) fn open_dialogs(&self) {
+        self.open.send_replace(true);
+    }
+
+    /// Wait until a dialog waits for the client.
+    pub(crate) async fn wait_for_dialog(&self) {
+        let _ = self.waiting.subscribe().wait_for(|count| *count > 0).await;
     }
 
     /// Deliver an `extension_ui_response`; false when no dialog waits for `id`.
     pub fn resolve(&self, id: &str, response: Response) -> bool {
-        match lock(&self.pending).remove(id) {
+        match self.take_pending(id) {
             Some(sender) => sender.send(response).is_ok(),
             None => false,
         }
+    }
+
+    fn take_pending(&self, id: &str) -> Option<oneshot::Sender<Response>> {
+        let mut pending = lock(&self.pending);
+        let sender = pending.remove(id);
+        self.waiting.send_replace(pending.len());
+        sender
     }
 
     /// Dialogs waiting for a response.
@@ -76,7 +111,8 @@ impl RpcExtensionUi {
         lock(&self.pending).len()
     }
 
-    /// Send a dialog request and wait for its response; `None` on timeout or cancellation.
+    /// Send a dialog request and wait for its response; `None` on timeout or cancellation. A
+    /// held dialog is sent when dialogs open, and its timeout starts then.
     async fn dialog(&self, opts: DialogOptions, record: Map<String, Value>) -> Option<Response> {
         let cancel = opts.cancel.unwrap_or_default();
         if cancel.is_cancelled() {
@@ -84,20 +120,30 @@ impl RpcExtensionUi {
         }
         let id = record["id"].as_str().unwrap_or_default().to_string();
         let (sender, receiver) = oneshot::channel();
-        lock(&self.pending).insert(id.clone(), sender);
-        self.output.send(&Value::Object(record));
-        let timeout = async {
-            match opts.timeout {
-                Some(timeout) => tokio::time::sleep(timeout).await,
-                None => std::future::pending().await,
+        {
+            let mut pending = lock(&self.pending);
+            pending.insert(id.clone(), sender);
+            self.waiting.send_replace(pending.len());
+        }
+        let answer = async {
+            let _ = self.open.subscribe().wait_for(|open| *open).await;
+            self.output.send(&Value::Object(record));
+            let timeout = async {
+                match opts.timeout {
+                    Some(timeout) => tokio::time::sleep(timeout).await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                response = receiver => response.ok(),
+                _ = timeout => None,
             }
         };
         let response = tokio::select! {
-            response = receiver => response.ok(),
+            response = answer => response,
             _ = cancel.cancelled() => None,
-            _ = timeout => None,
         };
-        lock(&self.pending).remove(&id);
+        self.take_pending(&id);
         response
     }
 

@@ -157,6 +157,25 @@ pub enum RpcCommand {
     GetCommands,
 }
 
+impl RpcCommand {
+    /// A `get_*` command: it reads state and acts on nothing.
+    pub(crate) fn is_query(&self) -> bool {
+        matches!(
+            self,
+            Self::GetState
+                | Self::GetAvailableModels
+                | Self::GetAvailableThinkingLevels
+                | Self::GetSessionStats
+                | Self::GetForkMessages
+                | Self::GetEntries { .. }
+                | Self::GetTree
+                | Self::GetLastAssistantText
+                | Self::GetMessages
+                | Self::GetCommands
+        )
+    }
+}
+
 /// One input line, routed by its `type`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum InputRecord {

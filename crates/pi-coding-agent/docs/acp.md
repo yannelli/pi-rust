@@ -101,6 +101,7 @@ The Mode selector controls tool approval. It is independent of the Thinking sele
 - The options of a `select` are its choices. A `confirm` has the options **Yes** and **No**.
 - All options of a dialog have the kind `allow_once`. Clients that approve tool calls on their own, such as Paseo with **Auto Accept**, take a request whose options share an allow kind for a choice and leave it to the user. Before, **Yes** had `allow_once` and **No** `reject_once`, so Auto Accept answered **Yes**. A `select` with one option is still answered by such clients.
 - `input` and `editor` dialogs are canceled with a note. `notify` becomes an agent message with `_meta.piAcp.notify.level`.
+- pi sends the updates and dialogs of a session after the `session/new` or `session/load` response, so the client knows the session. A dialog of a `session_start` handler, such as a hook trust question, comes after the response.
 
 ## MCP servers from the client
 

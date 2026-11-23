@@ -132,6 +132,11 @@ impl RpcServer {
             }
             Ok(InputRecord::Command { id, kind, command }) => (id, kind, command),
         };
+        // Clients such as Paseo start pi and query it before they listen for dialogs, and a probe
+        // may only query it, so dialogs wait for a command that acts on the session.
+        if command.as_ref().is_ok_and(|command| !command.is_query()) {
+            self.ui.open_dialogs();
+        }
         let reply = match command {
             Err(message) => Some(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))),
             Ok(command) => match self.handle_command(id.as_ref(), command).await {
@@ -198,7 +203,7 @@ pub async fn serve_rpc(
     let server = Arc::new_cyclic(|weak| RpcServer {
         runtime: runtime.clone(),
         output: output.clone(),
-        ui: RpcExtensionUi::new(output),
+        ui: RpcExtensionUi::held(output),
         host: options.extension_host.clone(),
         shutdown: RpcShutdownHandle::default(),
         subscription: Mutex::new(None),

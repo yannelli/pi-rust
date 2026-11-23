@@ -193,6 +193,8 @@ impl AcpAgent {
         }
     }
 
+    /// The session's events wait for [`AcpSession::start_event_pump`], so that extension dialogs of
+    /// `session_start` reach the client after the response that gives it the session.
     fn register(&self, session_id: &str, cwd: &str, backend: Arc<dyn PiBackend>, auto_title: bool) -> Arc<AcpSession> {
         backend.bind_client(session_id, self.client.clone());
         let session = AcpSession::new(AcpSessionParams {
@@ -203,7 +205,6 @@ impl AcpAgent {
             auto_title,
             terminal_output: self.terminal_output.load(Ordering::SeqCst),
         });
-        session.start_event_pump();
         session.touch(self.uses.fetch_add(1, Ordering::SeqCst) + 1);
         lock(&self.sessions).insert(session_id.to_string(), session.clone());
         session
@@ -334,6 +335,7 @@ impl AcpAgent {
         let (agent, cwd) = (self.this(), params.cwd.clone());
         let after = async move {
             session.send_startup_info_if_pending();
+            session.start_event_pump();
             agent.advertise_commands(&session, &cwd).await;
         };
         Ok(Handled { response, after: Some(Box::pin(after)) })
@@ -368,7 +370,9 @@ impl AcpAgent {
     /// The live session, or the stored one reopened without client MCP servers: pi keeps no copy of
     /// them, so a session reopened after a close has none until `session/load` supplies them again.
     pub async fn restore_session(&self, session_id: &str, cwd: Option<&str>) -> AcpResult<Arc<AcpSession>> {
-        self.restore_session_with(session_id, cwd, &ClientMcpServers::default()).await
+        let session = self.restore_session_with(session_id, cwd, &ClientMcpServers::default()).await?;
+        session.start_event_pump();
+        Ok(session)
     }
 
     /// The live session, or the stored one reopened with `mcp_servers`.
