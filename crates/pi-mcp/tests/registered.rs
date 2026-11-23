@@ -90,8 +90,8 @@ async fn connects_and_disconnects_servers_registered_during_the_session() {
 
 #[tokio::test]
 async fn prefers_the_mcp_json_server_over_a_registered_one() {
-    // "my_docs" shares the namespace of "my-docs".
-    for name in ["my-docs", "my_docs"] {
+    // "my_docs" and "my docs" share the namespace of "my-docs".
+    for name in ["my-docs", "my_docs", "my docs"] {
         let registry = McpServerRegistry::new();
         registry.register("/ext/plugin.ts", name, &json!({ "url": "http://plugin.invalid" })).unwrap();
         let mut configured = entry("my-docs", json!({ "url": "http://config.invalid" }));
@@ -118,6 +118,8 @@ fn rejects_names_another_extension_registered() {
     assert_eq!(error, "MCP server \"taken\" is already registered by extension \"/ext/a.ts\"");
     let error = registry.register("/ext/b.ts", "my_server", &json!({ "url": "http://z.invalid" })).unwrap_err();
     assert_eq!(error, "MCP server \"my_server\" conflicts with registered server \"my-server\"");
+    let error = registry.register("/ext/b.ts", "my server", &json!({ "url": "http://z.invalid" })).unwrap_err();
+    assert_eq!(error, "MCP server \"my server\" conflicts with registered server \"my-server\"");
     let error = registry.register("/ext/b.ts", "bad", &json!({ "exposure": "direct" })).unwrap_err();
     assert!(error.starts_with("Invalid MCP server registered by extension \"/ext/b.ts\": "), "{error}");
     let listed: Vec<_> = registry.list().into_iter().map(|server| (server.name, server.config.url)).collect();

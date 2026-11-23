@@ -19,6 +19,7 @@ use url::Url;
 
 use super::bridge::{EventBridge, UiEvent};
 use super::mode::InteractiveMode;
+use crate::agent_session::builtins::split_mcp_args;
 use crate::interactive_components::login::system_browser;
 use crate::interactive_components::{McpManagerView, McpServers, run_mcp_manager, sign_in_with_view};
 use crate::theme::{ThemeColor, theme};
@@ -88,13 +89,12 @@ impl InteractiveMode {
     pub(super) fn handle_mcp_command(&self, args: Option<String>) {
         let session = self.session();
         let args = args.unwrap_or_default();
-        let words: Vec<String> = args.split_whitespace().map(String::from).collect();
+        let (action, server) = split_mcp_args(&args);
+        let (action, server) = (action.to_string(), server.map(str::to_string));
         self.spawn(move |mode| async move {
-            match words.as_slice() {
-                [] => mode.run_mcp_view().await,
-                [action, rest @ ..] if action == "login" && rest.len() <= 1 => {
-                    mode.mcp_login(rest.first().cloned()).await
-                }
+            match action.as_str() {
+                "" => mode.run_mcp_view().await,
+                "login" => mode.mcp_login(server).await,
                 _ => {
                     let _ = tokio::spawn(async move { session.run_mcp_command(&args).await }).await;
                     mode.request_render();
@@ -165,14 +165,10 @@ impl InteractiveMode {
 
     /// Argument completion of `/mcp`: the actions, then the servers each action applies to.
     pub(super) fn mcp_completions(&self, prefix: &str) -> Option<Vec<AutocompleteItem>> {
-        let words: Vec<&str> = prefix.split_whitespace().collect();
-        let trailing_space = prefix.ends_with(char::is_whitespace);
-        let (action, server) = match (words.as_slice(), trailing_space) {
-            ([], _) => ("", None),
-            ([action], false) => (*action, None),
-            ([action], true) => (*action, Some("")),
-            ([action, server], false) => (*action, Some(*server)),
-            _ => return None,
+        let prefix = prefix.trim_start();
+        let (action, server) = match prefix.split_once(char::is_whitespace) {
+            Some((action, server)) => (action, Some(server.trim_start())),
+            None => (prefix, None),
         };
         let Some(server) = server else {
             let items: Vec<AutocompleteItem> = MCP_ACTIONS

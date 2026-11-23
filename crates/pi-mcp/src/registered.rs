@@ -61,7 +61,7 @@ impl McpServerRegistry {
             {
                 return Err(format!("MCP server \"{name}\" is already registered by extension \"{owner}\""));
             }
-            // Names that differ only in `-` and `_` would share a namespace.
+            // Names with the same server key, such as `a-b`, `a b`, and `a_b`, would share a namespace.
             let namespace = mcp_namespace(name);
             let clash =
                 state.servers.iter().find(|server| server.name != name && mcp_namespace(&server.name) == namespace);

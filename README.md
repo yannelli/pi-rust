@@ -177,6 +177,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 
   See [Settings](crates/pi-coding-agent/docs/settings.md#git-worktrees).
 - Extension and login `select` menus show at most 10 options, with a `(n/total)` counter, so the selected option stays visible. Short terminals show fewer options. Upstream pi shows all options.
+- An MCP server name in `mcp.json` or `pi.registerMcpServer` can have any characters except control characters and spaces at either end, for example `"Google Drive"` from a Claude Code plugin. In tool names and the server namespace, each character other than an ASCII letter, an ASCII digit, or `_` changes to one `_` for each UTF-16 unit (`😀` gives `__`), so `Google Drive` gives `mcp__Google_Drive`. pi rejects a server whose name gives the same namespace as an earlier server. `/mcp login`, `/mcp logout`, and `/mcp reconnect` use the rest of the line as the server name. Upstream pi accepts only letters, digits, `_`, and `-` in server names.
 
 ### Additions
 

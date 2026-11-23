@@ -253,9 +253,10 @@ pub fn get_mcp_tool_exposure(config: &McpServerConfig, tool: &str) -> McpExposur
     pattern.map(|(_, exposure)| *exposure).unwrap_or_else(|| config.exposure())
 }
 
-/// Namespace of a server's tools: `mcp__<server>` with `-` replaced by `_`.
+/// Namespace of a server's tools: `mcp__<server>` with the [`server_key`] of the server, the same
+/// server part as in its tool names.
 pub fn mcp_namespace(server: &str) -> String {
-    format!("mcp__{}", server.replace('-', "_"))
+    format!("mcp__{}", server_key(server))
 }
 
 /// Add the servers an ACP client supplied for one session. A configured server with the same
@@ -290,5 +291,6 @@ mod tests {
         assert!(!tool_pattern_matches("get_file.*", "get_file_x"));
         assert!(tool_name_matches(&["x".into(), "mcp__*".into()], "mcp__a__b"));
         assert_eq!(mcp_namespace("my-server"), "mcp__my_server");
+        assert_eq!(mcp_namespace("plugin_privacy-legal_Google Drive"), "mcp__plugin_privacy_legal_Google_Drive");
     }
 }

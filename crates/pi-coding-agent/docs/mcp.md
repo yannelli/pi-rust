@@ -23,7 +23,7 @@ By default pi connects every enabled MCP server of `mcp.json` in the background 
 
 ## Tool cache
 
-Each time a server from `mcp.json` lists its tools, pi saves the list to `<agent dir>/mcp-cache/<server>.json`. `pi mcp list` also saves it. The file holds these items:
+Each time a server from `mcp.json` lists its tools, pi saves the list to `<agent dir>/mcp-cache/<server>.json`. `pi mcp list` also saves it. In the file name, each byte of the server name other than a letter, a digit, `_`, or `-` is written as `%XX`, for example `Google%20Drive.json`. When the encoded name is longer than 200 bytes, pi cuts it and adds `%` and a hash of the server name. The file holds these items:
 
 - Each tool as the server sent it: the name, title, description, input and output schemas, and annotations.
 - The server instructions.

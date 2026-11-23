@@ -10,12 +10,11 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use super::{LineFn, McpCommandOptions, ReadRedirectFn};
+use super::{LineFn, McpCommandOptions, ReadRedirectFn, login_command};
 use crate::config::{LoadedMcpConfig, McpServerEntry, get_mcp_tool_exposure};
 use crate::error::OAuthError;
 use crate::log::McpServerLog;
 use crate::oauth::LoopbackCallbackFactory;
-use crate::runtime::signin::APP_NAME;
 use crate::runtime::{
     ConnectionOptions, McpOAuthCredentialStore, McpServerConnection, McpSignInPrompt, ServerState, SignInOptions,
     sign_in_mcp_server,
@@ -148,7 +147,7 @@ pub(super) async fn list(loaded: &LoadedMcpConfig, json: bool, note: Option<&str
             log(&format!("  project override: {path}"));
         }
         if report.state == "needs-auth" {
-            log(&format!("  sign in with: {APP_NAME} mcp login {}", report.name));
+            log(&format!("  sign in with: {}", login_command(&report.name)));
         }
         if !report.tools.is_empty() {
             let tools: Vec<String> = report
