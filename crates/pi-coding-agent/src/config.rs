@@ -80,7 +80,10 @@ mod tests {
         std::fs::write(root.path().join("repo").join("CLAUDE.md"), "\u{feff}repo").unwrap();
         std::fs::write(nested.join("AGENTS.md"), "sub").unwrap();
         std::fs::write(nested.join("CLAUDE.md"), "ignored").unwrap();
-        let contents: Vec<String> = load_context_files(&nested, &agent).into_iter().map(|file| file.content).collect();
+        let files = load_context_files(&nested, &agent).into_iter();
+        // A machine can keep its own context files above the temp folder, such as `/AGENTS.md`.
+        let contents: Vec<String> =
+            files.filter(|file| file.path.starts_with(root.path())).map(|file| file.content).collect();
         assert_eq!(contents, ["global", "repo", "sub"]);
     }
 }

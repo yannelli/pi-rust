@@ -489,6 +489,7 @@ fn resource_options_of(options: &crate::resources::ResourceLoaderOptions) -> sup
         no_prompt_templates: options.no_prompt_templates,
         no_themes: options.no_themes,
         no_context_files: options.no_context_files,
+        context_files_ceiling: options.context_files_ceiling.clone(),
         system_prompt: options.system_prompt.clone(),
         append_system_prompt: options.append_system_prompt.clone(),
         output_schema_prompt: options.output_schema_prompt.clone(),

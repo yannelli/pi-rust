@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::brand::project_config_path;
-use super::context::{ContextFile, load_project_context_files};
+use super::context::{ContextFile, load_context_files_up_to};
 use super::context_entries::ContextEntry;
 use super::discovery::{LocalResourceOptions, ResourceSettings, ResourceType, resolve_local_resources};
 use super::paths::{absolute, file_kind, home_dir, is_local_path, sorted_entries};
@@ -44,6 +44,9 @@ pub struct ResourceLoaderOptions {
     pub no_prompt_templates: bool,
     pub no_themes: bool,
     pub no_context_files: bool,
+    /// Highest directory searched for context files; `None` searches up to the filesystem root.
+    #[doc(hidden)]
+    pub context_files_ceiling: Option<PathBuf>,
     /// `--system-prompt`: a file path or literal text; replaces `SYSTEM.md` discovery.
     pub system_prompt: Option<String>,
     /// `--append-system-prompt` values: file paths or literal text; replace `APPEND_SYSTEM.md`.
@@ -75,6 +78,7 @@ impl ResourceLoaderOptions {
             no_prompt_templates: false,
             no_themes: false,
             no_context_files: false,
+            context_files_ceiling: None,
             system_prompt: None,
             append_system_prompt: None,
             output_schema_prompt: None,
@@ -351,7 +355,8 @@ impl ResourceLoader {
         if self.options.no_context_files {
             return Vec::new();
         }
-        load_project_context_files(&self.options.cwd, &self.options.agent_dir)
+        let ceiling = self.options.context_files_ceiling.as_deref();
+        load_context_files_up_to(&self.options.cwd, &self.options.agent_dir, ceiling)
     }
 
     pub fn set_context_files(&mut self, files: Vec<ContextFile>) {

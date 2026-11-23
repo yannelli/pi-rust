@@ -28,6 +28,7 @@ fn dirs() -> Dirs {
 fn options(dirs: &Dirs) -> ResourceLoaderOptions {
     let mut options = ResourceLoaderOptions::new(&dirs.cwd, &dirs.agent);
     options.home = dirs.temp.path().join("home");
+    options.context_files_ceiling = Some(dirs.temp.path().to_path_buf());
     options
 }
 
