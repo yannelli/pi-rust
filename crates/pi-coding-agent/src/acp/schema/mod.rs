@@ -1,5 +1,5 @@
-//! ACP wire types pi uses, with the JSON of `agent-client-protocol-schema` 0.13.7. Field order is
-//! wire order; uses only std, serde, and serde_json so the parity oracle can compile it alone.
+//! ACP wire types adapted from `agent-client-protocol-schema` 0.13.7 (see `LICENSE-agent-client-protocol-schema`).
+//! Fields follow the serialization order of the pinned schema.
 
 use std::fmt;
 

@@ -134,4 +134,11 @@ Paseo 0.14 and later send an `http` server named `paseo` with an `Authorization`
 
 If no models are configured, the editor offers to start pi in a terminal, where you can log in.
 
+## Rust clients
+
+When implementing `pi_coding_agent::acp::AcpClient`, import `SessionNotification`, `RequestPermissionRequest`,
+`RequestPermissionResponse`, and `Error` from `pi_coding_agent::acp::schema`. These replace the corresponding
+`agent_client_protocol_schema` imports. Read the JSON-RPC error code directly from the `i32` field `error.code`.
+Clients that connect over stdio can use their existing ACP SDK.
+
 ACP mode is a port of [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak (MIT license).

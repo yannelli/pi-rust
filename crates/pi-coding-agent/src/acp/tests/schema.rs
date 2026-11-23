@@ -1,5 +1,5 @@
-//! `acp::schema` against JSON recorded from `agent-client-protocol-schema` 0.13.7, the crate it
-//! replaced (`schema_golden.json`, written by the oracle that includes the case files).
+//! Run `sh scripts/acp-schema-oracle.sh` to check the fixtures against the published 0.13.7 crate.
+//! Pass `--write` to regenerate `schema_golden.json` after changing the cases.
 
 mod cases {
     use crate::acp::schema::*;

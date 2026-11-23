@@ -1,5 +1,4 @@
-// Outbound parity cases. The oracle includes this file and `schema_inbound.rs` against pinned
-// 0.13.7 and against `acp::schema` to write `schema_golden.json`; `tests/schema.rs` checks it.
+// The fixture generator runs these cases against schema 0.13.7. The unit test runs them against pi's types.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
