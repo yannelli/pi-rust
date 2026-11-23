@@ -87,8 +87,9 @@ pub(crate) fn run(scenario: &str, backend: Backend) -> Child {
         }
     };
     let log = format!(
-        "{scenario} on {backend:?}, exit {:?}\nstdout:\n{}\nstderr:\n{}",
+        "{scenario} on {backend:?}, exit {:?}\nnotes:\n{}\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
+        std::fs::read_to_string(report.with_extension("notes")).unwrap_or_default(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -119,6 +120,14 @@ pub(crate) fn record(report: &Path, key: &str, mode: u32) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(report).unwrap();
     writeln!(file, "{key}={mode:x}").unwrap();
+}
+
+/// Appends a free-form line that the parent test shows in [`Child::log`].
+pub(crate) fn note(report: &Path, line: &str) {
+    use std::io::Write;
+    let path = report.with_extension("notes");
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
+    writeln!(file, "{line}").unwrap();
 }
 
 fn start_tui() -> Tui {

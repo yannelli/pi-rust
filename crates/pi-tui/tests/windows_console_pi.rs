@@ -1,15 +1,17 @@
 //! Starts the built `pi.exe` (`PI_TUI_TEST_PI`) in a classic or ConPTY console, quits it with
 //! Ctrl+D, and checks the console input mode. Ignored; the console child runs [`run_pi`].
 
+use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
+use std::io::Write as _;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child as Process, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use crossterm_winapi::ScreenBuffer;
+use crossterm_winapi::{Console, ConsoleMode, Handle, InputRecord, ScreenBuffer};
 
-use crate::windows_console::{Backend, is_raw, read_mode, record, run};
+use crate::windows_console::{Backend, COOKED, is_raw, note, read_mode, record, run};
 
 const PI: &str = "PI_TUI_TEST_PI";
 const PI_ARGS: [&str; 7] = [
@@ -21,47 +23,136 @@ const PI_ARGS: [&str; 7] = [
     "--no-prompt-templates",
     "--no-themes",
 ];
+const CTRL_D: &str = "\u{4}";
+const QUIT_COMMAND: &str = "/quit\r";
+const WINDOW_INPUT: u32 = 0x0008;
 const VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
+const VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+/// What pi writes at start on Windows (CI log), with one palette query and the DA1 query.
+const PI_NEGOTIATION: &str = "\x1b[?2004h\x1b[>7u\x1b[?u\x1b]7501;?\x1b\\\x1b[?2031h\x1b]4;0;?\x07\x1b[c\x1b[>4;2m";
+const PI_NEGOTIATION_RESET: &str = "\x1b[?2004l\x1b[<u\x1b[>4;0m\x1b[?2031l";
 const READY_DEADLINE: Duration = Duration::from_secs(40);
-const EXIT_WAIT: Duration = Duration::from_secs(5);
-const CTRL_D_ATTEMPTS: usize = 4;
+const EXIT_WAIT: Duration = Duration::from_secs(15);
+
+fn console_file(name: &str) -> File {
+    OpenOptions::new().read(true).write(true).open(name).unwrap_or_else(|error| panic!("open {name}: {error}"))
+}
+
+fn input_console() -> Console {
+    Console::from(Handle::current_in_handle().expect("CONIN$"))
+}
 
 fn cursor() -> (i16, i16) {
     let info = ScreenBuffer::current().and_then(|buffer| buffer.info()).expect("console screen buffer");
     (info.cursor_pos().x, info.cursor_pos().y)
 }
 
-fn console_file(name: &str) -> File {
-    OpenOptions::new().read(true).write(true).open(name).unwrap_or_else(|error| panic!("open {name}: {error}"))
-}
-
-/// Writes Ctrl+D key records to this process's console through a detached PowerShell, which
+/// Types `keys` into this process's console as key records through a detached PowerShell, which
 /// leaves the console modes alone.
-fn send_ctrl_d() {
+fn send_keys(keys: &str) {
     const DETACHED_PROCESS: u32 = 0x0000_0008;
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/windows-console-ctrl-d.ps1");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/windows-console-keys.ps1");
     let output = Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"])
         .arg(script)
         .env("PI_CONSOLE_ATTACH_PID", std::process::id().to_string())
+        .env("PI_CONSOLE_KEYS", keys)
         .creation_flags(DETACHED_PROCESS)
         .stdin(Stdio::null())
         .output()
-        .expect("run windows-console-ctrl-d.ps1");
+        .expect("run windows-console-keys.ps1");
     assert!(
         output.status.success(),
-        "Ctrl+D injection failed: {:?}\n{}\n{}",
+        "typing {keys:?} failed: {:?}\n{}\n{}",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
 }
 
+/// Reads every input record that arrives until 300 ms pass without a new one, for at most 3 s.
+fn read_records(console: &Console) -> Vec<InputRecord> {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut records = Vec::new();
+    let mut last = Instant::now();
+    while Instant::now() < deadline && (records.is_empty() || last.elapsed() < Duration::from_millis(300)) {
+        if console.number_of_console_input_events().unwrap_or(0) > 0 {
+            records.extend(console.read_console_input().expect("ReadConsoleInputW"));
+            last = Instant::now();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    records
+}
+
+fn describe(records: &[InputRecord]) -> String {
+    let mut text = String::new();
+    for record in records {
+        match record {
+            InputRecord::KeyEvent(key) => {
+                let direction = if key.key_down { "down" } else { "up" };
+                let _ = write!(
+                    text,
+                    "[{direction} vk {:02x} char {:04x} {:?}]",
+                    key.virtual_key_code, key.u_char, key.control_key_state
+                );
+            }
+            other => {
+                let _ = write!(text, "[{other:?}]");
+            }
+        }
+    }
+    text
+}
+
+/// Puts this console in the raw input mode pi-tui uses, writes `negotiation` as pi-tui does, types
+/// Ctrl+D, and notes the records a pi-tui reader would read.
+fn probe_injection(report: &Path, label: &str, negotiation: &str) {
+    let input_mode = ConsoleMode::from(Handle::current_in_handle().expect("CONIN$"));
+    let output_mode = ConsoleMode::from(Handle::current_out_handle().expect("CONOUT$"));
+    let (saved_input, saved_output) = (input_mode.mode().unwrap(), output_mode.mode().unwrap());
+    input_mode.set_mode(saved_input & !COOKED | WINDOW_INPUT | VIRTUAL_TERMINAL_INPUT).unwrap();
+    output_mode.set_mode(saved_output | VIRTUAL_TERMINAL_PROCESSING).unwrap();
+    let console = input_console();
+    let stale = read_records(&console);
+    let mut out = console_file("CONOUT$");
+    out.write_all(negotiation.as_bytes()).unwrap();
+    send_keys(CTRL_D);
+    let records = read_records(&console);
+    let line = format!("[probe {label}] stale {}; after Ctrl+D: {}", describe(&stale), describe(&records));
+    note(report, &line);
+    if !negotiation.is_empty() {
+        out.write_all(PI_NEGOTIATION_RESET.as_bytes()).unwrap();
+    }
+    input_mode.set_mode(saved_input).unwrap();
+    output_mode.set_mode(saved_output).unwrap();
+}
+
+fn wait_for_exit(child: &mut Process) -> Option<ExitStatus> {
+    let deadline = Instant::now() + EXIT_WAIT;
+    while Instant::now() < deadline {
+        if let Some(status) = child.try_wait().unwrap() {
+            return Some(status);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    None
+}
+
+fn tail_since(path: &Path, from: usize) -> String {
+    let bytes = std::fs::read(path).unwrap_or_default();
+    let tail = String::from_utf8_lossy(bytes.get(from..).unwrap_or_default()).into_owned();
+    tail.escape_debug().to_string()
+}
+
 /// Console child side: runs pi on this console and records `running`, `exit`, and `after`.
 pub(crate) fn run_pi(report: &Path) {
     let pi = std::env::var_os(PI).unwrap_or_else(|| panic!("{PI} names the pi.exe to start"));
+    probe_injection(report, "plain", "");
+    probe_injection(report, "pi negotiation", PI_NEGOTIATION);
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
+    let write_log = home.path().join("pi-output.log");
     let output = console_file("CONOUT$");
     let start_cursor = cursor();
     let mut child = Command::new(pi)
@@ -71,6 +162,7 @@ pub(crate) fn run_pi(report: &Path) {
         .env("USERPROFILE", home.path())
         .env("PI_CODING_AGENT_DIR", home.path().join("agent"))
         .env("PI_OFFLINE", "1")
+        .env("PI_TUI_WRITE_LOG", &write_log)
         .stdin(Stdio::from(console_file("CONIN$")))
         .stdout(Stdio::from(output.try_clone().unwrap()))
         .stderr(Stdio::from(output))
@@ -95,29 +187,32 @@ pub(crate) fn run_pi(report: &Path) {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let mut status = None;
-    for _ in 0..CTRL_D_ATTEMPTS {
-        send_ctrl_d();
-        let wait_until = Instant::now() + EXIT_WAIT;
-        while status.is_none() && Instant::now() < wait_until {
-            status = child.try_wait().unwrap();
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        if status.is_some() {
-            break;
-        }
+    let logged = std::fs::metadata(&write_log).map(|meta| meta.len() as usize).unwrap_or(0);
+    send_keys(CTRL_D);
+    if let Some(status) = wait_for_exit(&mut child) {
+        record(report, "exit", status.code().unwrap_or(-1) as u32);
+        record(report, "after", read_mode());
+        return;
     }
-    let Some(status) = status else {
-        let _ = child.kill();
-        panic!("pi kept running after {CTRL_D_ATTEMPTS} Ctrl+D presses; mode {:x}", read_mode());
-    };
-    record(report, "exit", status.code().unwrap_or(-1) as u32);
-    record(report, "after", read_mode());
+    let pending = input_console().number_of_console_input_events().unwrap_or(u32::MAX);
+    let mode = read_mode();
+    let output = tail_since(&write_log, logged);
+    send_keys(QUIT_COMMAND);
+    let quit = wait_for_exit(&mut child);
+    let _ = child.kill();
+    panic!(
+        "pi kept running {EXIT_WAIT:?} after Ctrl+D: {pending} unread input records, mode {mode:x}\n\
+         pi output after Ctrl+D: {output}\n/quit then: {quit:?}, mode {:x}",
+        read_mode()
+    );
 }
 
 fn start_and_quit(backend: Backend) {
     assert!(std::env::var_os(PI).is_some(), "set {PI} to the absolute path of the built pi.exe");
     let child = run("pi", backend);
+    for line in child.log.lines().filter(|line| line.starts_with("[probe ")) {
+        eprintln!("{line}");
+    }
     child.assert_exit(false);
     assert!(is_raw(child.mode("running")), "{}", child.log);
     assert_eq!(child.mode("exit"), 0, "pi exit code\n{}", child.log);
