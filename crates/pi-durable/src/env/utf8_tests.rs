@@ -17,6 +17,19 @@ const ALPHABET: [u8; 27] = [
 /// non-ASCII bytes selects how the DFA runs the block.
 const FILLS: [&str; 4] = ["a", "я", "日", "😀"];
 
+/// More fills for the kernel's other paths: the lead bytes ed and f4 (rules with more tests), and one character of
+/// each width among ASCII at several distances (blocks with few parts that are not ASCII).
+const MORE_FILLS: [&str; 6] = [
+    "한",
+    "\u{100000}",
+    "0123456789abcdefghijklmnopqrstuvwxyz ok é",
+    "0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz 😀",
+    "0123456789abcdef日",
+    "0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz \
+     0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz \
+     0123456789abcdefghijklmnopqrstuvwxyz 0123456789abcdefghijklmnopqrstuvwxyz \u{10ffff}",
+];
+
 fn validators() -> Vec<(&'static str, Prefix)> {
     let mut validators: Vec<(&'static str, Prefix)> = vec![("dfa", dfa::valid_prefix)];
     #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -148,6 +161,76 @@ fn sequences_across_block_and_stream_edges_match_std() {
 }
 
 #[test]
+fn sequences_in_crowded_sparse_and_trusted_blocks_match_std() {
+    let alphabet = &ALPHABET[..];
+    for fill in FILLS.iter().chain(&MORE_FILLS) {
+        // Inside the second block, at its start, before a part edge, and after a piece edge; then after 8 KiB of the
+        // fill, where blocks of crowded text take the rules of the blocks before them.
+        for start in [1500, 1027, 1087, 1073, 8 * 1024 + 500] {
+            let mut prefix = vec![b'a'; start % fill.len()];
+            prefix.extend(fill.repeat(start / fill.len()).bytes());
+            for length in 1..=2 {
+                for sequence in sequences(alphabet, length) {
+                    agrees(&[prefix.as_slice(), &sequence, fill.as_bytes()].concat());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn sequences_cut_at_a_block_edge_before_a_full_block_match_std() {
+    // A character cut at the end of a block is finished, or not, by the next block, which takes the sparse path when it
+    // is ASCII or nearly so.
+    for fill in FILLS.iter().chain(&MORE_FILLS[2..4]) {
+        for start in 1025..=1027 {
+            let mut prefix = vec![b'a'; start % fill.len()];
+            prefix.extend(fill.repeat(start / fill.len()).bytes());
+            for tail in ["x", "0123456789abcdef日"] {
+                let tail = tail.repeat(1030 / tail.len());
+                for length in 1..=2 {
+                    for sequence in sequences(&ALPHABET, length) {
+                        agrees(&[prefix.as_slice(), &sequence, tail.as_bytes()].concat());
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Pairs of text whose lead bytes allow different rule sets, so that the rules picked from the first text's blocks do
+/// not fit the second's.
+const SWITCHES: [(&str, &str); 10] = [
+    ("日", "한"),
+    ("日", "\u{800}"),
+    ("日", "я日"),
+    ("한", "日"),
+    ("я日", "日"),
+    ("😀", "日😀"),
+    ("😀", "\u{10ffff}"),
+    ("\u{10ffff}", "😀"),
+    ("日😀", "😀"),
+    ("😀", "\u{10000}"),
+];
+
+#[test]
+fn rules_picked_from_the_block_before_match_std() {
+    for (first, second) in SWITCHES {
+        let prefix = first.repeat(2100 / first.len()).into_bytes();
+        let next = second.repeat(2400 / second.len()).into_bytes();
+        // Inside the first block of the second text, and in the block after it.
+        for at in [600, 1500] {
+            let at = (0..=4).map(|back| at - back).find(|&at| (next[at] as i8) >= -64).unwrap_or(at);
+            for length in 1..=2 {
+                for sequence in sequences(&ALPHABET, length) {
+                    agrees(&[prefix.as_slice(), &next[..at], &sequence, &next[at..]].concat());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn damaged_mixed_text_over_many_blocks_matches_std() {
     for bytes in damaged_pieces(1000) {
         agrees(&bytes);
@@ -187,9 +270,113 @@ fn is_utf8_and_lossy_len_match_std_through_the_choice() {
     }
 }
 
+/// About 30 million inputs, too many for an unoptimized build: `cargo xtask utf8-check` runs this in an optimized one.
+#[test]
+#[ignore = "too slow unoptimized: cargo xtask utf8-check"]
+fn exhaustive() {
+    let mut count = 0u64;
+    let mut agree = |bytes: &[u8]| {
+        agrees(bytes);
+        count += 1;
+    };
+    let fills: Vec<&str> = FILLS.iter().chain(&MORE_FILLS).copied().collect();
+    let lead_of = |fill: &str, least: usize| fill.repeat(least.div_ceil(fill.len())).into_bytes();
+    for length in 0..=3 {
+        for sequence in sequences(&ALPHABET, length) {
+            agree(&sequence);
+            for fill in &fills {
+                let (lead, fill) = (lead_of(fill, 3), fill.as_bytes());
+                agree(&[lead.as_slice(), &sequence, fill].concat());
+                agree(&[lead.as_slice(), &sequence].concat());
+                agree(&[sequence.as_slice(), fill].concat());
+            }
+        }
+    }
+    // Every sequence of four bytes, and five bytes of one per class, after each fill: once near the start, where every
+    // block has a pass for its largest byte, and once after 8 KiB of the fill, where blocks take the rules of the
+    // blocks before them.
+    let classes = [0x41, 0x80, 0x90, 0xa0, 0xc0, 0xc2, 0xe0, 0xe1, 0xed, 0xee, 0xf0, 0xf1, 0xf4, 0xf5];
+    for (alphabet, length) in [(&ALPHABET[..], 4), (&classes[..], 5)] {
+        for fill in &fills {
+            let (short, long) = (lead_of(fill, 3), lead_of(fill, 8 * 1024 + 500));
+            let mut buffer = long.clone();
+            for sequence in sequences(alphabet, length) {
+                agree(&[short.as_slice(), &sequence, fill.as_bytes()].concat());
+                buffer.truncate(long.len());
+                buffer.extend_from_slice(&sequence);
+                buffer.extend_from_slice(fill.as_bytes());
+                agree(&buffer);
+            }
+        }
+    }
+    // Sequences across block edges, in a run of alike blocks and at the start, also followed by other text.
+    for fill in &fills {
+        for start in (1022..=1027).chain(6 * 1024 - 2..=6 * 1024 + 4) {
+            let mut prefix = vec![b'a'; start % fill.len()];
+            prefix.extend(fill.repeat(start / fill.len()).bytes());
+            for length in 1..=3 {
+                for sequence in sequences(&ALPHABET, length) {
+                    agree(&[prefix.as_slice(), &sequence, fill.as_bytes()].concat());
+                    // Long enough that the next block is full, and so takes the sparse path after ASCII.
+                    for other in ["a", "😀", "0123456789abcdef日"] {
+                        let other = other.repeat(1100 / other.len());
+                        agree(&[prefix.as_slice(), &sequence, other.as_bytes()].concat());
+                    }
+                }
+            }
+        }
+    }
+    // Every sequence of up to three bytes in text whose blocks before allowed other rules.
+    for (first, second) in SWITCHES {
+        let prefix = first.repeat(2100 / first.len()).into_bytes();
+        let next = second.repeat(2400 / second.len()).into_bytes();
+        for at in (590..610).chain(1490..1510) {
+            if (next[at] as i8) < -64 {
+                continue;
+            }
+            for length in 1..=3 {
+                for sequence in sequences(&ALPHABET, length) {
+                    agree(&[prefix.as_slice(), &next[..at], &sequence, &next[at..]].concat());
+                }
+            }
+        }
+    }
+    // Mixed runs of every fill and of the pairs, three quarters damaged.
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let mut text = Vec::new();
+    let runs: Vec<&str> = fills.iter().copied().chain(SWITCHES.iter().map(|(_, second)| *second)).collect();
+    while text.len() < 256 * 1024 {
+        text.extend(runs[rng.below(runs.len())].repeat(1 + rng.below(3000)).bytes());
+    }
+    for _ in 0..60_000 {
+        let mut start = rng.below(text.len() - 40_000);
+        let mut end = start + 64 + rng.below(30_000);
+        while (text[start] as i8) < -64 {
+            start += 1;
+        }
+        while (text[end] as i8) < -64 {
+            end -= 1;
+        }
+        let mut bytes = text[start..end].to_vec();
+        let at = rng.below(bytes.len());
+        match rng.below(4) {
+            0 => {}
+            1 => bytes[at] = ALPHABET[rng.below(ALPHABET.len())],
+            2 => {
+                bytes.remove(at);
+            }
+            _ => bytes.insert(at, ALPHABET[rng.below(ALPHABET.len())]),
+        }
+        agree(&bytes);
+    }
+    let names: Vec<&str> = validators().into_iter().map(|(name, _)| name).collect();
+    println!("{count} inputs: {} agree with std", names.join(" and "));
+}
+
 /// The name of a validator `choice()` picked.
 fn name(prefix: Prefix) -> &'static str {
-    let named = validators().into_iter().chain([("std", std_prefix as Prefix)]);
+    let mut named = validators();
+    named.push(("std", std_prefix as Prefix));
     named.into_iter().find(|(_, validator)| std::ptr::fn_addr_eq(*validator, prefix)).map_or("?", |(name, _)| name)
 }
 
@@ -232,13 +419,53 @@ fn benchmark() {
     for at in (40_000..damaged.len()).step_by(70_001) {
         damaged[at] = 0xff;
     }
+    let cyrillic = words(&["Привет", "мир", "файл", "строка", "ошибка", "сборка", "тест", "и", "в", "не"], " ", 70);
+    let korean = words(&["한국어", "텍스트", "를", "표시", "합니다", "파일", "오류", "빌드"], " ", 50);
+    // ASCII with one `mark` after each gap of `gap` bytes, or of a random length around `gap` when `jitter`.
+    let mut sparse = |mark: &str, gap: usize, jitter: bool| {
+        let line = b"let total = count + 1; // a line of ordinary source code, then more of it\n";
+        let mut ascii = line.iter().copied().cycle();
+        let mut text = Vec::new();
+        while text.len() < SIZE {
+            let gap = if jitter { gap / 2 + rng.below(gap) } else { gap - mark.len() };
+            text.extend(ascii.by_ref().take(gap));
+            text.extend_from_slice(mark.as_bytes());
+        }
+        text
+    };
+    let emoji_256 = sparse("😀", 256, false);
+    let emoji_1024 = sparse("😀", 1024, false);
+    let emoji_about_1024 = sparse("😀", 1024, true);
+    let cjk_about_256 = sparse("日", 256, true);
+    let mut runs = Vec::new();
+    while runs.len() < SIZE {
+        // 2 KiB of CJK cut at character starts.
+        let mut start = runs.len() % (cjk.len() - 4096);
+        while (cjk[start] as i8) < -64 {
+            start += 1;
+        }
+        let mut end = start + 2048;
+        while (cjk[end] as i8) < -64 {
+            end -= 1;
+        }
+        runs.extend_from_slice(&cjk[start..end]);
+        runs.extend(std::iter::repeat_n(b'x', 2047).chain(*b"\n"));
+    }
+    let widths = ["a", "b", " ", "\n", "é", "я", "日", "한", "\u{800}", "😀", "\u{10ffff}"];
+    let mixed: Vec<u8> = (0..SIZE / 2).flat_map(|_| widths[rng.below(widths.len())].bytes()).collect();
     let inputs = [
         ("ASCII log", log.bytes().filter(u8::is_ascii).collect()),
         ("log with marks", log.into_bytes()),
         ("CJK", cjk),
-        ("Cyrillic", words(&["Привет", "мир", "файл", "строка", "ошибка", "сборка", "тест", "и", "в", "не"], " ", 70)),
-        ("Korean", words(&["한국어", "텍스트", "를", "표시", "합니다", "파일", "오류", "빌드"], " ", 50)),
-        ("emoji in every KiB", "emoji 😄".repeat(SIZE / 10).into_bytes()),
+        ("Cyrillic", cyrillic),
+        ("Korean", korean),
+        ("emoji every 10 B", "emoji 😄".repeat(SIZE / 10).into_bytes()),
+        ("emoji every 256 B", emoji_256),
+        ("emoji every 1 KiB", emoji_1024),
+        ("emoji every ~1 KiB", emoji_about_1024),
+        ("CJK every ~256 B", cjk_about_256),
+        ("2 KiB CJK, 2 KiB ASCII", runs),
+        ("all widths mixed", mixed),
         ("CJK, bad byte per 70 KB", damaged),
     ];
 

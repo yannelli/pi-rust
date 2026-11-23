@@ -1,4 +1,4 @@
-//! `cargo xtask utf8-asm` and `cargo xtask utf8-bench` for the UTF-8 validator in `crates/pi-durable/src/env/utf8.rs`.
+//! `cargo xtask utf8-asm`, `utf8-bench` and `utf8-check` for the UTF-8 validator in `crates/pi-durable/src/env/utf8.rs`.
 //! Its kernel beats `std` only where the compiler turns the kernel's loops into vector code. The assembly check compiles
 //! the file for each release target and fails when one of those loops is scalar; the benchmark times it on this machine.
 
@@ -7,12 +7,14 @@ use std::process::Command;
 
 const SOURCE: &str = "crates/pi-durable/src/env/utf8.rs";
 
-/// The kernel's loops, by a part of their function's v0 symbol name: the largest-byte pass and the three rule sets.
-const LOOPS: [(&str, &str); 4] = [
-    ("largest byte", "6kernel12valid_prefix"),
-    ("2-byte rules", "6kernel12block_breaksKj2_"),
-    ("3-byte rules", "6kernel12block_breaksKj3_"),
-    ("4-byte rules", "6kernel12block_breaksKj4_"),
+/// The kernel's functions that must have a vector loop, by a part of their v0 symbol name, with how many functions have
+/// that part: a generic function has one per set of const arguments. The bookkeeping of sparse blocks (`survey`, and
+/// `pieces_break`, whose 16-byte rules are straight-line code) runs once per block and is not listed.
+const LOOPS: [(&str, &str, usize); 4] = [
+    ("largest byte", "6kernel12valid_prefix", 1),
+    ("rule sets", "6kernel5rules", 8),
+    ("2-byte rules", "6kernel15two_byte_breaks", 1),
+    ("2-byte parts", "6kernel11parts_break", 1),
 ];
 
 /// An innermost loop of a function: its instruction count and how many of those use vector registers.
@@ -66,15 +68,26 @@ pub fn asm(args: &[String], root: &Path) -> Result<(), String> {
         let functions = functions(&text, target.starts_with("x86_64"));
         let mut ok = true;
         let mut parts = Vec::new();
-        for (name, symbol) in LOOPS {
-            let loops = functions.iter().find(|(label, _)| names(label, symbol)).map(|(_, loops)| loops);
-            let widest = loops.and_then(|loops| loops.iter().filter(|l| l.is_vector()).max_by_key(|l| l.instructions));
-            parts.push(match (loops, widest) {
-                (_, Some(widest)) => format!("{name} {} ({} vector)", widest.instructions, widest.vector),
-                (Some(_), None) => format!("{name} SCALAR"),
-                (None, None) => format!("{name} NOT FOUND"),
+        for (name, symbol, count) in LOOPS {
+            // The widest vector loop of each function with this name, `None` for a function without one.
+            let widest: Vec<Option<Loop>> = functions
+                .iter()
+                .filter(|(label, _)| names(label, symbol))
+                .map(|(_, loops)| loops.iter().copied().filter(Loop::is_vector).max_by_key(|l| l.instructions))
+                .collect();
+            let vector: Vec<Loop> = widest.iter().flatten().copied().collect();
+            parts.push(if widest.len() != count {
+                format!("{name} NOT FOUND ({} of {count})", widest.len())
+            } else if vector.len() < count {
+                format!("{name} SCALAR ({} of {count})", count - vector.len())
+            } else if count == 1 {
+                format!("{name} {} ({} vector)", vector[0].instructions, vector[0].vector)
+            } else {
+                let sizes = vector.iter().map(|l| l.instructions);
+                let (least, most) = (sizes.clone().min().unwrap_or(0), sizes.max().unwrap_or(0));
+                format!("{name} {count} loops of {least} to {most}")
             });
-            ok &= widest.is_some();
+            ok &= widest.len() == count && vector.len() == count;
         }
         println!("{:<8}{target}: {}", if ok { "ok" } else { "FAILED" }, parts.join(", "));
         if !ok {
@@ -93,11 +106,21 @@ pub fn asm(args: &[String], root: &Path) -> Result<(), String> {
 }
 
 pub fn bench(args: &[String], root: &Path) -> Result<(), String> {
+    run_ignored(args, root, "utf8-bench", "tests::benchmark")
+}
+
+/// The equality check of every candidate against `std`, about 30 million inputs, in an optimized build.
+pub fn check(args: &[String], root: &Path) -> Result<(), String> {
+    run_ignored(args, root, "utf8-check", "tests::exhaustive")
+}
+
+/// Builds the tests of `utf8.rs` with `opt-level=3` and runs the ignored test `test`.
+fn run_ignored(args: &[String], root: &Path, command: &str, test: &str) -> Result<(), String> {
     let (targets, flags) = options(args)?;
     if !targets.is_empty() {
-        return Err("utf8-bench runs on this machine and takes no --target".into());
+        return Err(format!("{command} runs on this machine and takes no --target"));
     }
-    let binary = output_dir(root)?.join(format!("utf8-bench{}", std::env::consts::EXE_SUFFIX));
+    let binary = output_dir(root)?.join(format!("{command}{}", std::env::consts::EXE_SUFFIX));
     let status = rustc()
         .current_dir(root)
         .args(["--edition=2024", "--test", "-C", "opt-level=3", "-C", "codegen-units=1", "-o"])
@@ -110,10 +133,10 @@ pub fn bench(args: &[String], root: &Path) -> Result<(), String> {
         return Err("rustc failed".into());
     }
     let status = Command::new(&binary)
-        .args(["--ignored", "--exact", "tests::benchmark", "--nocapture"])
+        .args(["--ignored", "--exact", test, "--nocapture"])
         .status()
         .map_err(|error| format!("{}: {error}", binary.display()))?;
-    if status.success() { Ok(()) } else { Err("the benchmark failed".into()) }
+    if status.success() { Ok(()) } else { Err(format!("{test} failed")) }
 }
 
 /// `--target <triple>` options before `--`, and the rustc flags after it.
@@ -161,9 +184,12 @@ fn output_dir(root: &Path) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Whether a symbol names the function `symbol` itself, not a closure or another function whose name it starts.
+/// Whether a symbol names the function `symbol` itself or one of its instances (`K` starts a const argument), not a
+/// closure or another function whose name it starts.
 fn names(label: &str, symbol: &str) -> bool {
-    label.find(symbol).is_some_and(|start| matches!(label[start + symbol.len()..].chars().next(), None | Some('E')))
+    label
+        .find(symbol)
+        .is_some_and(|start| matches!(label[start + symbol.len()..].chars().next(), None | Some('E' | 'K')))
 }
 
 /// A function's instructions, and its local labels with the index of the instruction that follows each.
@@ -265,10 +291,10 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert_eq!(found[0].1, vec![Loop { instructions: 4, vector: 2 }]);
         assert!(names(found[0].0, LOOPS[0].1) && !names(found[1].0, LOOPS[0].1));
-        let x86 = "_RINvNtCs1_4utf86kernel12block_breaksKj2_EB4_:\n.LBB1_1:\t# loop\n\tmovdqu\txmm0, xmmword ptr [rdi]\n\
+        let x86 = "_RINvNtCs1_4utf86kernel5rulesKj2_KB4_Kb0_KBa_KBa_KBa_EB4_:\n.LBB1_1:\t# loop\n\tmovdqu\txmm0, xmmword ptr [rdi]\n\
                    \tadd\trdi, 16 # xmm9\n\tcmp\trdi, rsi\n\tjne\t.LBB1_1\n\tret\n";
         let found = functions(x86, true);
-        assert!(names(found[0].0, LOOPS[1].1) && !names(found[0].0, LOOPS[2].1));
+        assert!(names(found[0].0, LOOPS[1].1) && !names(found[0].0, LOOPS[0].1));
         assert_eq!(found[0].1, vec![Loop { instructions: 4, vector: 1 }]);
         assert!(!found[0].1[0].is_vector());
     }

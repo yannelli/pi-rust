@@ -28,7 +28,8 @@ fn usage() -> String {
   vendor-js <upstream-root> [--out <path>]                 bundle the upstream JavaScript the extension host embeds
   parity --upstream <path> [--out <file>] [--strict]       write a Markdown gap report against an upstream pi checkout
   utf8-asm [--target <triple>]... [-- <rustc flags>]       fail unless the UTF-8 kernel compiles to vector loops
-  utf8-bench [-- <rustc flags>]                            time the UTF-8 validator in an optimized build"
+  utf8-bench [-- <rustc flags>]                            time the UTF-8 validator in an optimized build
+  utf8-check [-- <rustc flags>]                            check the UTF-8 validator against std on 30M inputs"
         .into()
 }
 
@@ -247,6 +248,7 @@ fn run(args: &[String]) -> Result<(), String> {
         Some("parity") => parity::run(&args[1..], &root()),
         Some("utf8-asm") => utf8::asm(&args[1..], &root()),
         Some("utf8-bench") => utf8::bench(&args[1..], &root()),
+        Some("utf8-check") => utf8::check(&args[1..], &root()),
         _ => Err(usage()),
     }
 }
