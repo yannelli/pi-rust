@@ -6,7 +6,7 @@ CI (`.github/workflows/ci.yml`) runs the repository checks from the [README](../
 
 ## Jobs and shards
 
-- `lint (<os>)` runs `cargo fmt --check` and `cargo clippy`. On macOS it also runs `scripts/test-install.sh`.
+- `lint (<os>)` runs `cargo fmt --check` and `cargo clippy`. On Linux it also runs the [UTF-8 kernel assembly check](#utf-8-kernel-assembly-check). On macOS it also runs `scripts/test-install.sh`.
 - `test (<os>, <k>/<n>)` builds every test and runs slice `k` of `n` with [`cargo nextest run --partition slice:k/n`](https://nexte.st/docs/ci-features/partitioning/) (nextest 0.9.127 or later). Slices deal the listed tests round-robin, so a test can move to another shard when tests are added or removed. The Node backend step splits the same way.
 - Shard 1 of each OS also runs the tests with their own harness and the doc tests.
 - Shards: Linux 4, Windows 6. macOS splits by target: `test (macos-latest, unit 1/1)` runs the lib unit tests (`--workspace --exclude pi-evals --lib`), and `test (macos-latest, integration k/2)` runs the bin and integration tests (`--workspace --bins --test '*'`). Integration shard 2 runs all Node backend tests. GitHub runs at most 5 macOS jobs at once, and a run has 4: lint and 3 test jobs. The 2026-11-22 main run before the split took 27 minutes on Windows: 7m51 test build, 8m07 nextest run, 6m05 Node backend run. Change a count in the `include` list of the `test` job.
@@ -64,6 +64,34 @@ When you change `cfg(windows)` code, cross-build for Windows locally:
 ```sh
 cargo zigbuild --target x86_64-pc-windows-gnu --workspace --tests
 ```
+
+## UTF-8 kernel assembly check
+
+`is_utf8` in `crates/pi-durable/src/env/utf8.rs` validates command output and file lines in the `pi-env` daemon and the host. Its kernel is faster than `std` only when the compiler turns the kernel's loops into vector code. At the first long input, `is_utf8` times the kernel against `std` and keeps the faster one, so a build without vector loops is slow, not wrong. The check finds such a build before a release. `lint (ubuntu-latest)` runs it with the current stable Rust, which the Release workflow also uses.
+
+```sh
+rustup target add <targets>     # once: the targets of release.yml, as listed in the CI step
+cargo xtask utf8-asm            # every target of release.yml
+cargo xtask utf8-asm --target aarch64-linux-android -- -C opt-level=s   # one target, extra rustc flags
+```
+
+The check compiles `utf8.rs` with `opt-level=3` for each target and reads the innermost loops of four functions: the largest-byte pass (`kernel::is_utf8`) and the three rule sets (`block_breaks::<2>`, `<3>` and `<4>`). Each function must have a loop in which at least half of the instructions use vector registers. Each target gets one line with the instruction count of each vector loop:
+
+```
+ok      x86_64-unknown-linux-musl: largest byte 7 (4 vector), 2-byte rules 27 (24 vector), 3-byte rules 49 (46 vector), 4-byte rules 85 (82 vector)
+FAILED  aarch64-linux-android: largest byte 6 (3 vector), 2-byte rules 20 (16 vector), 3-byte rules 34 (29 vector), 4-byte rules SCALAR
+```
+
+The listings are in `target/xtask-utf8/<target>.s`. armv7 has no kernel and always passes.
+
+| Failure | Cause and fix |
+| --- | --- |
+| `rustc failed: install it with rustup target add <target>` | `release.yml` has a new target. Add it to the CI step. |
+| `SCALAR` after a change to `utf8.rs` | The change stopped vectorization. An early exit, a bounds check or a call in the loop can do that. |
+| `SCALAR` after a new stable Rust | The new compiler does not vectorize the loop. Compare with the previous compiler (`cargo +<version> xtask utf8-asm`), then change the loop until the check passes again. |
+| `NOT FOUND` | A function was renamed or inlined. Update `LOOPS` in `xtask/src/utf8.rs`. |
+
+`cargo xtask utf8-bench` measures the speed. It builds the ignored `benchmark` test of `utf8.rs` with `opt-level=3` and prints the GB/s of `std`, the kernel and `is_utf8` on 8 MiB inputs, and which one `is_utf8` chose. Add rustc flags after `--`: `-C opt-level=s` shows the fallback to `std`, and on Apple silicon `--target x86_64-apple-darwin -C target-cpu=x86-64` runs the x86_64 baseline build under Rosetta 2.
 
 ## Release workflow failures
 

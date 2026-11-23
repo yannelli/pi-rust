@@ -281,7 +281,7 @@ fn push_pieces(text: &mut Vec<u8>, mut bytes: &[u8]) {
 }
 
 fn lossy_len(bytes: &[u8]) -> usize {
-    if bytes.is_ascii() {
+    if super::utf8::is_utf8(bytes) {
         return bytes.len();
     }
     bytes

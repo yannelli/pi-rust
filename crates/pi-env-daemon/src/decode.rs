@@ -2,6 +2,8 @@
 #[allow(dead_code)]
 #[path = "../../pi-durable/src/env/decode.rs"]
 mod durable;
+#[path = "../../pi-durable/src/env/utf8.rs"]
+mod utf8;
 
 pub(crate) use durable::{StreamDecoder, count_newlines, starts_with_bom};
 
