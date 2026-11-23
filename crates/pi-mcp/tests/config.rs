@@ -49,7 +49,7 @@ fn merges_global_and_trusted_project_servers_and_validates_entries() {
             "bad": { "args": ["no command"] },
             "legacy": { "type": "sse", "url": "https://example.com/sse" },
             "badUrl": { "url": "example.com/mcp" },
-            "bad name": { "command": "x" }
+            " padded": { "command": "x" }
         } }),
         json!({ "mcpServers": { "shared": { "command": "project-cmd", "exposure": "direct" } } }),
     );
@@ -72,7 +72,7 @@ fn merges_global_and_trusted_project_servers_and_validates_entries() {
     assert!(trusted.errors[0].contains("server \"bad\" needs either \"command\""));
     assert!(trusted.errors[1].contains("legacy SSE transport is not supported"));
     assert!(trusted.errors[2].contains("server \"badUrl\": url must be an http or https URL"));
-    assert!(trusted.errors[3].contains("invalid server name \"bad name\""));
+    assert!(trusted.errors[3].contains("invalid server name \" padded\""));
     assert_eq!(trusted.project_config, Some(paths.project_file()));
 
     // Untrusted projects cannot add or override servers, since stdio servers run commands.
@@ -135,15 +135,37 @@ fn lets_project_entries_override_enabled_and_exposure_of_global_servers() {
 }
 
 #[test]
-fn rejects_server_names_that_differ_only_in_dash_and_underscore() {
+fn accepts_server_names_with_spaces_and_other_characters() {
     let paths = setup(
-        json!({ "mcpServers": { "work-files": { "command": "a" }, "work_files": { "command": "b" } } }),
+        json!({ "mcpServers": {
+            "plugin_privacy-legal_Google Drive": { "type": "http", "url": "https://drivemcp.googleapis.com/mcp/v1" },
+            "docs.v2": { "command": "docs" }
+        } }),
+        json!({}),
+    );
+    let loaded = load_mcp_config(&paths.agent_dir, &paths.cwd, false);
+    assert_eq!(loaded.errors, Vec::<String>::new());
+    let names: Vec<&str> = loaded.servers.iter().map(|entry| entry.name.as_str()).collect();
+    assert_eq!(names, vec!["plugin_privacy-legal_Google Drive", "docs.v2"]);
+}
+
+#[test]
+fn rejects_server_names_with_the_same_key() {
+    let paths = setup(
+        json!({ "mcpServers": {
+            "work-files": { "command": "a" },
+            "work_files": { "command": "b" },
+            "work files": { "command": "c" },
+            "work.files": { "command": "d" }
+        } }),
         json!({}),
     );
     let loaded = load_mcp_config(&paths.agent_dir, &paths.cwd, false);
     assert_eq!(loaded.servers.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), vec!["work-files"]);
-    assert_eq!(loaded.errors.len(), 1);
-    assert!(loaded.errors[0].contains("server \"work_files\" conflicts with \"work-files\""));
+    assert_eq!(loaded.errors.len(), 3);
+    for (error, name) in loaded.errors.iter().zip(["work_files", "work files", "work.files"]) {
+        assert!(error.contains(&format!("server \"{name}\" conflicts with \"work-files\"")), "{error}");
+    }
 }
 
 #[test]

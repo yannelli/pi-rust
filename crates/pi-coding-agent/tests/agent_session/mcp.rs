@@ -304,6 +304,21 @@ async fn mcp_status_and_actions_reach_the_session() {
 }
 
 #[tokio::test]
+async fn mcp_commands_name_servers_with_spaces() {
+    let s = setup(json!({ "exposure": "direct" }), SetupOptions { server: "My Docs", ..SetupOptions::default() }).await;
+    let session = &s.h.session;
+    session.mcp_pending().await;
+    assert!(session.active_tool_names().contains(&"mcp__My_Docs__search".to_string()));
+    session.prompt("/mcp reconnect  My Docs ", Vec::new()).await.unwrap();
+    let last = s.notifications.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(last, "Reconnected to MCP server \"My Docs\" (connected · 3 tools).");
+    session.prompt("/mcp logout My Docs", Vec::new()).await.unwrap();
+    let last = s.notifications.lock().unwrap().last().cloned().unwrap();
+    assert_eq!(last, "No stored credentials for MCP server \"My Docs\".");
+    session.shutdown().await;
+}
+
+#[tokio::test]
 async fn announces_elicitation_and_declines_without_a_ui() {
     let s = setup(json!({ "exposure": "direct" }), SetupOptions::default()).await;
     let initialize = s.fake.received.lock().unwrap()[0].to_value();

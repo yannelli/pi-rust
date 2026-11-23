@@ -257,6 +257,21 @@ pub async fn run_mcp_command(args: &[String], options: &McpCommandOptions) -> i3
     }
 }
 
+/// The `mcp login` command for a server. The name is one shell word: single-quoted when it has other
+/// characters than letters, digits, `_`, `-`, and `.` (for PowerShell on Windows, else for `sh`),
+/// and after `--` when it starts with `-`.
+fn login_command(name: &str) -> String {
+    let plain = name.chars().all(|character| character.is_ascii_alphanumeric() || "_-.".contains(character));
+    let word = if plain {
+        name.to_string()
+    } else {
+        let quote = if cfg!(windows) { "''" } else { r"'\''" };
+        format!("'{}'", name.replace('\'', quote))
+    };
+    let separator = if name.starts_with('-') { "-- " } else { "" };
+    format!("{APP_NAME} mcp login {separator}{word}")
+}
+
 // Match upstream's Levenshtein distance over JavaScript UTF-16 string units.
 fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<u16> = b.encode_utf16().collect();
@@ -418,7 +433,7 @@ fn add(args: &[String], project_config: &Path, options: &McpCommandOptions) -> i
     // HTTP servers without an Authorization header may use OAuth.
     let authorization = validated.header_pairs().iter().any(|(header, _)| header.eq_ignore_ascii_case("authorization"));
     let sign_in = if validated.is_http() && !authorization {
-        format!(". If it requires sign-in: {APP_NAME} mcp login {name}")
+        format!(". If it requires sign-in: {}", login_command(name))
     } else {
         String::new()
     };

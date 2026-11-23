@@ -18,6 +18,7 @@ use serde_json::Value;
 
 pub use self::codemode::{CODEMODE_DOCS, SessionCodemodeTool, codemode_docs_path};
 pub use self::mcp::{LoadMcpConfigFn, McpSessionOptions};
+pub use self::mcp_api::split_mcp_args;
 pub use self::tool_search::ToolSearchTool;
 pub use pi_mcp::NotifyLevel;
 

@@ -281,6 +281,9 @@ async fn adds_http_servers_and_keeps_other_content_of_the_file() {
     ];
     let oauth = run(&args, None, dir.path()).await;
     assert!(oauth.output.contains("If it requires sign-in: pi mcp login sentry"), "{}", oauth.output);
+    let drive =
+        run(&["add", "Google Drive", "--url", "https://drivemcp.googleapis.com/mcp/v1"], None, dir.path()).await;
+    assert!(drive.output.contains("If it requires sign-in: pi mcp login 'Google Drive'"), "{}", drive.output);
     let sentry = &read_config(&dir.path().join("mcp.json"))["mcpServers"]["sentry"];
     assert_eq!(
         *sentry,
@@ -293,7 +296,7 @@ async fn rejects_invalid_add_invocations_without_writing() {
     let cases: [&[&str]; 9] = [
         &["add", "x"],
         &["add", "x", "--url", "https://example.com", "--", "cmd"],
-        &["add", "bad name", "--", "cmd"],
+        &["add", "", "--", "cmd"],
         &["add", "x", "--url", "ftp://example.com"],
         &["add", "x", "--env", "A=1", "--url", "https://example.com"],
         &["add", "x", "--header", "A=1", "--", "cmd"],
@@ -345,6 +348,17 @@ async fn removes_global_servers() {
 
 fn in_memory(options: &mut McpCommandOptions, backend: &Arc<InMemoryAuthStorageBackend>) {
     options.credentials = Some(McpOAuthCredentialStore::with_backend(backend.clone(), None));
+}
+
+#[tokio::test]
+async fn sign_in_hints_pass_each_server_name_as_one_argument() {
+    let server = start_oauth_mcp_server(OAuthServerOptions::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let backend = Arc::new(InMemoryAuthStorageBackend::default());
+    let servers = json!({ "Google Drive": { "url": server.url }, "-l": { "url": server.url } });
+    let listed = run_with(&["list"], Some(servers), dir.path(), |options| in_memory(options, &backend)).await;
+    assert!(listed.output.contains("  sign in with: pi mcp login 'Google Drive'\n"), "{}", listed.output);
+    assert!(listed.output.contains("  sign in with: pi mcp login -- -l"), "{}", listed.output);
 }
 
 #[tokio::test]

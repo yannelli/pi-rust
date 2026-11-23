@@ -9,11 +9,6 @@ const LOOPBACK_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
 const EXPOSURES: &str = "\"codemode\", \"deferred\", \"direct\", \"hidden\"";
 pub(super) const LIFECYCLE_ERROR: &str = "lifecycle must be \"eager\" or \"lazy\"";
 
-fn is_server_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.chars().all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '-')
-}
-
 fn is_string_record(value: &Value) -> bool {
     value.as_object().is_some_and(|object| object.values().all(Value::is_string))
 }
@@ -162,10 +157,16 @@ fn validate_stdio(name: &str, value: &Map<String, Value>) -> Option<String> {
     None
 }
 
+/// Tool names and the namespace use the [`crate::server_key`] of the name, so it can have any
+/// characters. Commands and tool arguments trim the names they get, and the name is shown as is.
+fn is_server_name(name: &str) -> bool {
+    !name.is_empty() && name.trim() == name && !name.chars().any(char::is_control)
+}
+
 /// Validate one server entry. Returns the config with exposure aliases resolved, or an error message.
 pub fn validate_mcp_server_config(name: &str, raw: &Value) -> Result<McpServerConfig, String> {
     if !is_server_name(name) {
-        return Err(format!("invalid server name \"{name}\" (use letters, digits, \"_\" and \"-\")"));
+        return Err(format!("invalid server name {name:?} (use no control characters and no spaces at either end)"));
     }
     let Some(raw) = raw.as_object() else { return Err(format!("server \"{name}\" must be an object")) };
     let value = resolve_exposure_aliases(raw);
@@ -250,6 +251,10 @@ mod tests {
             error("x", json!({ "command": "a", "lifecycle": "later" })),
             "server \"x\": lifecycle must be \"eager\" or \"lazy\""
         );
+        for name in ["", " Drive", "Drive ", "a\0b", "a\u{1b}[2Jb"] {
+            assert!(error(name, json!({ "command": "a" })).starts_with("invalid server name \""), "{name:?}");
+        }
+        assert!(validate_mcp_server_config("Google Drive", &json!({ "command": "a" })).is_ok());
         let lazy = validate_mcp_server_config("x", &json!({ "command": "a", "lifecycle": "lazy" })).unwrap();
         assert_eq!(lazy.lifecycle, Some(McpLifecycle::Lazy));
         assert_eq!(

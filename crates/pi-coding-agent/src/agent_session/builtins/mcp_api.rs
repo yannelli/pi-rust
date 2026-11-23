@@ -16,6 +16,16 @@ use crate::agent_session::{AgentSession, lock};
 const MCP_USAGE: &str = "Usage: /mcp, /mcp login [server], /mcp logout [server], /mcp reconnect [server]";
 const MCP_DISABLED: &str = "Built-in MCP support is disabled.";
 
+/// `/mcp` arguments as the action and the server it names. The server is the rest of the line, so
+/// a name can have spaces.
+pub fn split_mcp_args(args: &str) -> (&str, Option<&str>) {
+    let args = args.trim();
+    match args.split_once(char::is_whitespace) {
+        Some((action, server)) => (action, Some(server.trim_start())),
+        None => (args, None),
+    }
+}
+
 impl AgentSession {
     /// Wait until the connections started with the session connected or failed.
     pub async fn mcp_pending(&self) {
@@ -136,16 +146,11 @@ impl AgentSession {
         let Some(manager) = self.mcp_manager() else {
             return self.notify(MCP_DISABLED, NotifyLevel::Info);
         };
-        let words: Vec<&str> = args.split_whitespace().collect();
-        let Some(action) = words.first().copied() else {
-            manager.pending().await;
-            return self.notify(&manager.format_status(), NotifyLevel::Info);
-        };
-        if words.len() > 2 {
-            return self.notify(MCP_USAGE, NotifyLevel::Warning);
-        }
+        let (action, name) = split_mcp_args(args);
         manager.pending().await;
-        let name = words.get(1).copied();
+        if action.is_empty() {
+            return self.notify(&manager.format_status(), NotifyLevel::Info);
+        }
         match action {
             "login" | "logout" => {
                 let none = "No enabled MCP server uses OAuth. Only HTTP servers without an Authorization header do.";

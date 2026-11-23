@@ -176,7 +176,7 @@ fn read_config_file(path: &Path, scope: McpConfigScope, loaded: &mut LoadedMcpCo
                 continue;
             }
         };
-        // Names that differ only in `-` and `_` would share a namespace.
+        // Names with the same server key, such as `a-b`, `a b`, and `a_b`, would share a namespace.
         let clash = loaded
             .servers
             .iter()

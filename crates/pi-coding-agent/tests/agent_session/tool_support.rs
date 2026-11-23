@@ -77,7 +77,7 @@ pub async fn setup(mut config: Value, options: SetupOptions) -> Setup {
     .await;
     let notifications = capture_notifications(&h.session);
     if options.wait_for_tools {
-        let search = format!("mcp__{}__search", options.server.replace('-', "_"));
+        let search = format!("mcp__{}__search", pi_mcp::server_key(options.server));
         wait_until(|| h.session.all_tools().iter().any(|tool| tool.name == search)).await;
     }
     Setup { h, fake, notifications }
