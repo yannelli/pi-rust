@@ -226,6 +226,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     // 520, 524 and 525 are Cloudflare's errors between it and the provider's origin.
     "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524|525)(?:[^a-z0-9]|$)",
     "service.?(?:is.?)?(?:temporarily.?)?unavailable",
+    // "temporarily" is required: a plain "provider unavailable" is often a lasting routing error.
+    "provider.?(?:is.?)?temporarily.?unavailable",
     "server.?error",
     "internal.?error",
     "provider.?returned.?(?:an.?)?error",
@@ -271,6 +273,10 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     // Codex CLI mid-stream disconnect, relayed by proxies that wrap the Codex CLI.
     "stream disconnected before completion",
     "cut short after the reply had begun",
+    // Gateway mid-stream failures relayed as SSE `event: error` frames without a status code.
+    "ended the response before it was complete",
+    "connection to the provider was reset",
+    "reported a failure while generating the response",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",

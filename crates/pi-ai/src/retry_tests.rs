@@ -202,6 +202,22 @@ fn retries_the_codex_websocket_connection_limit() {
 }
 
 #[test]
+fn retries_gateway_provider_failures_without_a_status() {
+    for text in [
+        "The provider is temporarily unavailable. Retry shortly.",
+        "The upstream provider is temporarily unavailable. Try again shortly.",
+        "The provider ended the response before it was complete.",
+        "The connection to the provider was reset. Retry shortly.",
+        "The provider reported a failure while generating the response.",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in ["Provider unavailable for this model", "The provider is unavailable in your region"] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
 fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
     let text = r#"OpenAI API error (429): {"code":"subscription_sharing_workplace_individual_usage_limit_exceeded","message":"Usage limit reached."}"#;
     assert!(!is_retryable_assistant_error(&error_message(text)));
