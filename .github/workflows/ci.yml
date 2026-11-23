@@ -45,10 +45,15 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
+      - name: Build pi for the Windows console checks
+        if: runner.os == 'Windows'
+        run: cargo build --workspace --locked --bin pi
       - name: Check raw mode and crash recovery in Windows Console Host and ConPTY
         if: runner.os == 'Windows'
+        env:
+          PI_TUI_TEST_PI: ${{ github.workspace }}/target/debug/pi.exe
         run: >-
-          cargo test --locked -p pi-tui --test integration windows_console:: -- --include-ignored --test-threads=1
+          cargo test --locked -p pi-tui --test integration windows_console -- --include-ignored --test-threads=1
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: actions/setup-node@v4
         with:

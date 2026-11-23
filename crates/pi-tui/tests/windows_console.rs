@@ -20,39 +20,39 @@ use pi_tui::{Tui, TuiOptions, TuiStopOptions};
 const SCENARIO: &str = "PI_TUI_CONSOLE_SCENARIO";
 const REPORT: &str = "PI_TUI_CONSOLE_REPORT";
 const CHILD_TEST: &str = "windows_console::console_child";
-const COOKED: u32 = 0x0001 | 0x0002 | 0x0004;
+pub(crate) const COOKED: u32 = 0x0001 | 0x0002 | 0x0004;
 const WINDOW_INPUT: u32 = 0x0008;
 const QUICK_EDIT: u32 = 0x0040;
 const EXTENDED_FLAGS: u32 = 0x0080;
 const VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
 /// What pi-js writes for `process.stdin.setRawMode(true)`, as libuv does.
 const EXTENSION_RAW: u32 = WINDOW_INPUT;
-const CHILD_DEADLINE: Duration = Duration::from_secs(90);
+const CHILD_DEADLINE: Duration = Duration::from_secs(180);
 
 #[derive(Clone, Copy, Debug)]
-enum Backend {
+pub(crate) enum Backend {
     Classic,
     ConPty,
 }
 
-struct Child {
+pub(crate) struct Child {
     report: HashMap<String, u32>,
     exit: Option<i32>,
-    log: String,
+    pub(crate) log: String,
 }
 
 impl Child {
-    fn mode(&self, key: &str) -> u32 {
+    pub(crate) fn mode(&self, key: &str) -> u32 {
         *self.report.get(key).unwrap_or_else(|| panic!("no {key} in {:x?}\n{}", self.report, self.log))
     }
 
-    fn assert_exit(&self, crashed: bool) {
+    pub(crate) fn assert_exit(&self, crashed: bool) {
         let expected = if crashed { 101 } else { 0 };
         assert_eq!(self.exit, Some(expected), "{}", self.log);
     }
 }
 
-fn run(scenario: &str, backend: Backend) -> Child {
+pub(crate) fn run(scenario: &str, backend: Backend) -> Child {
     let dir = tempfile::tempdir().unwrap();
     let report = dir.path().join("report.txt");
     let exe = std::env::current_exe().unwrap();
@@ -105,7 +105,7 @@ fn console() -> ConsoleMode {
     ConsoleMode::from(Handle::current_in_handle().expect("CONIN$ opens in the console child"))
 }
 
-fn read_mode() -> u32 {
+pub(crate) fn read_mode() -> u32 {
     console().mode().expect("GetConsoleMode")
 }
 
@@ -115,7 +115,7 @@ fn seed(mode: u32) -> u32 {
     read_mode()
 }
 
-fn record(report: &Path, key: &str, mode: u32) {
+pub(crate) fn record(report: &Path, key: &str, mode: u32) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(report).unwrap();
     writeln!(file, "{key}={mode:x}").unwrap();
@@ -181,11 +181,12 @@ fn console_child() {
             record(&report, "changed", seed(before ^ QUICK_EDIT));
             panic!("crash with a cooked console");
         }
+        "pi" => crate::windows_console_pi::run_pi(&report),
         other => panic!("unknown scenario {other}"),
     }
 }
 
-fn is_raw(mode: u32) -> bool {
+pub(crate) fn is_raw(mode: u32) -> bool {
     mode & COOKED == 0
 }
 

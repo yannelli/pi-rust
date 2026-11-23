@@ -117,4 +117,4 @@ public static class PiConPty {
 '@
 
 if (-not $env:PI_CONPTY_COMMAND_LINE) { throw 'PI_CONPTY_COMMAND_LINE is not set' }
-exit [PiConPty]::Run($env:PI_CONPTY_COMMAND_LINE, 80000)
+exit [PiConPty]::Run($env:PI_CONPTY_COMMAND_LINE, 170000)

@@ -101,4 +101,6 @@ mod utils_wrap;
 mod wheel_scroll_accelerator;
 #[cfg(windows)]
 mod windows_console;
+#[cfg(windows)]
+mod windows_console_pi;
 mod word_navigation_cjk;
