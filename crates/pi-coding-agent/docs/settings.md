@@ -49,11 +49,18 @@ Attribution headers, such as OpenRouter's `HTTP-Referer` and `X-OpenRouter-Title
 
 ## Session sharing
 
-`/share` uploads the current session. `sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
+`/share` uploads the current session. The first time pi runs in interactive mode, it asks where `/share` should send sessions:
+
+- **pi-rust.com** sets `sessionShareDestination` to `"pi-rust"` and `sessionShareViewer` to `"pi-rust"`.
+- **pi.dev** sets `sessionShareDestination` to `"auto"` and `sessionShareViewer` to `"pi.dev"`, which is upstream pi's behavior.
+
+Esc keeps the defaults. pi asks once: it asks while the global settings have no `sessionShareViewer`, so people who installed an earlier version are asked once too. It does not ask when `PI_CODING_AGENT_DIR` is set, or in print, JSON, and RPC modes.
+
+`sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
 
 | Value | Behavior |
 | --- | --- |
-| `"auto"` (default) | Your pi-rust.com account when you are signed in, else Radius when the `radius` provider has a credential, else a secret GitHub gist. |
+| `"auto"` (default) | Your pi-rust.com account when you are signed in, else Radius when the `radius` provider has a credential, else a secret GitHub gist. With `sessionShareViewer` set to `"pi.dev"`, it skips the pi-rust.com account, as upstream pi. |
 | `"pi-rust"` | Your pi-rust.com account. If you are not signed in, `/share` signs you in first. |
 | `"radius"` | A Radius artifact. Run `/login radius` first. |
 | `"gist"` | A secret GitHub gist, created with the `gh` CLI. |

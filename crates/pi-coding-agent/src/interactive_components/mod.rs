@@ -22,6 +22,7 @@ pub mod model_selector;
 pub mod scoped_models_selector;
 pub mod session_selector;
 pub mod settings_selector;
+pub mod share_service;
 pub mod show_images_selector;
 pub mod theme_selector;
 pub mod thinking_selector;

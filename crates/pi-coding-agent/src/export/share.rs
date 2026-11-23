@@ -57,6 +57,16 @@ pub enum ShareRoute {
 
 pub const RADIUS_NOT_CONFIGURED: &str = "Radius authentication is not configured. Run '/login radius' first.";
 
+/// Whether `/share` looks for a pi-rust.com account: always for `pi-rust`, and for `auto` unless
+/// the user chose pi.dev's viewer, so `auto` then behaves as upstream (Radius, else a gist).
+pub fn uses_pi_rust_account(destination: SessionShareDestination, viewer: SessionShareViewer) -> bool {
+    match destination {
+        SessionShareDestination::PiRust => true,
+        SessionShareDestination::Auto => viewer == SessionShareViewer::PiRust,
+        SessionShareDestination::Gist | SessionShareDestination::Radius => false,
+    }
+}
+
 /// Whether choosing a route for `destination` needs to know about a Radius credential.
 pub fn route_needs_radius(destination: SessionShareDestination, pi_rust_signed_in: bool) -> bool {
     match destination {

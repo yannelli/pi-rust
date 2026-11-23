@@ -287,6 +287,12 @@ impl SettingsManager {
         SessionShareViewer
     );
 
+    /// Whether the global settings name a `sessionShareViewer`, i.e. the user answered the
+    /// one-time share service question or chose a viewer.
+    pub fn session_share_viewer_chosen(&self) -> bool {
+        self.state().global_typed.session_share_viewer.is_some()
+    }
+
     pub fn compaction_enabled(&self) -> bool {
         self.state().merged.compaction.as_ref().and_then(|c| c.enabled).unwrap_or(COMPACTION_ENABLED)
     }

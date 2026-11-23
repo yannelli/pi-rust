@@ -20,9 +20,10 @@ use crate::export::pi_rust_share::{
 use crate::export::share::{
     DEFAULT_RADIUS_GATEWAY, DEFAULT_SHARE_TITLE, ShareOutcome, ShareRoute, SystemCommandRunner, check_gh_auth,
     create_gist, export_session_for_share, route_needs_radius, share_route, upload_radius_artifact,
+    uses_pi_rust_account,
 };
 use crate::interactive_components::login::{LoginDialog, dialog_interaction};
-use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
+use crate::settings::schema::SessionShareViewer;
 
 /// Removes the temp directory of the share files when dropped.
 struct ShareDir(PathBuf);
@@ -35,7 +36,8 @@ impl Drop for ShareDir {
 
 impl InteractiveMode {
     /// `/share` to the `sessionShareDestination`: with `auto`, the pi-rust.com account when signed
-    /// in, else Radius when signed in, else a secret GitHub gist of the HTML export.
+    /// in (unless `sessionShareViewer` is pi.dev), else Radius when signed in, else a secret GitHub
+    /// gist of the HTML export.
     pub(super) fn handle_share_command(&self) {
         let session = self.session();
         let dir = ShareDir(std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4())));
@@ -51,12 +53,8 @@ impl InteractiveMode {
         let destination = self.settings().session_share_destination();
         let viewer = self.settings().session_share_viewer();
         let origin = share_url();
-        let account = match destination {
-            SessionShareDestination::Auto | SessionShareDestination::PiRust => {
-                load_account_for(&self.agent_dir, &origin)
-            }
-            _ => None,
-        };
+        let account =
+            if uses_pi_rust_account(destination, viewer) { load_account_for(&self.agent_dir, &origin) } else { None };
         self.spawn(move |mode| async move {
             let radius =
                 if route_needs_radius(destination, account.is_some()) { mode.radius_share_token().await } else { None };
