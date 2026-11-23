@@ -1,6 +1,18 @@
 # CI triage
 
+Created: 2026-10-21. Last updated: 2026-11-22.
+
 CI (`.github/workflows/ci.yml`) runs the repository checks from the [README](../../README.md#development) on each OS in its matrix. Each job stops after 60 minutes.
+
+## Jobs and shards
+
+- `lint (<os>)` runs `cargo fmt --check` and `cargo clippy`.
+- `test (<os>, <k>/<n>)` builds every test and runs slice `k` of `n` with [`cargo nextest run --partition slice:k/n`](https://nexte.st/docs/ci-features/partitioning/) (nextest 0.9.127 or later). Slices deal the listed tests round-robin, so a test can move to another shard when tests are added or removed. The Node backend step splits the same way.
+- Shard 1 of each OS also runs the tests with their own harness and the doc tests.
+- Shards: Linux 2, macOS 1, Windows 6. The 2026-11-22 main run before the split took 27 minutes on Windows: 7m51 test build, 8m07 nextest run, 6m05 Node backend run. Change a count in the `include` list of the `test` job.
+- Only shard 1 of each OS saves the rust-cache entry.
+
+To repeat a failure locally, run the failing test by name. Slice numbers do not match across machines, because the test list differs by OS.
 
 ## Read the failure
 
