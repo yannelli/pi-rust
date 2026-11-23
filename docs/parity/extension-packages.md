@@ -61,7 +61,7 @@ All 25 packages, the five terminal menus and the AgentFS check also passed on Wi
 
 The CLI also loaded a local package given as an absolute path with backslashes or forward slashes, as a `.\` relative path and as an entry file. It loaded `-e npm:@narumitw/pi-goal@0.55.3` online and again with `--offline`.
 
-The Node backend starts more slowly on Windows. In the debug build, Chat drew its first frame after about 20 seconds; a QuickJS package took about 2 seconds. On Windows CI, the Node backend tests also take about twice as long as on macOS and Linux. The check scripts allow 60 to 90 seconds for each package.
+Each check starts its package with a new agent directory. There the Node backend wrote one transpile cache file for each of its about 800 built-in modules, so in the debug build Chat drew its first frame after about 20 seconds. On Windows CI, the Node backend tests took about twice as long as on macOS and Linux. [#276](https://github.com/yannelli/pi-rust/pull/276) keeps those modules in memory, and the Chat menu check then took about 6 seconds. The check scripts allow 60 to 90 seconds for each package.
 
 ## Final macOS build
 
