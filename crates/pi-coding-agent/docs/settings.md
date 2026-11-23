@@ -69,6 +69,15 @@ A pi-rust.com share uploads the same HTML export as a gist share, up to 25 MiB, 
 
 To sign in, `/share` shows a code and a sign-in URL. Press Enter to open the page and copy the code, then approve the code on pi-rust.com. Esc cancels. The code expires after the time the service sets. pi saves the token in `<agent dir>/pi-rust-account.json`, readable only by you, and not in `auth.json`. If pi-rust.com rejects the token, pi deletes the file, and the next `/share` signs you in again. To sign out, run `/logout` and choose **pi-rust.com**. pi revokes the token on pi-rust.com and deletes the file.
 
+Two settings apply to shares on your pi-rust.com account. Upstream pi has neither.
+
+| Setting | Values | Effect |
+| --- | --- | --- |
+| `sessionShareExpiry` | `"never"` (default), `"1h"`, `"1d"`, `"7d"`, `"30d"` | pi-rust.com deletes the share after this time. |
+| `sessionShareVisibility` | `"link"` (default), `"private"` | `"link"`: anyone with the link can open it. `"private"`: only you, signed in to pi-rust.com. |
+
+After a share, pi shows the expiry and visibility under the URL when they are not the defaults. You can change both later, rename, download, and delete shares at [pi-rust.com/account](https://pi-rust.com/account/). Shares are not indexed by search engines.
+
 `sessionShareViewer` chooses the page that gist links open:
 
 | Value | Link |

@@ -12,6 +12,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::platform::{VERSION, pi_user_agent};
+use crate::settings::schema::{SessionShareExpiry, SessionShareVisibility};
 
 pub const ENV_SHARE_URL: &str = "PI_SHARE_URL";
 pub const DEFAULT_SHARE_URL: &str = "https://pi-rust.com";
@@ -202,6 +203,31 @@ pub struct PiRustShare {
     pub url: String,
 }
 
+/// Expiry and visibility of a new share, from `sessionShareExpiry` and `sessionShareVisibility`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShareOptions {
+    pub expiry: SessionShareExpiry,
+    pub visibility: SessionShareVisibility,
+}
+
+impl ShareOptions {
+    /// The line shown under the share URL, such as `Expires in 7 days. Only you can open it.`;
+    /// `None` for the defaults.
+    pub fn note(&self) -> Option<String> {
+        let expiry = match self.expiry {
+            SessionShareExpiry::Never => None,
+            SessionShareExpiry::Hour => Some("Expires in 1 hour."),
+            SessionShareExpiry::Day => Some("Expires in 1 day."),
+            SessionShareExpiry::Week => Some("Expires in 7 days."),
+            SessionShareExpiry::Month => Some("Expires in 30 days."),
+        };
+        let private = (self.visibility == SessionShareVisibility::Private)
+            .then_some("Only you can open it, signed in to pi-rust.com.");
+        let parts: Vec<&str> = expiry.into_iter().chain(private).collect();
+        (!parts.is_empty()).then(|| parts.join(" "))
+    }
+}
+
 fn endpoint(origin: &str, path: &str) -> Result<reqwest::Url, PiRustError> {
     reqwest::Url::parse(origin)
         .and_then(|base| base.join(path))
@@ -369,6 +395,7 @@ pub async fn upload_share(
     client: &reqwest::Client,
     account: &PiRustAccount,
     title: &str,
+    options: ShareOptions,
     html: Vec<u8>,
     cancel: &CancellationToken,
 ) -> Result<PiRustShare, PiRustError> {
@@ -378,7 +405,17 @@ pub async fn upload_share(
         return Err(failed(format!("the session export is {mib:.1} MiB, more than the 25 MiB limit")));
     }
     let mut url = endpoint(&account.origin, "/v1/shares")?;
-    url.query_pairs_mut().append_pair("title", title);
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("title", title);
+        // Defaults are left out, so older servers get the request they know.
+        if let Some(seconds) = options.expiry.seconds() {
+            query.append_pair("expires_in", &seconds.to_string());
+        }
+        if options.visibility == SessionShareVisibility::Private {
+            query.append_pair("visibility", "private");
+        }
+    }
     let request = client
         .post(url)
         .bearer_auth(&account.token)

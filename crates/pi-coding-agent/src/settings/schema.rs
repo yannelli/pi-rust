@@ -315,6 +315,48 @@ pub enum SessionShareViewer {
     PiDev,
 }
 
+/// `sessionShareExpiry` (pi-rust extension): when shares to a pi-rust.com account expire.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionShareExpiry {
+    #[default]
+    #[serde(rename = "never")]
+    Never,
+    #[serde(rename = "1h")]
+    Hour,
+    #[serde(rename = "1d")]
+    Day,
+    #[serde(rename = "7d")]
+    Week,
+    #[serde(rename = "30d")]
+    Month,
+}
+
+impl SessionShareExpiry {
+    /// Seconds until a new share expires; `None` when it never does.
+    pub fn seconds(self) -> Option<u64> {
+        const HOUR: u64 = 60 * 60;
+        match self {
+            Self::Never => None,
+            Self::Hour => Some(HOUR),
+            Self::Day => Some(24 * HOUR),
+            Self::Week => Some(7 * 24 * HOUR),
+            Self::Month => Some(30 * 24 * HOUR),
+        }
+    }
+}
+
+/// `sessionShareVisibility` (pi-rust extension): who can open shares on a pi-rust.com account.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionShareVisibility {
+    /// Anyone with the unlisted link.
+    #[default]
+    #[serde(rename = "link")]
+    Link,
+    /// Only the owner, signed in to pi-rust.com.
+    #[serde(rename = "private")]
+    Private,
+}
+
 /// `providerIdentity` (pi-rust extension): how model provider requests identify the client.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -421,6 +463,10 @@ pub struct Settings {
     pub session_share_destination: Option<SessionShareDestination>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_share_viewer: Option<SessionShareViewer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_share_expiry: Option<SessionShareExpiry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_share_visibility: Option<SessionShareVisibility>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steering_mode: Option<QueueMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -559,6 +605,8 @@ pub const PI_SETTINGS_KEYS: &[&str] = &[
     "transport",
     "sessionShareDestination",
     "sessionShareViewer",
+    "sessionShareExpiry",
+    "sessionShareVisibility",
     "steeringMode",
     "followUpMode",
     "theme",

@@ -8,11 +8,12 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::export::pi_rust_share::{
-    ACCOUNT_FILE, DeviceAuthorization, MAX_SHARE_BYTES, PiRustAccount, PiRustError, delete_account,
+    ACCOUNT_FILE, DeviceAuthorization, MAX_SHARE_BYTES, PiRustAccount, PiRustError, ShareOptions, delete_account,
     fetch_account_email, load_account, load_account_for, poll_device_token, revoke_token, save_account, sign_in,
     start_device_authorization, upload_share,
 };
 use crate::platform::test_http::{TestReply, TestRequest, TestServer, client};
+use crate::settings::schema::{SessionShareExpiry, SessionShareVisibility};
 
 const EXPIRED: &str = "The pi-rust.com sign-in code expired. Run /share again to get a new code.";
 
@@ -198,10 +199,16 @@ async fn uploads_the_html_with_the_title() {
     })
     .await;
     let html = b"<html>session</html>".to_vec();
-    let share =
-        upload_share(&client(), &account(&server.url), "My session & more", html.clone(), &CancellationToken::new())
-            .await
-            .unwrap();
+    let share = upload_share(
+        &client(),
+        &account(&server.url),
+        "My session & more",
+        ShareOptions::default(),
+        html.clone(),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
     assert_eq!((share.id.as_str(), share.url.as_str()), ("s1", "https://share.test/s/s1"));
     let request = &server.requests()[0];
     assert_eq!((request.method.as_str(), request.path()), ("POST", "/v1/shares"));
@@ -209,6 +216,28 @@ async fn uploads_the_html_with_the_title() {
     assert_eq!(request.header("authorization"), Some("Bearer tok-secret"));
     assert_eq!(request.header("content-type"), Some("text/html; charset=utf-8"));
     assert_eq!(request.body, html);
+    assert_eq!(request.query("expires_in"), None);
+    assert_eq!(request.query("visibility"), None);
+}
+
+#[tokio::test]
+async fn uploads_send_the_expiry_and_visibility_settings() {
+    let server =
+        TestServer::start(|_| reply(201, json!({"ok": true, "share": {"id": "s2", "url": "https://share.test/s/s2"}})))
+            .await;
+    let options = ShareOptions { expiry: SessionShareExpiry::Week, visibility: SessionShareVisibility::Private };
+    upload_share(&client(), &account(&server.url), "t", options, b"x".to_vec(), &CancellationToken::new())
+        .await
+        .unwrap();
+    let request = &server.requests()[0];
+    assert_eq!(request.query("expires_in").as_deref(), Some("604800"));
+    assert_eq!(request.query("visibility").as_deref(), Some("private"));
+    assert_eq!(options.note().as_deref(), Some("Expires in 7 days. Only you can open it, signed in to pi-rust.com."));
+    let hour = ShareOptions { expiry: SessionShareExpiry::Hour, ..ShareOptions::default() };
+    assert_eq!(hour.note().as_deref(), Some("Expires in 1 hour."));
+    assert_eq!(ShareOptions::default().note(), None);
+    assert_eq!(SessionShareExpiry::Month.seconds(), Some(30 * 24 * 60 * 60));
+    assert_eq!(SessionShareExpiry::Never.seconds(), None);
 }
 
 #[tokio::test]
@@ -218,7 +247,9 @@ async fn upload_errors_report_revoked_tokens_and_limits() {
     })
     .await;
     let cancel = CancellationToken::new();
-    let result = upload_share(&client(), &account(&unauthorized.url), "t", b"x".to_vec(), &cancel).await;
+    let result =
+        upload_share(&client(), &account(&unauthorized.url), "t", ShareOptions::default(), b"x".to_vec(), &cancel)
+            .await;
     assert_eq!(result, Err(PiRustError::Unauthorized));
     assert!(PiRustError::Unauthorized.to_string().contains("Run /share again to sign in"));
 
@@ -226,15 +257,20 @@ async fn upload_errors_report_revoked_tokens_and_limits() {
         reply(413, json!({"ok": false, "error": "too_large", "description": "Shares are limited to 25 MiB"}))
     })
     .await;
-    let error = upload_share(&client(), &account(&too_large.url), "t", b"x".to_vec(), &cancel).await.unwrap_err();
+    let error = upload_share(&client(), &account(&too_large.url), "t", ShareOptions::default(), b"x".to_vec(), &cancel)
+        .await
+        .unwrap_err();
     assert_eq!(error.to_string(), "Failed to share on pi-rust.com: Shares are limited to 25 MiB");
     let limited = TestServer::start(|_| reply(429, json!({"ok": false, "error": "rate_limited"}))).await;
-    let error = upload_share(&client(), &account(&limited.url), "t", b"x".to_vec(), &cancel).await.unwrap_err();
+    let error = upload_share(&client(), &account(&limited.url), "t", ShareOptions::default(), b"x".to_vec(), &cancel)
+        .await
+        .unwrap_err();
     assert_eq!(error.to_string(), "Failed to share on pi-rust.com: rate_limited");
 
     let local = TestServer::start(|_| panic!("an oversized export is not sent")).await;
     let html = vec![b' '; MAX_SHARE_BYTES + 1];
-    let error = upload_share(&client(), &account(&local.url), "t", html, &cancel).await.unwrap_err();
+    let error =
+        upload_share(&client(), &account(&local.url), "t", ShareOptions::default(), html, &cancel).await.unwrap_err();
     assert_eq!(
         error.to_string(),
         "Failed to share on pi-rust.com: the session export is 25.0 MiB, more than the 25 MiB limit"

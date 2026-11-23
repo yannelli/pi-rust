@@ -88,6 +88,8 @@ impl InteractiveMode {
             transport: settings.transport(),
             session_share_destination: settings.session_share_destination(),
             session_share_viewer: settings.session_share_viewer(),
+            session_share_expiry: settings.session_share_expiry(),
+            session_share_visibility: settings.session_share_visibility(),
             http_idle_timeout_ms: settings.http_idle_timeout_ms().unwrap_or(DEFAULT_HTTP_IDLE_TIMEOUT_MS),
             cache_warming_mode: settings.cache_warming_mode(),
             retry: settings.retry_settings(),
@@ -188,6 +190,10 @@ impl InteractiveMode {
                 mode.settings().set_session_share_destination(destination)
             }),
             on_session_share_viewer_change: on!(weak, |mode, viewer| mode.settings().set_session_share_viewer(viewer)),
+            on_session_share_expiry_change: on!(weak, |mode, expiry| mode.settings().set_session_share_expiry(expiry)),
+            on_session_share_visibility_change: on!(weak, |mode, visibility| {
+                mode.settings().set_session_share_visibility(visibility)
+            }),
             on_http_idle_timeout_ms_change: on!(weak, |mode, timeout| {
                 let settings = mode.settings();
                 settings.set_http_idle_timeout_ms(timeout);

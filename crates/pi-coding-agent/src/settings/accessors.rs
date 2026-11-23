@@ -287,6 +287,22 @@ impl SettingsManager {
         SessionShareViewer
     );
 
+    choice!(
+        session_share_expiry,
+        set_session_share_expiry,
+        "sessionShareExpiry",
+        session_share_expiry,
+        SessionShareExpiry
+    );
+
+    choice!(
+        session_share_visibility,
+        set_session_share_visibility,
+        "sessionShareVisibility",
+        session_share_visibility,
+        SessionShareVisibility
+    );
+
     /// Whether the global settings name a `sessionShareViewer`, i.e. the user answered the
     /// one-time share service question or chose a viewer.
     pub fn session_share_viewer_chosen(&self) -> bool {
