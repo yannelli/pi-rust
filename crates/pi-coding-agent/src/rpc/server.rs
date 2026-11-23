@@ -2,6 +2,7 @@
 //! concurrently, stream session events, and shut down on end of input, a closed output, an
 //! extension request, or SIGTERM and SIGHUP.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::io::Write;
 use std::pin::Pin;
@@ -49,6 +50,10 @@ pub(super) async fn run_eagerly(mut task: Task) {
     if futures::poll!(task.as_mut()).is_pending() {
         tokio::spawn(task);
     }
+}
+
+fn is_ui_response(line: &str) -> bool {
+    matches!(parse_input(line), Ok(InputRecord::UiResponse { .. }))
 }
 
 #[cfg(unix)]
@@ -149,22 +154,41 @@ impl RpcServer {
         self.shutdown.check();
     }
 
-    /// Read and dispatch records until the loop must stop; returns the exit code.
+    /// Read and dispatch records until the loop must stop; returns the exit code. Upstream binds
+    /// extensions before it reads input, so commands read while they bind wait in order, also
+    /// when the input ends. Dialog responses go through at once: the binding can wait on one.
     async fn read_loop(&self, input: impl AsyncRead + Unpin, handle_signals: bool) -> i32 {
         let mut reader = JsonlReader::new(input);
         let closed = self.output.closed();
         let signal = async { if handle_signals { termination_signal().await } else { std::future::pending().await } };
         tokio::pin!(signal);
+        let mut waiting: VecDeque<String> = VecDeque::new();
+        let mut input_ended = false;
         loop {
+            while !waiting.is_empty() && self.runtime.session().extensions_bound() {
+                let line = waiting.pop_front().expect("a waiting command");
+                run_eagerly(Box::pin(self.this().handle_line(line))).await;
+            }
+            if input_ended && waiting.is_empty() {
+                return 0;
+            }
+            let session = self.runtime.session();
             tokio::select! {
-                line = reader.next_line() => match line {
-                    Ok(Some(line)) => run_eagerly(Box::pin(self.this().handle_line(line))).await,
-                    Ok(None) => return 0,
+                line = reader.next_line(), if !input_ended => match line {
+                    Ok(Some(line)) => {
+                        if (waiting.is_empty() && session.extensions_bound()) || is_ui_response(&line) {
+                            run_eagerly(Box::pin(self.this().handle_line(line))).await;
+                        } else {
+                            waiting.push_back(line);
+                        }
+                    }
+                    Ok(None) => input_ended = true,
                     Err(failure) => {
                         eprintln!("Error: could not read RPC input: {failure}");
                         return 0;
                     }
                 },
+                _ = session.wait_extensions_bound(), if !waiting.is_empty() => {}
                 _ = closed.cancelled() => return 1,
                 _ = self.shutdown.token().cancelled() => return 0,
                 code = &mut signal => return code,

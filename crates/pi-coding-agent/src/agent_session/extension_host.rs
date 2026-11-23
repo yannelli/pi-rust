@@ -242,6 +242,11 @@ impl AgentSession {
         }
     }
 
+    /// Whether no [`Self::bind_extensions`] is still on its way to `session_start`.
+    pub(crate) fn extensions_bound(&self) -> bool {
+        *self.extensions.bound.borrow()
+    }
+
     /// Wait until a running [`Self::bind_extensions`] emitted `session_start`.
     pub(crate) async fn wait_extensions_bound(&self) {
         let mut receiver = self.extensions.bound.subscribe();

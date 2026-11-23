@@ -91,6 +91,23 @@ async fn get_commands_waits_for_the_skills_extensions_discover() {
     rpc.finish().await;
 }
 
+/// Upstream binds extensions before it reads input, so a command sent right before the input ends
+/// is answered after they are bound.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_sent_as_the_input_ends_is_answered_after_extensions_bind() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, _| {
+        add_late_skill_extension(&h.agent_dir, &h.cwd.join("discovered"));
+    })
+    .await;
+    rpc.send(json!({"id": "c", "type": "get_commands"})).await;
+    assert_eq!(rpc.finish().await, 0);
+    let responses = rpc.responses("c");
+    let commands = responses.first().map(|response| response["data"]["commands"].clone());
+    let commands = commands.unwrap_or_else(|| panic!("no get_commands response:\n{}", rpc.lines().join("\n")));
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "skill:late"), "{commands}");
+}
+
 const NOTES: &str = r#"export default function (pi) {
 	pi.registerCommand("notes", { handler: async () => {
 		pi.sendMessage({ customType: "unset", content: "no display" });
