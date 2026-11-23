@@ -2,6 +2,17 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.28] - 2026-11-22
+
+### Added
+
+- **coding-agent:** set expiry and visibility for pi-rust.com shares ([e9a73c5](https://github.com/yannelli/pi-rust/commit/e9a73c55fc5ed8e3a8d98b753959d308a5f237f0))
+- **coding-agent:** ask on first run whether /share uses pi-rust.com or pi.dev ([f598312](https://github.com/yannelli/pi-rust/commit/f59831240df7d387b4609e7765841976157f4916))
+
+### Fixed
+
+- **coding-agent:** default /share to pi.dev as upstream pi does ([513be8a](https://github.com/yannelli/pi-rust/commit/513be8a01554ef6c1bbc5d266e458a7bda009f01))
+
 ## [0.12.27] - 2026-11-22
 
 ### Added
