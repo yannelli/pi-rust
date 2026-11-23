@@ -43,6 +43,8 @@ The timeout of a held dialog starts when pi sends the dialog.
 
 `get_commands` waits for the `session_start` and `resources_discover` handlers, as in upstream pi. While a dialog waits for the client, `get_commands` answers at once. That list does not have the skills and prompts that `resources_discover` adds after the dialog. A `prompt` waits until the `session_start` handlers finish.
 
+When stdin closes, pi answers the `get_*` queries it has read, then exits. A client can send `get_commands` and close stdin at once.
+
 Upstream pi sends dialogs at once and reads no input until its `session_start` handlers finish. A `session_start` dialog without a timeout stops upstream pi.
 
 ## agentInvoked

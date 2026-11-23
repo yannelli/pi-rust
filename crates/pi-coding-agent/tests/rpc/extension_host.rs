@@ -91,6 +91,23 @@ async fn get_commands_waits_for_the_skills_extensions_discover() {
     rpc.finish().await;
 }
 
+/// A client that sends `get_commands` and closes stdin at once still gets the list, after the
+/// extensions bind.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_query_sent_as_the_input_ends_is_answered() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, _| {
+        add_late_skill_extension(&h.agent_dir, &h.cwd.join("discovered"));
+    })
+    .await;
+    rpc.send(json!({"id": "c", "type": "get_commands"})).await;
+    assert_eq!(rpc.finish().await, 0);
+    let responses = rpc.responses("c");
+    let commands = responses.first().map(|response| response["data"]["commands"].clone());
+    let commands = commands.unwrap_or_else(|| panic!("no get_commands response:\n{}", rpc.lines().join("\n")));
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "skill:late"), "{commands}");
+}
+
 const TRUST: &str = r#"export default function (pi) {
 	pi.on("session_start", async (_event, ctx) => {
 		const choice = await ctx.ui.select("Run untrusted hook?", ["Allow once", "Deny"]);

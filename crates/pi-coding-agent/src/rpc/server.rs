@@ -9,11 +9,12 @@ use std::sync::{Arc, Mutex, Weak};
 
 use serde_json::{Value, json};
 use tokio::io::AsyncRead;
+use tokio::sync::watch;
 
 use super::host::{RpcExtensionBinding, RpcExtensionHost, RpcShutdownHandle};
 use super::jsonl::JsonlReader;
 use super::output::RpcOutput;
-use super::types::{InputRecord, error, parse_input};
+use super::types::{InputRecord, RpcCommand, error, parse_input};
 use super::ui::RpcExtensionUi;
 use crate::agent_session::{AgentSession, AgentSessionEvent, AgentSessionRuntime, lock};
 
@@ -38,7 +39,25 @@ pub(super) struct RpcServer {
     pub host: Option<Arc<dyn RpcExtensionHost>>,
     pub shutdown: RpcShutdownHandle,
     subscription: Mutex<Option<(Arc<AgentSession>, u64)>>,
+    /// Queries read and not yet answered.
+    queries: watch::Sender<usize>,
     weak: Weak<RpcServer>,
+}
+
+/// Counts one query until it is dropped.
+struct QueryInFlight<'a>(&'a watch::Sender<usize>);
+
+impl<'a> QueryInFlight<'a> {
+    fn new(queries: &'a watch::Sender<usize>) -> Self {
+        queries.send_modify(|count| *count += 1);
+        Self(queries)
+    }
+}
+
+impl Drop for QueryInFlight<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
+    }
 }
 
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -137,6 +156,7 @@ impl RpcServer {
         if command.as_ref().is_ok_and(|command| !command.is_query()) {
             self.ui.open_dialogs();
         }
+        let _query = command.as_ref().is_ok_and(RpcCommand::is_query).then(|| QueryInFlight::new(&self.queries));
         let reply = match command {
             Err(message) => Some(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))),
             Ok(command) => match self.handle_command(id.as_ref(), command).await {
@@ -154,7 +174,9 @@ impl RpcServer {
         self.shutdown.check();
     }
 
-    /// Read and dispatch records until the loop must stop; returns the exit code.
+    /// Read and dispatch records until the loop must stop; returns the exit code. At the end of
+    /// input, queries already read still answer, as upstream answers each record it read before it
+    /// handles the end. A `get_commands` can still be waiting for the extensions to bind.
     async fn read_loop(&self, input: impl AsyncRead + Unpin, handle_signals: bool) -> i32 {
         let mut reader = JsonlReader::new(input);
         let closed = self.output.closed();
@@ -164,7 +186,7 @@ impl RpcServer {
             tokio::select! {
                 line = reader.next_line() => match line {
                     Ok(Some(line)) => run_eagerly(Box::pin(self.this().handle_line(line))).await,
-                    Ok(None) => return 0,
+                    Ok(None) => break,
                     Err(failure) => {
                         eprintln!("Error: could not read RPC input: {failure}");
                         return 0;
@@ -174,6 +196,13 @@ impl RpcServer {
                 _ = self.shutdown.token().cancelled() => return 0,
                 code = &mut signal => return code,
             }
+        }
+        let mut queries = self.queries.subscribe();
+        tokio::select! {
+            _ = queries.wait_for(|count| *count == 0) => 0,
+            _ = closed.cancelled() => 1,
+            _ = self.shutdown.token().cancelled() => 0,
+            code = &mut signal => code,
         }
     }
 
@@ -207,6 +236,7 @@ pub async fn serve_rpc(
         host: options.extension_host.clone(),
         shutdown: RpcShutdownHandle::default(),
         subscription: Mutex::new(None),
+        queries: watch::channel(0).0,
         weak: weak.clone(),
     });
     server.bind(&runtime.session());
