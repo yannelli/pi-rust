@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.33] - 2026-11-23
+
+### Fixed
+
+- **shell:** run shell commands in a new session without pi's terminal ([6546c4c](https://github.com/yannelli/pi-rust/commit/6546c4cb4ba064d915d17c48f06efa8d72c8fd08))
+
 ## [0.12.32] - 2026-11-23
 
 ### Fixed
