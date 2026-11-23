@@ -171,7 +171,7 @@ fn script(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
 }
 
 #[cfg(unix)]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn rejects_requests_when_the_process_exits_or_stays_silent() {
     let dir = tempfile::tempdir().unwrap();
     let options = |program, timeout| RpcClientOptions {
@@ -197,7 +197,11 @@ async fn rejects_requests_when_the_process_exits_or_stays_silent() {
     silent.respond_to_ui("u1", RpcUiResponse::Cancelled).await.unwrap();
     silent.stop().await;
 
-    let early = RpcClient::new(options(script(dir.path(), "early.sh", "exit 3"), Duration::from_secs(30)));
-    let error = early.start().await.unwrap_err().to_string();
-    assert!(error.starts_with("Agent process exited (code=3"), "{error}");
+    let early = RpcClient::new(options(script(dir.path(), "early.sh", "read line\nexit 3"), Duration::from_secs(30)));
+    // Hold the startup future at its grace period and let the first request release the child.
+    let mut starting = std::pin::pin!(early.start());
+    assert!(futures::poll!(&mut starting).is_pending());
+    let exit = early.get_state().await.unwrap_err().to_string();
+    assert!(exit.starts_with("Agent process exited (code=3"), "{exit}");
+    assert_eq!(starting.await.unwrap_err().to_string(), exit);
 }
