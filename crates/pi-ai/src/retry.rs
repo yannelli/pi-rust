@@ -238,6 +238,7 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "connection.?error",
     "connection.?refused",
     "connection.?lost",
+    "connection.?closed",
     "other side closed",
     "fetch failed",
     // reqwest's words for Node's "fetch failed" and "terminated": the request got no response,

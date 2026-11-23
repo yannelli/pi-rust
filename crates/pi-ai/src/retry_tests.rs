@@ -133,6 +133,7 @@ fn classifies_retryable_assistant_errors() {
         "503",
         "(HTTP 502) Bad Gateway",
         "Claude Code's stream from Anthropic was cut short after the reply had begun",
+        r#"{"type":"error","error":{"type":"api_error","message":"Connection closed."}}"#,
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }
