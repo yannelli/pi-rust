@@ -211,3 +211,86 @@ fn transformers_run_in_order_and_failures_keep_the_markdown() {
     let transform = create_markdown_transform(MarkdownMessageType::User, true, vec![upper, skip, failing, width], None);
     assert_eq!(transform("hi", 42), "HI 42 streaming User");
 }
+
+/// Tags spans with a prefix the test can change between calls.
+struct SwitchStyle(std::sync::Mutex<&'static str>);
+
+impl MermaidStyle for SwitchStyle {
+    fn fg(&self, color: ThemeColor, text: &str) -> String {
+        format!("<{}{color}>{text}", self.0.lock().expect("style"))
+    }
+
+    fn bold(&self, text: &str) -> String {
+        format!("<bold>{text}")
+    }
+}
+
+#[test]
+fn a_reused_transformer_matches_a_fresh_one_for_streamed_and_changed_context() {
+    let diagram = "```mermaid\nflowchart LR\n  A[Start] --> B[Done]\n```";
+    let documents = [
+        format!(
+            "{}{diagram}\n\nAfter\n\n```mermaid\nflowchart LR\n  A[Foo] invalid\n```\nTail",
+            "Prose line.\n\n".repeat(8)
+        ),
+        format!("# Plan\r\n\r\n{}\r\nText\r\n```js\r\nx\r\n```", diagram.replace('\n', "\r\n")),
+    ];
+    let mode = Arc::new(std::sync::Mutex::new(MermaidRenderingMode::Streaming));
+    let style = Arc::new(SwitchStyle(std::sync::Mutex::new("a")));
+    let mode_source = mode.clone();
+    let reused = create_mermaid_markdown_transformer(MermaidTransformerOptions {
+        get_mode: Arc::new(move || *mode_source.lock().expect("mode")),
+        theme: Some(style.clone()),
+    });
+    let context = |is_streaming: bool, available_width: usize| MarkdownTransformContext {
+        message_type: MarkdownMessageType::Assistant,
+        is_streaming,
+        available_width,
+        message_id: None,
+        timestamp: None,
+    };
+    let fresh = |markdown: &str, context: &MarkdownTransformContext| {
+        let current = *mode.lock().expect("mode");
+        let style: Arc<dyn MermaidStyle + Send + Sync> = style.clone();
+        let transformer = create_mermaid_markdown_transformer(MermaidTransformerOptions {
+            get_mode: Arc::new(move || current),
+            theme: Some(style),
+        });
+        transformer(markdown, context)
+    };
+    let check = |markdown: &str, context: &MarkdownTransformContext| {
+        assert_eq!(reused(markdown, context), fresh(markdown, context), "{markdown:?} {context:?}");
+    };
+    let prefixes: Vec<Vec<&str>> = documents
+        .iter()
+        .map(|document| {
+            document.char_indices().map(|(index, _)| document[..index].trim()).chain([document.as_str()]).collect()
+        })
+        .collect();
+    // Two messages stream at once through one transformer.
+    for index in 0..prefixes[0].len().max(prefixes[1].len()) {
+        for prefixes in &prefixes {
+            check(prefixes[index.min(prefixes.len() - 1)], &context(true, 100));
+        }
+    }
+    for document in &documents {
+        check(document, &context(false, 100));
+        check(document, &context(false, 12));
+        *style.0.lock().expect("style") = "b";
+        check(document, &context(false, 100));
+        *mode.lock().expect("mode") = MermaidRenderingMode::Final;
+        check(document, &context(true, 100));
+        check(document, &context(false, 100));
+        *mode.lock().expect("mode") = MermaidRenderingMode::Streaming;
+        check(&document.replace("Start", "Begin"), &context(false, 100));
+        check(&document[..document.len() / 2], &context(true, 100));
+    }
+}
+
+#[test]
+fn keeps_a_dropped_duplicate_definition_after_a_diagram() {
+    let rendered = transform("[a]: u\n\n```mermaid\nflowchart LR\nA-->B\n```\n[a]: u\nnext", Options::default());
+    assert!(rendered.starts_with("[a]: u\n\n`"), "{rendered:?}");
+    assert!(rendered.ends_with("`\n[a]: u\nnext"), "{rendered:?}");
+    assert!(!rendered.contains("```mermaid"), "{rendered:?}");
+}

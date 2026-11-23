@@ -78,14 +78,15 @@ pub(crate) fn lex_top_level_blocks(source: &str) -> impl Iterator<Item = (Token,
     tokens.into_iter().zip(spans)
 }
 
-/// Records the span of the token an iteration pushed, or extends the last span when the iteration
-/// merged into the last token. A skipped duplicate definition changes neither.
+/// Records the span of the token an iteration pushed, or extends the last span by a contiguous merge.
+/// A skipped duplicate definition changes neither, so a newline merged after it stays out of the span.
 fn record_span(spans: &mut Vec<Range<usize>>, tokens: &[Token], before: (usize, usize), range: Range<usize>) {
     let (count, last_raw_len) = before;
     if tokens.len() > count {
         spans.push(range);
     } else if tokens.last().is_some_and(|last| last.raw().len() != last_raw_len)
         && let Some(last) = spans.last_mut()
+        && last.end == range.start
     {
         last.end = range.end;
     }

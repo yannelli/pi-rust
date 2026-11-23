@@ -1,8 +1,10 @@
 //! Replaces top-level Mermaid code blocks with Unicode diagrams (upstream `components/mermaid.ts`).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use pi_tui::components::markdown::{MarkdownCodeBlock, top_level_code_blocks};
+#[cfg(test)]
+use pi_tui::components::markdown::top_level_code_blocks;
+use pi_tui::components::markdown::{CodeBlockCache, MarkdownCodeBlock};
 
 use super::{MarkdownMessageType, MarkdownTransformContext, MarkdownTransformer};
 use crate::mermaid::{Cls, MermaidArt, Span, render};
@@ -115,9 +117,21 @@ fn replacement(
     format!("{}\n", rows.join("  \n"))
 }
 
+/// A panic in a scan drops the cache instead of leaving it poisoned.
+fn lock_cache(cache: &Mutex<CodeBlockCache>) -> MutexGuard<'_, CodeBlockCache> {
+    cache.lock().unwrap_or_else(|poisoned| {
+        cache.clear_poison();
+        let mut guard = poisoned.into_inner();
+        *guard = CodeBlockCache::default();
+        guard
+    })
+}
+
 /// A transformer that draws top-level Mermaid code blocks as Unicode diagrams. Respects the
 /// `markdown.mermaid` mode, skips thinking blocks, and leaves oversized or unsupported diagrams alone.
 pub fn create_mermaid_markdown_transformer(options: MermaidTransformerOptions) -> MarkdownTransformer {
+    // Streamed messages grow by appending, so each update lexes only the new tail.
+    let cache = Mutex::new(CodeBlockCache::default());
     Arc::new(move |markdown: &str, context: &MarkdownTransformContext| {
         let mode = (options.get_mode)();
         if mode == MermaidRenderingMode::Off
@@ -130,7 +144,8 @@ pub fn create_mermaid_markdown_transformer(options: MermaidTransformerOptions) -
         let style = options.theme.as_deref().map(|style| style as &dyn MermaidStyle);
         let mut output = String::with_capacity(markdown.len());
         let mut last = 0;
-        for block in top_level_code_blocks(markdown) {
+        let blocks = lock_cache(&cache).top_level_code_blocks(markdown);
+        for block in blocks {
             if !is_mermaid(&block.lang) {
                 continue;
             }

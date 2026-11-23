@@ -7,10 +7,15 @@ use std::ops::Range;
 use super::lexer::lex_top_level_blocks;
 use super::token::Token;
 
+mod cache;
+
+pub use cache::CodeBlockCache;
+
 /// A top-level fenced or indented code block (a marked `code` token).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownCodeBlock {
     /// Source bytes of marked's `raw`: one following newline, not a longer blank run. `\r\n` is 2 bytes.
+    /// A newline marked merges after a dropped duplicate definition is not contiguous, so it is left out.
     pub range: Range<usize>,
     /// The trimmed info string; empty for indented code.
     pub lang: String,
@@ -21,19 +26,51 @@ pub struct MarkdownCodeBlock {
 /// Top-level code blocks of `source` under GFM `marked` 18 rules without LaTeX. Blocks in lists,
 /// block quotes, or HTML blocks are skipped; an unclosed fence runs to the end of the source.
 pub fn top_level_code_blocks(source: &str) -> Vec<MarkdownCodeBlock> {
-    let normalized = normalize_line_endings(source);
+    lex_spans(source, 0).0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpanKind {
+    Space,
+    Fence,
+    AtxHeading,
+    Other,
+}
+
+fn span_kind(token: &Token) -> SpanKind {
+    let raw = token.raw();
+    let line = raw.trim_start_matches(' ');
+    let indented = raw.len() - line.len() > 3;
+    match token {
+        Token::Space { .. } => SpanKind::Space,
+        Token::Code { .. } if !indented && (line.starts_with("```") || line.starts_with("~~~")) => SpanKind::Fence,
+        Token::Heading { .. } if !indented => {
+            let hashes = line.bytes().take_while(|&byte| byte == b'#').count();
+            let atx = (1..=6).contains(&hashes) && line[hashes..].chars().next().is_none_or(char::is_whitespace);
+            if atx { SpanKind::AtxHeading } else { SpanKind::Other }
+        }
+        _ => SpanKind::Other,
+    }
+}
+
+/// Code blocks and top-level token ranges of `source[start..]`, as offsets into `source`.
+fn lex_spans(source: &str, start: usize) -> (Vec<MarkdownCodeBlock>, Vec<(SpanKind, Range<usize>)>) {
+    let tail = &source[start..];
+    let normalized = normalize_line_endings(tail);
     // Normalized offsets of the `\n` that replaced each `\r\n`.
     let crlf_offsets: Vec<usize> =
-        source.match_indices("\r\n").enumerate().map(|(index, (offset, _))| offset - index).collect();
-    let to_source = |offset: usize| offset + crlf_offsets.partition_point(|&crlf| crlf < offset);
-    lex_top_level_blocks(&normalized)
-        .filter_map(|(token, range)| match token {
-            Token::Code { lang, text, .. } => {
-                Some(MarkdownCodeBlock { range: to_source(range.start)..to_source(range.end), lang, text })
-            }
-            _ => None,
-        })
-        .collect()
+        tail.match_indices("\r\n").enumerate().map(|(index, (offset, _))| offset - index).collect();
+    let to_source = |offset: usize| start + offset + crlf_offsets.partition_point(|&crlf| crlf < offset);
+    let mut blocks = Vec::new();
+    let mut spans = Vec::new();
+    for (token, range) in lex_top_level_blocks(&normalized) {
+        let range = to_source(range.start)..to_source(range.end);
+        spans.push((span_kind(&token), range.clone()));
+        if let Token::Code { lang, text, .. } = token {
+            blocks.push(MarkdownCodeBlock { range, lang, text });
+        }
+    }
+    (blocks, spans)
 }
 
 fn normalize_line_endings(source: &str) -> Cow<'_, str> {
@@ -58,6 +95,7 @@ mod tests {
     }
 
     /// Expected `(raw, lang, text)` are the `code` tokens of `new Marked().lexer(source)`, marked 18.0.11.
+    /// `tools/marked-code-blocks.mjs` prints them (see `docs/marked-code-blocks.md`).
     #[test]
     fn matches_marked_top_level_code_tokens() {
         let fence = "```mermaid\nA\n```";
@@ -107,6 +145,21 @@ mod tests {
         assert_eq!(blocks(source), expected(&[("```mermaid\nA\n```", "mermaid", "A")]));
         let source = "[a]: x\n[a]: y\n```mermaid\nA\n```\n";
         assert_eq!(blocks(source), expected(&[("```mermaid\nA\n```\n", "mermaid", "A")]));
+    }
+
+    /// marked drops the second definition and merges the newline after it into the code `raw`. The
+    /// range stops at the contiguous bytes, so a replacement keeps `[a]: u\nnext`.
+    #[test]
+    fn ranges_stop_before_a_dropped_duplicate_definition() {
+        let source = "[a]: u\n\n```mermaid\nflowchart LR\nA-->B\n```\n[a]: u\nnext";
+        let fence = "```mermaid\nflowchart LR\nA-->B\n```\n";
+        assert_eq!(blocks(source), expected(&[(fence, "mermaid", "flowchart LR\nA-->B")]));
+        let raws: Vec<String> = super::lex_top_level_blocks(source)
+            .filter_map(|(token, _)| matches!(token, super::Token::Code { .. }).then(|| token.raw().to_string()))
+            .collect();
+        assert_eq!(raws, [format!("{fence}\n")], "marked 18.0.11 code raw");
+        let range = top_level_code_blocks(source)[0].range.clone();
+        assert_eq!(&source[range.end..], "[a]: u\nnext");
     }
 
     #[test]
