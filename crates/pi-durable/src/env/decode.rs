@@ -72,15 +72,7 @@ impl StreamDecoder {
         if self.pending_len > 0 {
             return self.decode(&bytes);
         }
-        let end = complete_prefix(&bytes);
-        self.hold(&bytes[end..]);
-        bytes.truncate(end);
-        if self.strip_bom && end > 0 {
-            self.strip_bom = false;
-            if starts_with_bom(&bytes) {
-                bytes.drain(..3);
-            }
-        }
+        self.cut_complete(&mut bytes);
         String::from_utf8(bytes).unwrap_or_else(|error| {
             let mut text = String::with_capacity(error.as_bytes().len());
             push_replaced(&mut text, error.as_bytes());
@@ -100,7 +92,7 @@ impl StreamDecoder {
             return text;
         }
         self.cut_complete(&mut bytes);
-        if std::str::from_utf8(&bytes).is_ok() {
+        if super::utf8::is_utf8(&bytes) {
             return bytes;
         }
         let mut text = Vec::with_capacity(bytes.len());
@@ -266,7 +258,7 @@ fn push_pieces(text: &mut Vec<u8>, mut bytes: &[u8]) {
             end -= back;
         }
         let (piece, rest) = bytes.split_at(end);
-        if std::str::from_utf8(piece).is_ok() {
+        if super::utf8::is_utf8(piece) {
             text.extend_from_slice(piece);
         } else {
             for chunk in piece.utf8_chunks() {
