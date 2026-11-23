@@ -2,6 +2,20 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.31] - 2026-11-23
+
+### Changed
+
+- **markdown:** reuse stable blocks during Mermaid streaming ([3fb731f](https://github.com/yannelli/pi-rust/commit/3fb731f6c197a566ae00d2676a396543e903d3a7))
+- **env:** decode split UTF-8 without copying the next chunk ([e00f141](https://github.com/yannelli/pi-rust/commit/e00f14144145443490ce010fa47057b275b20495))
+
+### Fixed
+
+- **rpc:** answer commands that wait for extensions before exiting at end of input ([5eb4a09](https://github.com/yannelli/pi-rust/commit/5eb4a09a88392586e6a2c0aebdd469824b6cf9dd))
+- **coding-agent:** send startup extension dialogs after the RPC or ACP client is ready ([8c3d4ae](https://github.com/yannelli/pi-rust/commit/8c3d4aef0b15d084c6b9f301078f0ed578886eb4))
+- **ci:** quote the Windows test filter in the workflow ([3c55b33](https://github.com/yannelli/pi-rust/commit/3c55b3342f1b42ba1c3f6a5150686adbe0a23d9b))
+- **tui:** restore Windows console modes after extension crashes ([f179ec3](https://github.com/yannelli/pi-rust/commit/f179ec34ecadc6aae212d04535be81de0ac3e198))
+
 ## [0.12.30] - 2026-11-22
 
 ### Changed
