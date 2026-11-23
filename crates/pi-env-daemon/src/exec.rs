@@ -343,12 +343,12 @@ pub fn run(
         }
         match receiver.recv_timeout(wait) {
             Ok(Message::Data(stream, bytes)) => {
-                emit(&mut pending, stream, decoders[stream].decode(&bytes));
                 if let Some(spill) = &mut spill {
                     spill.push(&bytes, tmpdir);
-                    if spill.failed.is_some() {
-                        kill(&mut killed);
-                    }
+                }
+                emit(&mut pending, stream, decoders[stream].decode_vec(bytes));
+                if spill.as_ref().is_some_and(|spill| spill.failed.is_some()) {
+                    kill(&mut killed);
                 }
                 if status.is_some() {
                     idle_until = Some(Instant::now() + EXIT_STDIO_GRACE);
