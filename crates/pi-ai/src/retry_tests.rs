@@ -132,6 +132,11 @@ fn classifies_retryable_assistant_errors() {
         "stream disconnected before completion: stream closed before response.completed",
         "503",
         "(HTTP 502) Bad Gateway",
+        "525 <!DOCTYPE html><title>SSL handshake failed</title>",
+        "Claude Code's stream from Anthropic was cut short after the reply had begun",
+        r#"{"type":"error","error":{"type":"api_error","message":"Connection closed."}}"#,
+        "Your request rate increased too quickly",
+        "Request rate increased too quickly. To ensure system stability, please adjust your client logic to scale requests more smoothly over time.",
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }
@@ -165,6 +170,72 @@ fn retries_reqwest_transport_failures() {
         "Request failed: builder error: relative URL without a base",
         "Provider HTTP 400: Invalid value for 'messages'",
         "Provider HTTP 429: You exceeded your current quota (insufficient_quota)",
+    ] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
+fn retries_bare_node_socket_error_codes() {
+    for text in [
+        "read ECONNRESET",
+        "connect ETIMEDOUT 140.82.113.3:443",
+        "write EPIPE",
+        "connect ECONNREFUSED 127.0.0.1:443",
+        "ECONNABORTED",
+        "Connection reset by peer",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in ["Invalid value EXECONNRESET", "Unknown field ETIMEDOUTX", "Invalid key ERR_EPIPE_ID"] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
+fn retries_the_codex_websocket_connection_limit() {
+    for text in [
+        "Codex error: Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+        "Codex error: websocket_connection_limit_reached",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    assert!(!is_retryable_assistant_error(&error_message("connection limit reached")));
+}
+
+#[test]
+fn retries_gateway_provider_failures_without_a_status() {
+    for text in [
+        "The provider is temporarily unavailable. Retry shortly.",
+        "The upstream provider is temporarily unavailable. Try again shortly.",
+        "The provider ended the response before it was complete.",
+        "The connection to the provider was reset. Retry shortly.",
+        "The provider reported a failure while generating the response.",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in ["Provider unavailable for this model", "The provider is unavailable in your region"] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
+fn retries_more_temporary_provider_failures() {
+    for text in [
+        "Unable to process request. Repeat the request later.",
+        "waited 73.4s in queue, reaching this model's admission ceiling of 60s; retry after the hinted delay",
+        r#"{"type":"error","error":{"details":null,"type":"api_error","message":"Unable to complete this request right now. Please try again."},"request_id":"req_011CgfE1bTgPTDsor4TsApFv"}"#,
+        "Provider finish_reason: error",
+        "Provider returned an empty response",
+        "Upstream error from Relace: The model stopped before completing the response.",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in [
+        "The operation was aborted",
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}"#,
+        "Provider finish_reason: content_filter",
+        r#"{"type":"error","error":{"type":"api_error","message":"Monthly quota exceeded"}}"#,
     ] {
         assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
     }

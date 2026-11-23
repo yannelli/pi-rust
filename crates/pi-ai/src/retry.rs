@@ -219,15 +219,24 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "servers are currently busy",
     "currently experiencing high demand",
     "model is at capacity",
+    // A request that waited too long in the provider's queue.
+    "admission ceiling",
     "rate.?limit",
     "too many requests",
+    // OpenAI 429 `slow_down` (Codex) and Alibaba Qwen throttling.
+    "rate increased too quickly",
     // Status codes must not be part of a longer word or number, e.g. a request id or byte count.
     // The regex crate has no lookaround, so the boundaries are matched as characters.
-    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524)(?:[^a-z0-9]|$)",
+    // 520, 524 and 525 are Cloudflare's errors between it and the provider's origin.
+    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524|525)(?:[^a-z0-9]|$)",
     "service.?(?:is.?)?(?:temporarily.?)?unavailable",
+    // "temporarily" is required: a plain "provider unavailable" is often a lasting routing error.
+    "provider.?(?:is.?)?temporarily.?unavailable",
     "server.?error",
     "internal.?error",
     "provider.?returned.?(?:an.?)?error",
+    // Anthropic's internal error, sent as HTTP 500 before streaming and as an event after it starts.
+    r#""type"\s*:\s*"api_error""#,
     "exceeded request buffer limit while retrying upstream",
     "unable to forward upstream",
     "upstream.?request.?failed",
@@ -238,6 +247,7 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "connection.?error",
     "connection.?refused",
     "connection.?lost",
+    "connection.?closed",
     "other side closed",
     "fetch failed",
     // reqwest's words for Node's "fetch failed" and "terminated": the request got no response,
@@ -246,6 +256,9 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "error decoding response body",
     r"request to \S+ failed, reason:",
     "getaddrinfo",
+    // Bare Node socket error codes, e.g. "read ECONNRESET", not part of a longer identifier.
+    "(?:^|[^a-z0-9_])(?:econnreset|econnaborted|econnrefused|etimedout|epipe)(?:[^a-z0-9_]|$)",
+    "connection reset by peer",
     "enotfound",
     "eai_again",
     "upstream.?connect",
@@ -257,17 +270,29 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "terminated",
     "websocket.?closed",
     "websocket.?error",
+    // The Codex 60-minute WebSocket lifetime limit; a retry opens a fresh connection.
+    "websocket.?connection.?limit.?reached",
     "ended without",
     "stream ended before message_stop",
     "stream ended before a terminal response event",
     "http2 request did not get a response",
+    // OpenRouter ends a stream with `finish_reason: "error"` when its provider fails mid-stream.
+    "provider finish_reason: error",
+    "returned an empty response",
+    "stopped before completing the response",
     // Codex CLI mid-stream disconnect, relayed by proxies that wrap the Codex CLI.
     "stream disconnected before completion",
+    "cut short after the reply had begun",
+    // Gateway mid-stream failures relayed as SSE `event: error` frames without a status code.
+    "ended the response before it was complete",
+    "connection to the provider was reset",
+    "reported a failure while generating the response",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",
     "try your request again",
     "please retry your request",
+    "repeat the request later",
     "resourceexhausted",
     "subscription_sharing_usage_unavailable",
     "subscription_sharing_user_unavailable",

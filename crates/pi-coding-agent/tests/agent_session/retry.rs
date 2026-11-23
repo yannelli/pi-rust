@@ -4,7 +4,8 @@ use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::session::SessionManager;
 use serde_json::{Value, json};
 
-use crate::agent_session::harness::{Options, harness, open_session, roles, wait_until};
+use crate::agent_session::harness::{Options, harness, harness_with, open_session, roles, wait_until};
+use crate::agent_session::tool_registry::tool;
 
 fn retry_events(events: &[Value]) -> Vec<Value> {
     events
@@ -99,4 +100,32 @@ async fn does_not_retry_when_disabled_or_not_retryable() {
     h.session.prompt("two", Vec::new()).await.unwrap();
     assert_eq!(h.requests().len(), 2);
     assert!(h.events_of("auto_retry_start").is_empty());
+}
+
+// Upstream issue #12124: the Codex WebSocket lifetime limit can hit mid-stream, where the provider cannot reconnect.
+#[tokio::test]
+async fn retries_the_codex_connection_limit_without_the_failed_response_or_rerunning_tools() {
+    let error = "Codex error: Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.";
+    let options = Options {
+        responses: vec![
+            FauxResponse::tool_call("completed_call", "record", json!({})),
+            FauxResponse::Error(error.into()),
+            FauxResponse::text("recovered"),
+        ],
+        settings: json!({"retry": {"baseDelayMs": 1, "maxRetries": 2}}),
+        ..Options::default()
+    };
+    let h = harness_with(options, |create| create.custom_tools = vec![tool("record", true)]).await;
+    h.session.prompt("test", Vec::new()).await.unwrap();
+
+    let requests = h.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(roles(&requests[2].messages), ["user", "assistant", "toolResult"], "the tool ran once");
+    let starts = h.events_of("auto_retry_start");
+    assert_eq!(
+        (starts.len(), starts[0]["attempt"].as_u64(), starts[0]["errorMessage"].as_str()),
+        (1, Some(1), Some(error))
+    );
+    assert_eq!(h.events_of("auto_retry_end"), [json!({"type": "auto_retry_end", "success": true, "attempt": 1})]);
+    assert_eq!(h.session.last_assistant_text().as_deref(), Some("recovered"));
 }

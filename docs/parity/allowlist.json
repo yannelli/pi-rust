@@ -355,6 +355,10 @@
     {
       "item": "918c6ffc2",
       "reason": "Internal Chord v2 design notes under packages/chord/docs/next; no code, test, or user docs. pi-rust ships no copy of these notes. Topic: slice 10 spec review folded (R1-R6), no automatic worker restarts, app kit malleable by plugins. No code commit through 35dfa7573."
+    },
+    {
+      "item": "51ba3ab5b",
+      "reason": "Removes the AbortSignal listener that retryAssistantCall's backoff sleep left behind. pi-rust has no listener to remove: cancellable_sleep in crates/pi-ai/src/retry.rs waits in tokio::select! on the CancellationToken and drops the wait when the sleep ends."
     }
   ],
   "cliFlags": [

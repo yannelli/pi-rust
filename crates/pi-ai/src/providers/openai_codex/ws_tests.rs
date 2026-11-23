@@ -256,6 +256,62 @@ async fn reconnects_once_when_the_connection_limit_is_reached() {
 }
 
 #[tokio::test]
+async fn the_connection_limit_after_the_stream_started_is_retried_on_a_fresh_socket() {
+    let thinking = vec![
+        json!({"type": "response.output_item.added", "item": {"type": "reasoning", "id": "rs_1", "summary": []}}),
+        json!({"type": "response.reasoning_summary_part.added", "part": {"type": "summary_text", "text": ""}}),
+        json!({"type": "response.reasoning_summary_text.delta", "delta": "unfinished thinking"}),
+    ];
+    let cases = [
+        ("metadata", vec![json!({"type": "response.created", "response": {"id": "resp_expired"}})]),
+        ("rate-limits", vec![json!({"type": "codex.rate_limits", "rate_limits": {"allowed": true}})]),
+        ("thinking", thinking),
+    ];
+    let limit = json!({"type": "error", "error": {"code": "websocket_connection_limit_reached", "message": "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue."}});
+    let recovered = vec![
+        json!({"type": "response.output_item.added", "item": {"type": "message", "id": "msg_2", "role": "assistant", "content": []}}),
+        json!({"type": "response.output_item.done", "item": {"type": "message", "id": "msg_2", "role": "assistant", "content": [{"type": "output_text", "text": "Recovered"}]}}),
+        json!({"type": "response.completed", "response": {"id": "resp_2", "status": "completed", "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8}}}),
+    ];
+    for (name, started) in cases {
+        let (limit, recovered) = (limit.clone(), recovered.clone());
+        let script = move |connection, _: &Value| match connection {
+            1 => Action::Reply(started.iter().cloned().chain([limit.clone()]).collect()),
+            _ => Action::Reply(recovered.clone()),
+        };
+        let server = Server::start(Arc::new(script), false).await;
+        let model = codex_model(&server.base_url);
+        let session = format!("connection-limit-{name}");
+        let attempts = Mutex::new(Vec::new());
+        let produce = || {
+            let (model, session, attempts) = (&model, &session, &attempts);
+            async move {
+                let options = options(&mock_token("acc"), Transport::WebsocketCached, Some(session));
+                let message = OpenAICodexResponses.stream(model, &context(), options).result(model).await;
+                attempts.lock().unwrap().push(message.clone());
+                message
+            }
+        };
+        let policy =
+            crate::retry::RetryPolicy { enabled: true, max_retries: 1, base_delay_ms: 0, max_agent_delay_ms: None };
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let result = crate::retry::retry_assistant_call(produce, Some(&policy), &cancel, &mut |_| {}).await;
+        assert_eq!((result.stop_reason, result.text()), (StopReason::Stop, "Recovered".into()), "{name}");
+        let attempts = attempts.into_inner().unwrap();
+        assert_eq!(attempts.len(), 2, "{name}");
+        assert_eq!(attempts[0].stop_reason, StopReason::Error, "{name}");
+        if name == "thinking" {
+            assert!(
+                matches!(&attempts[0].content[0], crate::types::ContentBlock::Thinking { thinking, .. } if thinking == "unfinished thinking")
+            );
+        }
+        assert_eq!(server.seen(|seen| (seen.connections, seen.http_requests)), (2, 0), "{name}");
+        assert!(server.seen(|seen| seen.bodies[1].1.get("previous_response_id").is_none()), "{name}");
+        close_websocket_sessions(Some(&session));
+    }
+}
+
+#[tokio::test]
 async fn falls_back_to_sse_after_a_connect_timeout_and_stays_on_sse() {
     let server = Server::start(Arc::new(|_, _| Action::Stall), true).await;
     let model = codex_model(&server.base_url);
@@ -324,7 +380,7 @@ async fn cached_sockets_respect_the_age_limit_and_the_account() {
         }
     };
     run(mock_token("acc_a")).await;
-    websocket::age_cached_socket("aged-session", Duration::from_secs(56 * 60));
+    websocket::age_cached_socket("aged-session", Duration::from_secs(46 * 60));
     run(mock_token("acc_a")).await;
     assert_eq!(server.seen(|seen| seen.connections), 2);
     run(mock_token("acc_b")).await;

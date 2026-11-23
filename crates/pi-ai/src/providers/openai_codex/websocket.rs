@@ -24,8 +24,9 @@ type Key = (String, String);
 
 /// Idle cached sockets close after this long.
 const IDLE_TTL: Duration = Duration::from_secs(5 * 60);
-/// The backend drops connections at 60 minutes; reconnect before that.
-const MAX_AGE: Duration = Duration::from_secs(55 * 60);
+/// The backend drops connections at 60 minutes, even mid-response. New requests open a fresh
+/// socket after 45 minutes, leaving 15 minutes for long responses.
+const MAX_AGE: Duration = Duration::from_secs(45 * 60);
 pub(super) const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 15_000;
 
 /// Per-session counters, as upstream `getOpenAICodexWebSocketDebugStats` reports them.
