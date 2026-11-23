@@ -16,7 +16,8 @@ use crate::session::ids::uuid_v4;
 
 type Response = Map<String, Value>;
 
-/// [`ExtensionUi`] for RPC mode. Unanswered dialogs wait until their timeout or cancellation.
+/// [`ExtensionUi`] for RPC mode. Unanswered dialogs wait until their timeout or cancellation,
+/// or until the input ends.
 pub struct RpcExtensionUi {
     output: RpcOutput,
     pending: Mutex<HashMap<String, oneshot::Sender<Response>>>,
@@ -24,6 +25,8 @@ pub struct RpcExtensionUi {
     waiting: watch::Sender<usize>,
     /// False while dialogs are held until [`Self::open_dialogs`].
     open: watch::Sender<bool>,
+    /// True once the input ended: no client can answer a dialog.
+    input_closed: watch::Sender<bool>,
 }
 
 fn request(method: &str, fields: Value) -> Map<String, Value> {
@@ -78,12 +81,18 @@ impl RpcExtensionUi {
             pending: Mutex::new(HashMap::new()),
             waiting: watch::channel(0).0,
             open: watch::channel(open).0,
+            input_closed: watch::channel(false).0,
         })
     }
 
     /// Send the held dialogs, and later dialogs at once.
     pub(crate) fn open_dialogs(&self) {
         self.open.send_replace(true);
+    }
+
+    /// The input ended: cancel the dialogs that wait for the client, sent or held, and later ones.
+    pub(crate) fn close_input(&self) {
+        self.input_closed.send_replace(true);
     }
 
     /// Wait until a dialog waits for the client.
@@ -115,7 +124,8 @@ impl RpcExtensionUi {
     /// held dialog is sent when dialogs open, and its timeout starts then.
     async fn dialog(&self, opts: DialogOptions, record: Map<String, Value>) -> Option<Response> {
         let cancel = opts.cancel.unwrap_or_default();
-        if cancel.is_cancelled() {
+        let mut input_closed = self.input_closed.subscribe();
+        if cancel.is_cancelled() || *input_closed.borrow() {
             return None;
         }
         let id = record["id"].as_str().unwrap_or_default().to_string();
@@ -140,6 +150,8 @@ impl RpcExtensionUi {
             }
         };
         let response = tokio::select! {
+            biased;
+            _ = input_closed.wait_for(|closed| *closed) => None,
             response = answer => response,
             _ = cancel.cancelled() => None,
         };

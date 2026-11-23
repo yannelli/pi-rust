@@ -45,6 +45,10 @@ The timeout of a held dialog starts when pi sends the dialog.
 
 Upstream pi sends dialogs at once and reads no input until its `session_start` handlers finish. A `session_start` dialog without a timeout stops upstream pi.
 
+## End of input
+
+When the input ends, pi cancels the dialogs that wait for the client, held or sent, answers the commands that wait for the `session_start` and `resources_discover` handlers (such as `get_commands` and `prompt`), and exits. So `echo '{"type":"get_commands"}' | pi --mode rpc` prints the response, as in upstream pi.
+
 ## agentInvoked
 
 The `prompt` response data has `agentInvoked` when pi knows whether the prompt reached the model:

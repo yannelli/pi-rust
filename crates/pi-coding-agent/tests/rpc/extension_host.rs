@@ -126,6 +126,49 @@ async fn startup_dialogs_wait_for_a_command_that_acts_on_the_session() {
     rpc.finish().await;
 }
 
+/// `echo '{"type":"get_commands"}' | pi --mode rpc` gets its answer: upstream reads no input
+/// before the extensions are bound, so the end of input cannot overtake a command.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_end_of_input_waits_for_commands_that_wait_for_the_extensions() {
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(Options::default(), rpc_options, |h, _| {
+        add_late_skill_extension(&h.agent_dir, &h.cwd.join("discovered"));
+    })
+    .await;
+    rpc.send(json!({"id": "c", "type": "get_commands"})).await;
+    assert_eq!(rpc.finish().await, 0);
+    let responses = rpc.responses("c");
+    let commands = responses.first().map(|response| response["data"]["commands"].clone());
+    let commands = commands.unwrap_or_else(|| panic!("no get_commands response:\n{}", rpc.lines().join("\n")));
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "skill:late"), "{commands}");
+}
+
+const ASK_ON_START: &str = r#"export default function (pi) {
+	pi.on("session_start", async (_event, ctx) => {
+		const ok = await ctx.ui.confirm("Continue?", "No client can answer once the input ends.");
+		ctx.ui.notify(`confirmed ${ok}`);
+	});
+}
+"#;
+
+/// No client can answer a dialog after the end of input, so pi cancels it, and a prompt that
+/// waits for the `session_start` handlers still gets its response.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_end_of_input_cancels_dialogs() {
+    let options = Options { responses: vec![FauxResponse::text("done")], ..Options::default() };
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(options, rpc_options, |h, _| {
+        std::fs::create_dir_all(h.agent_dir.join("extensions")).unwrap();
+        std::fs::write(h.agent_dir.join("extensions/ask.ts"), ASK_ON_START).unwrap();
+    })
+    .await;
+    rpc.send(json!({"id": "p", "type": "prompt", "message": "hello"})).await;
+    rpc.wait_for(|record| record["method"] == "confirm").await;
+    assert_eq!(rpc.finish().await, 0);
+    assert_eq!(rpc.responses("p").len(), 1, "{}", rpc.lines().join("\n"));
+    notified(&rpc, "confirmed false").await;
+}
+
 const NOTES: &str = r#"export default function (pi) {
 	pi.registerCommand("notes", { handler: async () => {
 		pi.sendMessage({ customType: "unset", content: "no display" });
