@@ -61,10 +61,13 @@ pub enum DiagramKind {
     Class,
     Er,
     Sequence,
+    Gantt,
+    GitGraph,
 }
 
 impl DiagramKind {
-    /// The upstream name (`"flowchart"`, `"state"`, `"class"`, `"er"`, `"sequence"`).
+    /// The upstream name (`"flowchart"`, `"state"`, `"class"`, `"er"`, `"sequence"`), or
+    /// `"gantt"` and `"gitGraph"` for the kinds this port adds.
     pub fn as_str(self) -> &'static str {
         match self {
             DiagramKind::Flowchart => "flowchart",
@@ -72,6 +75,8 @@ impl DiagramKind {
             DiagramKind::Class => "class",
             DiagramKind::Er => "er",
             DiagramKind::Sequence => "sequence",
+            DiagramKind::Gantt => "gantt",
+            DiagramKind::GitGraph => "gitGraph",
         }
     }
 }
@@ -85,6 +90,8 @@ pub fn diagram_kind(src: &str) -> Option<DiagramKind> {
         "graph" | "flowchart" => Some(DiagramKind::Flowchart),
         "erdiagram" => Some(DiagramKind::Er),
         "sequencediagram" => Some(DiagramKind::Sequence),
+        "gantt" => Some(DiagramKind::Gantt),
+        k if k.starts_with("gitgraph") => Some(DiagramKind::GitGraph),
         k if k.starts_with("statediagram") => Some(DiagramKind::State),
         k if k.starts_with("classdiagram") => Some(DiagramKind::Class),
         _ => None,
