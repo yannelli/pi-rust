@@ -2,6 +2,19 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.35] - 2026-11-23
+
+### Fixed
+
+- **ai:** retry "request rate increased too quickly" errors (upstream 0888fd79a) ([157e3da](https://github.com/yannelli/pi-rust/commit/157e3da8fbb87547937f007a6cfddaa4e2fcb1c2))
+- **ai:** retry more temporary provider failures (upstream a00a5048d) ([0da46b5](https://github.com/yannelli/pi-rust/commit/0da46b5817dab8f00d22739edbf7e217b36dbebb))
+- **ai:** retry gateway provider-unavailable and partial-response errors (upstream 25190b72c) ([52e8b08](https://github.com/yannelli/pi-rust/commit/52e8b082429a9aeb7d0558d03d1987f512e5695c))
+- **ai:** retry Cloudflare 525 errors (upstream fb62c069b) ([809e29d](https://github.com/yannelli/pi-rust/commit/809e29d8c88e1ecad1b5892ad72ac6978b5dff62))
+- **ai:** recover from the Codex websocket 60-minute connection limit (upstream bb1a2b354) ([3273013](https://github.com/yannelli/pi-rust/commit/327301364e0ce4ec0ef9978d9128ea3dd84f8c46))
+- **ai:** retry provider errors that report only a Node socket error code (upstream 4699b5b26) ([8890d07](https://github.com/yannelli/pi-rust/commit/8890d0710f53ae632c5f8f054d344a00bbadd51d))
+- **ai:** retry provider errors reading "Connection closed." (upstream 9b88b94e2) ([bca8bbd](https://github.com/yannelli/pi-rust/commit/bca8bbd74b869fe50b393e07b91e0023a8826a13))
+- **ai:** retry streams cut short after the reply had begun (upstream 566344046) ([8921848](https://github.com/yannelli/pi-rust/commit/89218486401e1c8122f932d905e90474eaf68042))
+
 ## [0.12.34] - 2026-11-23
 
 ### Fixed
