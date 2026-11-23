@@ -32,15 +32,27 @@ impl TranspileCache {
 
     /// The cached result for this source, transpiling it on a miss.
     pub fn get_or_transpile(&self, path: &Path, source: &str) -> Result<Arc<Transpiled>, JsError> {
+        self.lookup(path, source, true)
+    }
+
+    /// [`Self::get_or_transpile`] without the disk, for sources built into the program: they
+    /// transpile faster than their disk entries load, and a cold start would write one file each.
+    pub fn get_or_transpile_in_memory(&self, path: &Path, source: &str) -> Result<Arc<Transpiled>, JsError> {
+        self.lookup(path, source, false)
+    }
+
+    fn lookup(&self, path: &Path, source: &str, disk: bool) -> Result<Arc<Transpiled>, JsError> {
         let key = self.key(path, source);
         if let Some(hit) = self.memory.lock().unwrap_or_else(|poison| poison.into_inner()).get(&key) {
             return Ok(hit.clone());
         }
-        let result = match self.read_disk(&key) {
+        let result = match if disk { self.read_disk(&key) } else { None } {
             Some(cached) => cached,
             None => {
                 let fresh = transpile(path, source, &self.options)?;
-                self.write_disk(&key, &fresh);
+                if disk {
+                    self.write_disk(&key, &fresh);
+                }
                 fresh
             }
         };
