@@ -9,6 +9,7 @@ mod events;
 mod listing;
 mod mcp_servers;
 mod permissions;
+mod schema;
 mod session;
 mod translate;
 
@@ -17,7 +18,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use agent_client_protocol_schema::{
+use crate::acp::schema::{
     Error, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification,
 };

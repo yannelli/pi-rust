@@ -1,9 +1,10 @@
 //! Replaces top-level Mermaid code blocks with Unicode diagrams (upstream `components/mermaid.ts`).
 
-use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+#[cfg(test)]
+use pi_tui::components::markdown::top_level_code_blocks;
+use pi_tui::components::markdown::{CodeBlockCache, MarkdownCodeBlock};
 
 use super::{MarkdownMessageType, MarkdownTransformContext, MarkdownTransformer};
 use crate::mermaid::{Cls, MermaidArt, Span, render};
@@ -49,62 +50,12 @@ pub struct MermaidTransformerOptions {
     pub theme: Option<Arc<dyn MermaidStyle + Send + Sync>>,
 }
 
-/// A top-level fenced code block: its source extent (as marked's token `raw`), info string, and text.
-struct CodeBlock {
-    raw: Range<usize>,
-    info: String,
-    text: String,
-}
-
-/// marked appends a single following newline to a block's `raw`; longer blank runs stay separate.
-fn marked_raw_end(markdown: &str, block_end: usize) -> usize {
-    let core = markdown[..block_end].strip_suffix('\n').map_or(block_end, str::len);
-    let rest = &markdown[core..];
-    let mut blank = 0;
-    for line in rest.split_inclusive('\n') {
-        if !line.trim_matches([' ', '\t']).trim_end_matches('\n').is_empty() {
-            break;
-        }
-        blank += line.len();
-        if !line.ends_with('\n') {
-            break;
-        }
-    }
-    if blank == 1 { core + 1 } else { core }
-}
-
-fn top_level_code_blocks(markdown: &str) -> Vec<CodeBlock> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
-    let mut blocks = Vec::new();
-    let mut depth = 0usize;
-    let mut current: Option<CodeBlock> = None;
-    for (event, range) in Parser::new_ext(markdown, options).into_offset_iter() {
-        match event {
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if depth == 0 => {
-                current = Some(CodeBlock { raw: range.start..range.end, info: info.to_string(), text: String::new() });
-                depth += 1;
-            }
-            Event::Start(_) => depth += 1,
-            Event::Text(text) if depth == 1 => {
-                if let Some(block) = current.as_mut() {
-                    block.text.push_str(&text);
-                }
-            }
-            Event::End(TagEnd::CodeBlock) if depth == 1 => {
-                depth -= 1;
-                if let Some(mut block) = current.take() {
-                    block.raw.end = marked_raw_end(markdown, block.raw.end);
-                    if block.text.ends_with('\n') {
-                        block.text.pop();
-                    }
-                    blocks.push(block);
-                }
-            }
-            Event::End(_) => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    blocks
+/// Skip block lexing unless a line contains both a fence and the literal language name.
+fn may_contain_mermaid(markdown: &str) -> bool {
+    markdown.split(['\r', '\n']).any(|line| {
+        (line.contains("```") || line.contains("~~~"))
+            && line.as_bytes().windows(b"mermaid".len()).any(|word| word.eq_ignore_ascii_case(b"mermaid"))
+    })
 }
 
 fn is_mermaid(info: &str) -> bool {
@@ -145,7 +96,7 @@ fn diagram_lines(art: &MermaidArt, style: Option<&dyn MermaidStyle>) -> Vec<Stri
 }
 
 fn replacement(
-    block: &CodeBlock,
+    block: &MarkdownCodeBlock,
     raw: &str,
     context: &MarkdownTransformContext,
     style: Option<&dyn MermaidStyle>,
@@ -166,28 +117,42 @@ fn replacement(
     format!("{}\n", rows.join("  \n"))
 }
 
+/// A panic in a scan drops the cache instead of leaving it poisoned.
+fn lock_cache(cache: &Mutex<CodeBlockCache>) -> MutexGuard<'_, CodeBlockCache> {
+    cache.lock().unwrap_or_else(|poisoned| {
+        cache.clear_poison();
+        let mut guard = poisoned.into_inner();
+        *guard = CodeBlockCache::default();
+        guard
+    })
+}
+
 /// A transformer that draws top-level Mermaid code blocks as Unicode diagrams. Respects the
 /// `markdown.mermaid` mode, skips thinking blocks, and leaves oversized or unsupported diagrams alone.
 pub fn create_mermaid_markdown_transformer(options: MermaidTransformerOptions) -> MarkdownTransformer {
+    // Streamed messages grow by appending, so each update lexes only the new tail.
+    let cache = Mutex::new(CodeBlockCache::default());
     Arc::new(move |markdown: &str, context: &MarkdownTransformContext| {
         let mode = (options.get_mode)();
         if mode == MermaidRenderingMode::Off
             || context.message_type == MarkdownMessageType::AssistantThinking
             || (context.is_streaming && mode != MermaidRenderingMode::Streaming)
+            || !may_contain_mermaid(markdown)
         {
             return Some(markdown.to_string());
         }
         let style = options.theme.as_deref().map(|style| style as &dyn MermaidStyle);
         let mut output = String::with_capacity(markdown.len());
         let mut last = 0;
-        for block in top_level_code_blocks(markdown) {
-            if !is_mermaid(&block.info) {
+        let blocks = lock_cache(&cache).top_level_code_blocks(markdown);
+        for block in blocks {
+            if !is_mermaid(&block.lang) {
                 continue;
             }
-            let raw = &markdown[block.raw.clone()];
-            output.push_str(&markdown[last..block.raw.start]);
+            let raw = &markdown[block.range.clone()];
+            output.push_str(&markdown[last..block.range.start]);
             output.push_str(&replacement(&block, raw, context, style));
-            last = block.raw.end;
+            last = block.range.end;
         }
         output.push_str(&markdown[last..]);
         Some(output)
@@ -198,6 +163,6 @@ pub fn create_mermaid_markdown_transformer(options: MermaidTransformerOptions) -
 pub(super) fn code_blocks_for_test(markdown: &str) -> Vec<(String, String, String)> {
     top_level_code_blocks(markdown)
         .into_iter()
-        .map(|block| (markdown[block.raw].to_string(), block.info, block.text))
+        .map(|block| (markdown[block.range].to_string(), block.lang, block.text))
         .collect()
 }

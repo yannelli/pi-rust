@@ -1,6 +1,6 @@
 //! ACP model, thinking, and permission selectors. Legacy modes represent permissions only.
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ConfigOptionUpdate, CurrentModeUpdate, Error, Meta, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOption, SessionModeState, SessionNotification, SessionUpdate,
 };

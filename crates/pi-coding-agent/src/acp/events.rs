@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ContentBlock, ContentChunk, Diff, MessageId, SessionUpdate, TextContent, ToolCall, ToolCallContent,
     ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };

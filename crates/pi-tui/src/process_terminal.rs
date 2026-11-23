@@ -2,6 +2,8 @@
 
 mod input;
 mod reader;
+mod resize;
+pub(crate) mod tty;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,8 +11,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use input::{Core, OutputFn, TERMINAL_PROGRESS_ACTIVE_SEQUENCE, TERMINAL_PROGRESS_CLEAR_SEQUENCE};
-use reader::{ReaderThread, ResizeWatcher, spawn_reader};
+use reader::{ReaderThread, spawn_reader};
 pub use reader::{Utf8Decoder, decode_utf16_units};
+
+use tty::ResizeWatcher;
 
 use crate::env::{EnvLookup, ProcessEnv};
 use crate::program_status::{ProgramState, ProgramStatus, format_program_status};
@@ -96,7 +100,7 @@ pub(crate) fn report_terminal_error(error: &std::io::Error) {
 }
 
 fn real_size() -> Option<(usize, usize)> {
-    crossterm::terminal::size().ok().filter(|(c, r)| *c > 0 && *r > 0).map(|(c, r)| (c as usize, r as usize))
+    tty::size().filter(|(c, r)| *c > 0 && *r > 0).map(|(c, r)| (c as usize, r as usize))
 }
 
 impl ProcessTerminal {
@@ -160,15 +164,15 @@ impl ProcessTerminal {
     }
 
     fn enable_raw_mode(&mut self) {
-        self.was_raw = crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
-        self.raw_enabled = crossterm::terminal::enable_raw_mode().is_ok();
+        self.was_raw = tty::is_raw_mode_enabled();
+        self.raw_enabled = tty::enable_raw_mode().is_ok();
         #[cfg(windows)]
         enable_windows_console_modes();
     }
 
     fn restore_raw_mode(&mut self) {
         if self.raw_enabled && !self.was_raw {
-            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = tty::disable_raw_mode();
         }
         self.raw_enabled = false;
     }
@@ -237,7 +241,8 @@ impl Terminal for ProcessTerminal {
         }
         self.core().write("\x1b[?2004h");
         if self.real_io {
-            self.resize = ResizeWatcher::spawn(sink.clone());
+            let resize_sink = sink.clone();
+            self.resize = ResizeWatcher::spawn(move || resize_sink.resize());
             refresh_terminal_dimensions();
         }
         let input_sink = sink.clone();
@@ -369,19 +374,24 @@ impl Terminal for ProcessTerminal {
     }
 }
 
-/// Put the terminal back after a crash, when a TUI left it in raw mode: leave the alternate
-/// screen, turn off mouse, paste, and keyboard protocols, show the cursor, and leave raw mode.
-/// Does nothing when raw mode is off, so it is safe to call from a panic hook.
+/// Saves the input mode for [`restore_terminal_after_crash`] on Windows. Call it at startup.
+pub fn save_terminal_mode_for_crash() {
+    tty::save_baseline_mode();
+}
+
+/// After a crash that left the terminal raw, resets screen modes and the input mode, including
+/// Windows raw mode set outside a TUI. Without a TUI, only a terminal stdout gets the escapes.
 pub fn restore_terminal_after_crash() {
-    if !crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
-        return;
-    }
-    let sequence = "\x1b[?2026l\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?2031l\
-                    \x1b[<u\x1b[>4;0m\x1b[?7h\x1b[?1049l\x1b[0m\x1b[?25h\r\n";
-    let mut stdout = std::io::stdout();
-    let _ = std::io::Write::write_all(&mut stdout, sequence.as_bytes());
-    let _ = std::io::Write::flush(&mut stdout);
-    let _ = crossterm::terminal::disable_raw_mode();
+    tty::restore_mode_after_crash(|tui_saved| {
+        if !tui_saved && !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            return;
+        }
+        let sequence = "\x1b[?2026l\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?2031l\
+                        \x1b[<u\x1b[>4;0m\x1b[?7h\x1b[?1049l\x1b[0m\x1b[?25h\r\n";
+        let mut stdout = std::io::stdout();
+        let _ = std::io::Write::write_all(&mut stdout, sequence.as_bytes());
+        let _ = std::io::Write::flush(&mut stdout);
+    });
 }
 
 #[cfg(test)]

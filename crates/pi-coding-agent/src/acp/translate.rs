@@ -1,7 +1,7 @@
 //! Translation between ACP content and pi messages and tool results (upstream
 //! `translate/prompt.ts`, `translate/pi-messages.ts`, `translate/pi-tools.ts`).
 
-use agent_client_protocol_schema::{ContentBlock, EmbeddedResourceResource};
+use super::schema::{ContentBlock, EmbeddedResourceResource};
 use serde_json::Value;
 
 const TITLE_CHARS: usize = 80;
@@ -39,15 +39,11 @@ pub fn prompt_to_pi_message(blocks: &[ContentBlock]) -> (String, Vec<pi_ai::Cont
                     let bytes = base64_byte_length(&blob.blob);
                     message.push_str(&format!("\n[Embedded Context] {} ({mime}, {bytes} bytes)", blob.uri));
                 }
-                #[allow(unreachable_patterns)]
-                _ => {}
             },
             ContentBlock::Audio(audio) => {
                 let bytes = base64_byte_length(&audio.data);
                 message.push_str(&format!("\n[Audio] ({}, {bytes} bytes) not supported by pi-acp", audio.mime_type));
             }
-            #[allow(unreachable_patterns)]
-            _ => {}
         }
     }
     (message, images)
@@ -138,8 +134,8 @@ pub fn tool_result_to_text(result: &Value) -> String {
 }
 
 /// The ACP tool kind for a pi tool name.
-pub fn tool_kind(tool_name: &str) -> agent_client_protocol_schema::ToolKind {
-    use agent_client_protocol_schema::ToolKind;
+pub fn tool_kind(tool_name: &str) -> super::schema::ToolKind {
+    use super::schema::ToolKind;
     match tool_name {
         "read" => ToolKind::Read,
         "write" | "edit" => ToolKind::Edit,

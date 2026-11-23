@@ -316,6 +316,8 @@ These parts come from other projects. Each release archive includes their licens
 | Part | Source | License file |
 | --- | --- | --- |
 | ACP mode | [pi-acp](https://github.com/svkozak/pi-acp) by Sergii Kozak | [`LICENSE-pi-acp`](crates/pi-coding-agent/src/acp/LICENSE-pi-acp) |
+| ACP wire types | [Agent Client Protocol schema](https://github.com/agentclientprotocol/agent-client-protocol) 0.13.7 | [`LICENSE-agent-client-protocol-schema`](crates/pi-coding-agent/src/acp/schema/LICENSE-agent-client-protocol-schema) |
+| Terminal mode and size handling | [crossterm](https://github.com/crossterm-rs/crossterm) 0.29.0 | [`LICENSE-crossterm`](crates/pi-tui/src/process_terminal/LICENSE-crossterm) |
 | Some JavaScript modules of the extension runtime | [Node.js](https://github.com/nodejs/node) | [`LICENSE-node`](crates/pi-js/src/js/LICENSE-node) |
 | JSON syntax diagnostics in the extension runtime | [V8](https://github.com/nodejs/node/tree/v22.12.0/deps/v8) | [`LICENSE-v8`](crates/pi-js/src/js/LICENSE-v8) |
 | MCP OAuth code, ported from upstream pi | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | [`LICENSE-mcp-typescript-sdk`](crates/pi-mcp/src/oauth/LICENSE-mcp-typescript-sdk) |

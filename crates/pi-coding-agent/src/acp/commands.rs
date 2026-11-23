@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol_schema::{AvailableCommand, AvailableCommandInput, UnstructuredCommandInput};
+use super::schema::{AvailableCommand, AvailableCommandInput, UnstructuredCommandInput};
 use serde_json::Value;
 
 use crate::headless_commands::HEADLESS_COMMANDS;

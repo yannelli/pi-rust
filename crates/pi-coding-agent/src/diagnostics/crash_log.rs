@@ -154,9 +154,10 @@ pub fn crash_report_instructions(session_file: Option<&str>) -> String {
 }
 
 /// Record panics as `uncaught_exception` crashes in `path` (upstream `uncaughtCrash`), then run
-/// the earlier hook. Tracked detached children are killed and a terminal a TUI left in raw
-/// mode is restored first; the report instructions follow the panic text.
+/// the earlier hook. Tracked detached children are killed and a terminal left in raw mode is
+/// restored first; the report instructions follow the panic text.
 pub fn install_crash_hook(path: PathBuf, context: CrashContext) {
+    pi_tui::process_terminal::save_terminal_mode_for_crash();
     let earlier = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         crate::signals::kill_tracked_detached_children();

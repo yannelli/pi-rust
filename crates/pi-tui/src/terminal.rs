@@ -133,16 +133,7 @@ pub fn is_apple_terminal_session_with(env: &dyn EnvLookup) -> bool {
 /// Refreshes terminal dimensions on POSIX by sending SIGWINCH to this process. Best effort:
 /// environments that forbid signal delivery are ignored.
 pub fn refresh_terminal_dimensions() {
-    refresh_terminal_dimensions_with(cfg!(windows), || {
-        #[cfg(unix)]
-        {
-            signal_hook::low_level::raise(signal_hook::consts::SIGWINCH)
-        }
-        #[cfg(not(unix))]
-        {
-            Ok(())
-        }
-    });
+    refresh_terminal_dimensions_with(cfg!(windows), crate::process_terminal::tty::signal_resize);
 }
 
 /// [`refresh_terminal_dimensions`] with the platform check and the self-signal injected, so tests

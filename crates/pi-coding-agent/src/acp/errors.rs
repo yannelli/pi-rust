@@ -1,6 +1,6 @@
 //! JSON-RPC errors in the shapes of the TypeScript SDK's `RequestError` helpers.
 
-use agent_client_protocol_schema::Error;
+use super::schema::Error;
 use serde_json::{Value, json};
 
 use super::auth::{auth_methods_json, default_launch};
@@ -78,5 +78,5 @@ pub fn auth_or_internal(error: &anyhow::Error) -> Error {
 
 /// The numeric code of an error.
 pub fn code(error: &Error) -> i32 {
-    error.code.into()
+    error.code
 }

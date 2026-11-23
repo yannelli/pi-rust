@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use agent_client_protocol_schema::{
+use super::schema::{
     AgentCapabilities, AuthenticateResponse, AvailableCommandsUpdate, CancelNotification, CloseSessionRequest,
     CloseSessionResponse, DeleteSessionRequest, DeleteSessionResponse, Implementation, InitializeRequest,
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, McpCapabilities, NewSessionRequest,

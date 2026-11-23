@@ -99,7 +99,13 @@ jobs:
           nohup vm_stat 30 > "$RUNNER_TEMP/vm_stat.log" 2>&1 &
       # nextest gives each test its own process. Without PI_ENV_DAEMON, each pi-env test process runs
       # cargo build, which relinks the daemon while another test starts it.
-      - run: cargo build --workspace --locked --bin pi-env
+      - run: cargo build --workspace --locked --bin pi-env ${{ runner.os == 'Windows' && matrix.shard == 1 && '--bin pi' || '' }}
+      - name: Check raw mode and crash recovery in Windows Console Host and ConPTY
+        if: runner.os == 'Windows' && matrix.shard == 1
+        env:
+          PI_TUI_TEST_PI: ${{ github.workspace }}/target/debug/pi.exe
+        run: >-
+          cargo test --locked -p pi-tui --test integration windows_console -- --include-ignored --test-threads=1 --nocapture
       # nextest runs the tests of every binary in parallel; .config/nextest.toml lists the
       # binaries with their own main, which run with cargo test.
       - run: >-

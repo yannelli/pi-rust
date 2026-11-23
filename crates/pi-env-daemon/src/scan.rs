@@ -1,8 +1,7 @@
 //! Port of Durable's `LineScanner` (`env/line-scan.ts`): locates lines `[start_line, end_line)` of a file fed in order
 //! and measures their decoded UTF-8 size as `new TextDecoder().decode(file)` would produce it.
 
-use crate::decode::{decode_into, range_decoder, starts_with_bom};
-use encoding_rs::Decoder;
+use crate::decode::{StreamDecoder, starts_with_bom};
 use serde_json::{Value, json};
 
 const NEWLINE: u8 = 0x0a;
@@ -19,8 +18,7 @@ pub struct LineScanner {
     last_line_start: Option<u64>,
     selected_bytes: u64,
     first_line_bytes: u64,
-    selection: Option<Decoder>,
-    first_line: Option<Decoder>,
+    selection: Option<StreamDecoder>,
     head: Option<Vec<u8>>,
     bom: bool,
 }
@@ -41,7 +39,6 @@ impl LineScanner {
             selected_bytes: 0,
             first_line_bytes: 0,
             selection: None,
-            first_line: None,
             head: Some(Vec::with_capacity(3)),
             bom: false,
         };
@@ -140,21 +137,20 @@ impl LineScanner {
         if self.is_last_line(self.start_line) {
             self.last_line_start = Some(start);
         }
-        self.selection = Some(range_decoder());
-        self.first_line = Some(range_decoder());
+        self.selection = Some(StreamDecoder::range());
     }
 
     fn end_first_line(&mut self, position: u64) {
         self.first_line_end = Some(position);
-        if let Some(mut decoder) = self.first_line.take() {
-            self.first_line_bytes += decode_into(&mut decoder, &[], true).len() as u64;
+        if let Some(decoder) = &self.selection {
+            self.first_line_bytes = self.selected_bytes + decoder.finish_len() as u64;
         }
     }
 
     fn end_selection(&mut self, position: u64) {
         self.end = Some(position);
-        if let Some(mut decoder) = self.selection.take() {
-            self.selected_bytes += decode_into(&mut decoder, &[], true).len() as u64;
+        if let Some(decoder) = self.selection.take() {
+            self.selected_bytes += decoder.finish_len() as u64;
         }
     }
 
@@ -168,10 +164,7 @@ impl LineScanner {
         }
         let bytes = &chunk[from..to];
         if let Some(decoder) = &mut self.selection {
-            self.selected_bytes += decode_into(decoder, bytes, false).len() as u64;
-        }
-        if let Some(decoder) = &mut self.first_line {
-            self.first_line_bytes += decode_into(decoder, bytes, false).len() as u64;
+            self.selected_bytes += decoder.decoded_len(bytes) as u64;
         }
     }
 }

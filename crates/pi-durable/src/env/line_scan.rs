@@ -35,7 +35,6 @@ pub struct LineScanner {
     selected_bytes: u64,
     first_line_bytes: u64,
     selection: Option<StreamDecoder>,
-    first_line: Option<StreamDecoder>,
     /// The first bytes, held until it is known whether they are a byte-order mark.
     head: Option<Vec<u8>>,
     bom: bool,
@@ -60,7 +59,6 @@ impl LineScanner {
             selected_bytes: 0,
             first_line_bytes: 0,
             selection: None,
-            first_line: None,
             head: Some(Vec::with_capacity(3)),
             bom: false,
         };
@@ -165,24 +163,23 @@ impl LineScanner {
             self.last_line_start = Some(start);
         }
         self.selection = Some(StreamDecoder::range());
-        self.first_line = Some(StreamDecoder::range());
     }
 
     fn end_first_line(&mut self, position: u64) {
         self.first_line_end = Some(position);
-        if let Some(mut decoder) = self.first_line.take() {
-            self.first_line_bytes += decoder.finish().len() as u64;
+        if let Some(decoder) = &self.selection {
+            self.first_line_bytes = self.selected_bytes + decoder.finish_len() as u64;
         }
     }
 
     fn end_selection(&mut self, position: u64) {
         self.end = Some(position);
-        if let Some(mut decoder) = self.selection.take() {
-            self.selected_bytes += decoder.finish().len() as u64;
+        if let Some(decoder) = self.selection.take() {
+            self.selected_bytes += decoder.finish_len() as u64;
         }
     }
 
-    /// Feed `chunk[from, to)`, which starts at file offset `base`, to the decoders of the ranges still open.
+    /// Feed `chunk[from, to)`, which starts at file offset `base`, to the decoder while the selected range is open.
     fn feed(&mut self, chunk: &[u8], base: u64, mut from: usize, to: usize) {
         // Decoding the whole file drops a leading byte-order mark.
         if self.bom && base + (from as u64) < 3 {
@@ -193,10 +190,7 @@ impl LineScanner {
         }
         let bytes = &chunk[from..to];
         if let Some(decoder) = self.selection.as_mut() {
-            self.selected_bytes += decoder.decode(bytes).len() as u64;
-        }
-        if let Some(decoder) = self.first_line.as_mut() {
-            self.first_line_bytes += decoder.decode(bytes).len() as u64;
+            self.selected_bytes += decoder.decoded_len(bytes) as u64;
         }
     }
 }

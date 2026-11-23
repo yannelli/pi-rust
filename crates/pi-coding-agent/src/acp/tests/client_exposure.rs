@@ -3,7 +3,7 @@
 
 use std::sync::atomic::Ordering;
 
-use agent_client_protocol_schema::{McpServer, Meta};
+use crate::acp::schema::{McpServer, Meta};
 use pi_mcp::McpExposure;
 use serde_json::{Value, json};
 

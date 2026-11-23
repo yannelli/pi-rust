@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ContentBlock, ContentChunk, PromptRequest, PromptResponse, ResourceLink, SessionNotification, SessionUpdate,
     StopReason, TextContent,
 };

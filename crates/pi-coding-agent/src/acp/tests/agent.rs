@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use agent_client_protocol_schema::{InitializeRequest, NewSessionRequest, PromptRequest, StopReason};
+use crate::acp::schema::{InitializeRequest, NewSessionRequest, PromptRequest, StopReason};
 use serde_json::{Value, json};
 
 use super::{Env, FakeBackend, FakeClient, FakeConfig, FakeFactory, session_with, settle};

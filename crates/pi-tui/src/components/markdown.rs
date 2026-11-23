@@ -2,6 +2,7 @@
 //! LaTeX math) as styled terminal lines. Parsing follows `marked` 18 like upstream.
 
 mod block;
+mod code_blocks;
 mod inline;
 mod latex_ext;
 mod lexer;
@@ -19,6 +20,8 @@ use crate::line_chunks::LineChunks;
 use crate::terminal_image::is_image_line;
 use crate::utils::{apply_background_to_line, flatten_lines, js_trim, visible_width, wrap_text_with_ansi};
 use token::Token;
+
+pub use code_blocks::{CodeBlockCache, MarkdownCodeBlock, top_level_code_blocks};
 
 /// Syntax highlighting hook: code and optional language to styled lines.
 pub type HighlightCodeFn = Rc<dyn Fn(&str, Option<&str>) -> Vec<String>>;
