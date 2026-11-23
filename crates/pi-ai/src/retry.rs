@@ -219,6 +219,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "servers are currently busy",
     "currently experiencing high demand",
     "model is at capacity",
+    // A request that waited too long in the provider's queue.
+    "admission ceiling",
     "rate.?limit",
     "too many requests",
     // Status codes must not be part of a longer word or number, e.g. a request id or byte count.
@@ -231,6 +233,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "server.?error",
     "internal.?error",
     "provider.?returned.?(?:an.?)?error",
+    // Anthropic's internal error, sent as HTTP 500 before streaming and as an event after it starts.
+    r#""type"\s*:\s*"api_error""#,
     "exceeded request buffer limit while retrying upstream",
     "unable to forward upstream",
     "upstream.?request.?failed",
@@ -270,6 +274,10 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "stream ended before message_stop",
     "stream ended before a terminal response event",
     "http2 request did not get a response",
+    // OpenRouter ends a stream with `finish_reason: "error"` when its provider fails mid-stream.
+    "provider finish_reason: error",
+    "returned an empty response",
+    "stopped before completing the response",
     // Codex CLI mid-stream disconnect, relayed by proxies that wrap the Codex CLI.
     "stream disconnected before completion",
     "cut short after the reply had begun",
@@ -282,6 +290,7 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "you can retry your request",
     "try your request again",
     "please retry your request",
+    "repeat the request later",
     "resourceexhausted",
     "subscription_sharing_usage_unavailable",
     "subscription_sharing_user_unavailable",

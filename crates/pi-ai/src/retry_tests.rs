@@ -218,6 +218,28 @@ fn retries_gateway_provider_failures_without_a_status() {
 }
 
 #[test]
+fn retries_more_temporary_provider_failures() {
+    for text in [
+        "Unable to process request. Repeat the request later.",
+        "waited 73.4s in queue, reaching this model's admission ceiling of 60s; retry after the hinted delay",
+        r#"{"type":"error","error":{"details":null,"type":"api_error","message":"Unable to complete this request right now. Please try again."},"request_id":"req_011CgfE1bTgPTDsor4TsApFv"}"#,
+        "Provider finish_reason: error",
+        "Provider returned an empty response",
+        "Upstream error from Relace: The model stopped before completing the response.",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in [
+        "The operation was aborted",
+        r#"{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}"#,
+        "Provider finish_reason: content_filter",
+        r#"{"type":"error","error":{"type":"api_error","message":"Monthly quota exceeded"}}"#,
+    ] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
 fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
     let text = r#"OpenAI API error (429): {"code":"subscription_sharing_workplace_individual_usage_limit_exceeded","message":"Usage limit reached."}"#;
     assert!(!is_retryable_assistant_error(&error_message(text)));
