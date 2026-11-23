@@ -1,7 +1,6 @@
 //! Startup dialogs shown before the session runtime exists (upstream `cli/startup-ui.ts`
 //! `showFirstTimeSetup`, `cli/session-picker.ts`, the missing session cwd prompt of `main.ts`,
-//! and the key wait of `showDeprecationWarnings`), plus pi-rust's one-time `/share` service
-//! question. Each runs inside a `LocalSet`.
+//! and the key wait of `showDeprecationWarnings`). Each runs inside a `LocalSet`.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -14,9 +13,6 @@ use crate::interactive_components::SessionSelector;
 use crate::interactive_components::first_time_setup::{FirstTimeSetupComponent, apply_first_time_setup_result};
 use crate::interactive_components::session_selector::{
     SessionSelectorOptions, all_sessions_loader, project_sessions_loader,
-};
-use crate::interactive_components::share_service::{
-    SHARE_SERVICE_TITLE, apply_share_service, parse_share_service, share_service_options,
 };
 use crate::session::{SessionManager, session_dir};
 use crate::settings::SettingsManager;
@@ -82,18 +78,6 @@ pub async fn show_first_time_setup_on(terminal: TerminalRef, settings: &Settings
 /// [`show_first_time_setup_on`] on the process terminal.
 pub async fn show_first_time_setup(settings: &SettingsManager) -> bool {
     show_first_time_setup_on(process_terminal(), settings).await
-}
-
-/// The one-time `/share` service question (pi-rust): pi-rust.com or pi.dev. Saves the answer, or
-/// the defaults when dismissed, so it is not asked again.
-pub async fn show_share_service_choice_on(terminal: TerminalRef, settings: &SettingsManager) {
-    let answer = show_startup_selector(terminal, settings, SHARE_SERVICE_TITLE, share_service_options()).await;
-    apply_share_service(settings, parse_share_service(answer.as_deref()));
-}
-
-/// [`show_share_service_choice_on`] on the process terminal.
-pub async fn show_share_service_choice(settings: &SettingsManager) {
-    show_share_service_choice_on(process_terminal(), settings).await
 }
 
 /// Ask whether to continue a session whose stored cwd is gone in the current directory

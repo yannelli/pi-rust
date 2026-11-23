@@ -281,3 +281,48 @@ async fn logout_lists_the_pi_rust_account_and_revokes_its_token() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn first_share_asks_for_the_service_and_escape_cancels_without_saving() {
+    use pi_coding_agent::settings::schema::{SessionShareDestination, SessionShareViewer};
+    local(async {
+        let ui = start(Options::default()).await;
+        ui.submit("/share").await;
+        ui.wait_for("Where should /share send your sessions?").await;
+        let screen = ui.screen();
+        assert!(screen.contains("pi.dev: as upstream pi") && screen.contains("pi-rust.com: your pi-rust.com account"));
+        ui.send("\x1b").await;
+        ui.wait_for("Share cancelled").await;
+        assert!(!ui.session().settings().session_share_service_chosen());
+
+        // Enter picks pi.dev, the first option; the share then goes on with it.
+        ui.submit("/share").await;
+        ui.wait_for("Where should /share send your sessions?").await;
+        ui.send("\r").await;
+        ui.wait_until("choice saved", |ui| ui.session().settings().session_share_service_chosen()).await;
+        let session = ui.session();
+        let settings = session.settings();
+        assert_eq!(settings.session_share_viewer(), SessionShareViewer::PiDev);
+        assert_eq!(settings.session_share_destination(), SessionShareDestination::Auto);
+        ui.wait_until("question closed", |ui| !ui.screen().contains("Where should /share send")).await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn share_does_not_ask_once_a_share_setting_is_set() {
+    local(async {
+        let ui = start(Options { settings: json!({"sessionShareDestination": "gist"}), ..Options::default() }).await;
+        ui.submit("/share").await;
+        // The gist path runs at once: without a session file or `gh`, it ends in an error, not the question.
+        ui.wait_until("share ran", |ui| {
+            let screen = ui.screen();
+            screen.contains("Failed to export session")
+                || screen.contains("GitHub CLI")
+                || screen.contains("Cannot export")
+        })
+        .await;
+        assert!(!ui.screen().contains("Where should /share send"));
+    })
+    .await;
+}

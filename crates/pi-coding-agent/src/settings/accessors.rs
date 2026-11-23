@@ -303,10 +303,11 @@ impl SettingsManager {
         SessionShareVisibility
     );
 
-    /// Whether the global settings name a `sessionShareViewer`, i.e. the user answered the
-    /// one-time share service question or chose a viewer.
-    pub fn session_share_viewer_chosen(&self) -> bool {
-        self.state().global_typed.session_share_viewer.is_some()
+    /// Whether the settings name a `sessionShareViewer` or `sessionShareDestination`, i.e. the user
+    /// answered the share service question of the first `/share` or chose them some other way.
+    pub fn session_share_service_chosen(&self) -> bool {
+        let merged = &self.state().merged;
+        merged.session_share_viewer.is_some() || merged.session_share_destination.is_some()
     }
 
     pub fn compaction_enabled(&self) -> bool {

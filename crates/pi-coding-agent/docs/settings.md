@@ -49,12 +49,12 @@ Attribution headers, such as OpenRouter's `HTTP-Referer` and `X-OpenRouter-Title
 
 ## Session sharing
 
-`/share` uploads the current session. By default it works as in upstream pi: Radius when you are signed in to it, else a secret GitHub gist viewed on pi.dev. The first time pi runs in interactive mode, it asks where `/share` should send sessions:
+`/share` uploads the current session. By default it works as in upstream pi: Radius when you are signed in to it, else a secret GitHub gist viewed on pi.dev. The first time you run `/share` in interactive mode, pi asks where it should send sessions:
 
 - **pi.dev** (the default) sets `sessionShareDestination` to `"auto"` and `sessionShareViewer` to `"pi.dev"`.
 - **pi-rust.com** sets `sessionShareDestination` to `"pi-rust"` and `sessionShareViewer` to `"pi-rust"`.
 
-Esc keeps the pi.dev default. pi asks once: it asks while the global settings have no `sessionShareViewer`, so people who installed an earlier version are asked once too. It does not ask when `PI_CODING_AGENT_DIR` is set, or in print, JSON, and RPC modes.
+pi asks until either setting is set, then never again. Esc cancels that share and saves nothing, so the next `/share` asks again. pi never asks at startup, and print, JSON, and RPC modes use the pi.dev default.
 
 `sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
 
