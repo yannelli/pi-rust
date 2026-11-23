@@ -132,6 +132,7 @@ fn classifies_retryable_assistant_errors() {
         "stream disconnected before completion: stream closed before response.completed",
         "503",
         "(HTTP 502) Bad Gateway",
+        "525 <!DOCTYPE html><title>SSL handshake failed</title>",
         "Claude Code's stream from Anthropic was cut short after the reply had begun",
         r#"{"type":"error","error":{"type":"api_error","message":"Connection closed."}}"#,
     ] {

@@ -223,7 +223,8 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "too many requests",
     // Status codes must not be part of a longer word or number, e.g. a request id or byte count.
     // The regex crate has no lookaround, so the boundaries are matched as characters.
-    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524)(?:[^a-z0-9]|$)",
+    // 520, 524 and 525 are Cloudflare's errors between it and the provider's origin.
+    "(?:^|[^a-z0-9])(?:429|500|502|503|504|520|524|525)(?:[^a-z0-9]|$)",
     "service.?(?:is.?)?(?:temporarily.?)?unavailable",
     "server.?error",
     "internal.?error",
