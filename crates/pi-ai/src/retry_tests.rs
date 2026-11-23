@@ -173,6 +173,23 @@ fn retries_reqwest_transport_failures() {
 }
 
 #[test]
+fn retries_bare_node_socket_error_codes() {
+    for text in [
+        "read ECONNRESET",
+        "connect ETIMEDOUT 140.82.113.3:443",
+        "write EPIPE",
+        "connect ECONNREFUSED 127.0.0.1:443",
+        "ECONNABORTED",
+        "Connection reset by peer",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    for text in ["Invalid value EXECONNRESET", "Unknown field ETIMEDOUTX", "Invalid key ERR_EPIPE_ID"] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
 fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
     let text = r#"OpenAI API error (429): {"code":"subscription_sharing_workplace_individual_usage_limit_exceeded","message":"Usage limit reached."}"#;
     assert!(!is_retryable_assistant_error(&error_message(text)));

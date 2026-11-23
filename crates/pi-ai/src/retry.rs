@@ -247,6 +247,9 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "error decoding response body",
     r"request to \S+ failed, reason:",
     "getaddrinfo",
+    // Bare Node socket error codes, e.g. "read ECONNRESET", not part of a longer identifier.
+    "(?:^|[^a-z0-9_])(?:econnreset|econnaborted|econnrefused|etimedout|epipe)(?:[^a-z0-9_]|$)",
+    "connection reset by peer",
     "enotfound",
     "eai_again",
     "upstream.?connect",
