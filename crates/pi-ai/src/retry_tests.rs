@@ -149,6 +149,28 @@ fn classifies_retryable_assistant_errors() {
 }
 
 #[test]
+fn retries_reqwest_transport_failures() {
+    for text in [
+        "error decoding response body",
+        "Request failed: error decoding response body",
+        "Request failed: error sending request for url (http://127.0.0.1:8080/v1/chat/completions): client error (SendRequest): connection closed before message completed",
+        "Request failed: error sending request for url (https://api.example.com/v1/messages): client error (Connect): dns error: failed to lookup address information: nodename nor servname provided, or not known",
+    ] {
+        assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+    let aborted =
+        AssistantMessage { stop_reason: StopReason::Aborted, ..error_message("error decoding response body") };
+    assert!(!is_retryable_assistant_error(&aborted));
+    for text in [
+        "Request failed: builder error: relative URL without a base",
+        "Provider HTTP 400: Invalid value for 'messages'",
+        "Provider HTTP 429: You exceeded your current quota (insufficient_quota)",
+    ] {
+        assert!(!is_retryable_assistant_error(&error_message(text)), "{text}");
+    }
+}
+
+#[test]
 fn keeps_the_chatgpt_business_workspace_usage_limit_non_retryable() {
     let text = r#"OpenAI API error (429): {"code":"subscription_sharing_workplace_individual_usage_limit_exceeded","message":"Usage limit reached."}"#;
     assert!(!is_retryable_assistant_error(&error_message(text)));

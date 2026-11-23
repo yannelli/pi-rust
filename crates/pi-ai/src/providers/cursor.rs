@@ -23,6 +23,7 @@ use self::session::Session;
 use crate::auth::oauth::random_uuid;
 use crate::providers::common::header_map;
 use crate::registry::{ApiProvider, ProviderResponse, StreamOptions};
+use crate::request::error_chain;
 use crate::simple_options::supports_fast;
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, error_stream, event_channel};
 use crate::types::{Context, Model, StopReason};
@@ -176,7 +177,7 @@ async fn run(
         tokio::select! {
             chunk = body.next() => {
                 let Some(chunk) = chunk else { break };
-                frames.push(&chunk.map_err(|error| format!("Cursor stream failed: {error}"))?);
+                frames.push(&chunk.map_err(|error| format!("Cursor stream failed: {}", error_chain(&error)))?);
                 while let Some((flags, payload)) = frames.next_envelope() {
                     if flags & FLAG_END_STREAM != 0 {
                         end_stream(&payload)?;

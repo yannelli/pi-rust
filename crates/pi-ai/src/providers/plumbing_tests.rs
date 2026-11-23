@@ -5,10 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpListener;
 
+use super::mock_http::{MockHttp, Reply};
 use super::mock_server::{MockResponse, MockServer, collect, frame, test_model};
 use super::openai_completions::OpenAICompletions;
 use crate::registry::{ApiProvider, ProviderResponse, StreamOptions};
+use crate::retry::is_retryable_assistant_error;
 use crate::types::{Context, Message, StopReason};
 
 const API: &str = "openai-completions";
@@ -69,6 +73,31 @@ async fn timeout_covers_the_wait_for_response_headers() {
     let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options)).await;
     assert_eq!(message.stop_reason, StopReason::Error);
     assert_eq!(message.error_message.as_deref(), Some("Request timed out after 50ms"));
+}
+
+#[tokio::test]
+async fn dropped_connections_fail_with_retryable_errors() {
+    // The body stops after the first frame, short of its content length.
+    let cut = Reply::sse(vec![chunks()[0].clone()]).header("content-length", "100000");
+    let server = MockHttp::start(vec![cut]).await;
+    let model = test_model(API, "openai", &server.base_url);
+    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
+    let error = message.error_message.clone().unwrap_or_default();
+    assert!(error.starts_with("error decoding response body: "), "{error}");
+    assert!(error.ends_with("end of file before message length reached"), "{error}");
+    assert!(is_retryable_assistant_error(&message));
+
+    // The server reads the request and closes the connection without a response.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = test_model(API, "openai", &format!("http://{}", listener.local_addr().unwrap()));
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let _ = socket.read(&mut [0; 65536]).await;
+    });
+    let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
+    let error = message.error_message.clone().unwrap_or_default();
+    assert!(error.starts_with("Request failed: error sending request for url"), "{error}");
+    assert!(is_retryable_assistant_error(&message));
 }
 
 #[tokio::test]
