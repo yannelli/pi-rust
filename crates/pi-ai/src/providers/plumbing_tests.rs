@@ -82,7 +82,9 @@ async fn dropped_connections_fail_with_retryable_errors() {
     let server = MockHttp::start(vec![cut]).await;
     let model = test_model(API, "openai", &server.base_url);
     let (_, message) = collect(OpenAICompletions.stream(&model, &context(), options())).await;
-    assert_eq!(message.error_message.as_deref(), Some("error decoding response body"));
+    let error = message.error_message.clone().unwrap_or_default();
+    assert!(error.starts_with("error decoding response body: "), "{error}");
+    assert!(error.ends_with("end of file before message length reached"), "{error}");
     assert!(is_retryable_assistant_error(&message));
 
     // The server reads the request and closes the connection without a response.

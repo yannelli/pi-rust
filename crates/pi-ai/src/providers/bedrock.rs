@@ -27,7 +27,7 @@ use crate::providers::aws::sigv4::{Credentials, SignableRequest, sign, uri_encod
 use crate::providers::constrained_sampling::is_strict_tool_limit_error_message;
 use crate::providers::provider_env::{process_env_value, provider_env_value};
 use crate::registry::{ApiProvider, StreamOptions};
-use crate::request::provider_response;
+use crate::request::{error_chain, provider_response};
 use crate::stream::{AssistantMessageEventStream, MessageBuilder, diagnostic, event_channel};
 use crate::types::{Context, Model, StopReason};
 
@@ -262,7 +262,8 @@ impl Run {
         let mut decoder = Decoder::default();
         let mut chunks = response.bytes_stream();
         while let Some(chunk) = chunks.next().await {
-            let chunk = chunk.map_err(|error| Failure::new(format!("Bedrock stream failed: {error}")))?;
+            let chunk =
+                chunk.map_err(|error| Failure::new(format!("Bedrock stream failed: {}", error_chain(&error))))?;
             decoder.push(&chunk);
             while let Some(frame) = decoder.next_message().map_err(Failure::new)? {
                 let Some(item) = BedrockEvents::item(&frame) else { continue };

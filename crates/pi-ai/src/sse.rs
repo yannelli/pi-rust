@@ -17,7 +17,7 @@ pub fn sse_events<S, B, E>(body: S) -> impl Stream<Item = Result<SseEvent, Strin
 where
     S: Stream<Item = Result<B, E>> + Unpin,
     B: AsRef<[u8]>,
-    E: std::fmt::Display,
+    E: std::error::Error,
 {
     futures::stream::unfold(
         (body, Vec::<u8>::new(), SseEvent::default(), Vec::<String>::new(), false),
@@ -72,7 +72,8 @@ where
                         done = true;
                         buffer.clear();
                         data.clear();
-                        return Some((Err(error.to_string()), (body, buffer, current, data, done)));
+                        let error = Err(crate::request::error_chain(&error));
+                        return Some((error, (body, buffer, current, data, done)));
                     }
                     None => done = true,
                 }
@@ -105,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn frames_events_across_chunk_boundaries() {
         let bytes = "event: a\ndata: {\"x\":\"é\"}\r\n\r\n: comment\ndata: one\ndata: two\n\ndata: tail".as_bytes();
-        let chunks: Vec<Result<Vec<u8>, String>> = bytes.chunks(3).map(|chunk| Ok(chunk.to_vec())).collect();
+        let chunks: Vec<Result<Vec<u8>, std::io::Error>> = bytes.chunks(3).map(|chunk| Ok(chunk.to_vec())).collect();
         let events: Vec<_> = sse_events(futures::stream::iter(chunks)).collect().await;
         let events: Vec<SseEvent> = events.into_iter().map(Result::unwrap).collect();
         assert_eq!(events[0], SseEvent { event: Some("a".into()), data: "{\"x\":\"é\"}".into() });
