@@ -99,4 +99,6 @@ mod utils_visible_width;
 mod utils_word_navigation;
 mod utils_wrap;
 mod wheel_scroll_accelerator;
+#[cfg(windows)]
+mod windows_console;
 mod word_navigation_cjk;

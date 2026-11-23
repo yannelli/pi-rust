@@ -1,10 +1,11 @@
-//! Raw mode, window size, and SIGWINCH for the controlling terminal. Raw mode is held per
-//! process: the first enable saves the terminal mode, and disable writes that exact mode back.
+//! Raw mode, window size, and SIGWINCH for the controlling terminal, adapted from crossterm (MIT;
+//! see `LICENSE-crossterm`). The first enable saves the mode, and disable writes it back exactly.
 
 use std::io;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-pub use imp::{disable_raw_mode, enable_raw_mode, signal_resize, size};
+pub use super::resize::ResizeWatcher;
+pub use imp::{disable_raw_mode, enable_raw_mode, restore_mode_after_crash, save_baseline_mode, signal_resize, size};
 
 static PRIOR_MODE: Mutex<Option<imp::Mode>> = Mutex::new(None);
 
@@ -49,6 +50,26 @@ const NOT_RAW_INPUT_MASK: u32 = 0x0001 | 0x0002 | 0x0004;
 #[cfg(any(windows, test))]
 fn raw_input_mode(mode: u32) -> u32 {
     mode & !NOT_RAW_INPUT_MASK
+}
+
+/// Whether `mode` has none of processed, line, and echo input, as crossterm decides raw mode.
+#[cfg(any(windows, test))]
+fn is_raw_input_mode(mode: u32) -> bool {
+    mode & NOT_RAW_INPUT_MASK == 0
+}
+
+/// The input mode a crash restore writes, or `None`. A non-raw TUI snapshot wins; a raw live mode
+/// goes back to `baseline`, or without one gets processed, line, and echo input back if unsaved.
+#[cfg(any(windows, test))]
+fn crash_restore_mode(saved: Option<u32>, baseline: Option<u32>, current: impl FnOnce() -> Option<u32>) -> Option<u32> {
+    if let Some(saved) = saved {
+        return Some(baseline.filter(|_| is_raw_input_mode(saved)).unwrap_or(saved));
+    }
+    let live = current().filter(|mode| is_raw_input_mode(*mode))?;
+    match baseline {
+        Some(baseline) => Some(baseline).filter(|baseline| *baseline != live),
+        None => Some(live | NOT_RAW_INPUT_MASK),
+    }
 }
 
 #[cfg(unix)]
@@ -108,6 +129,19 @@ mod imp {
         disable_saved(prior, |original| Ok(termios::tcsetattr(fd, OptionalActions::Now, original)?))
     }
 
+    /// Unix crash restores use only the mode [`enable_raw_mode`] saved.
+    pub fn save_baseline_mode() {}
+
+    /// Runs `before_write(true)`, then writes back the mode [`enable_raw_mode`] saved, if any.
+    pub fn restore_mode_after_crash(before_write: impl FnOnce(bool)) {
+        let mut prior = prior_mode();
+        if prior.is_none() {
+            return;
+        }
+        before_write(true);
+        let _ = with_tty(|fd| disable_raw_mode_on(fd, &mut prior));
+    }
+
     /// `(columns, rows)` of `/dev/tty`, or of stdout when `/dev/tty` cannot be opened. When that
     /// query fails, `tput cols` and `tput lines` give the size.
     pub fn size() -> Option<(u16, u16)> {
@@ -146,8 +180,12 @@ mod imp {
 
     use crossterm_winapi::{ConsoleMode, Handle, ScreenBuffer};
 
-    use super::{disable_saved, enable_saved, prior_mode, raw_input_mode};
+    use std::sync::OnceLock;
+
+    use super::{crash_restore_mode, disable_saved, enable_saved, prior_mode, raw_input_mode};
     pub(super) type Mode = u32;
+
+    static BASELINE_MODE: OnceLock<u32> = OnceLock::new();
 
     fn input_mode() -> io::Result<ConsoleMode> {
         Ok(ConsoleMode::from(Handle::current_in_handle()?))
@@ -175,6 +213,28 @@ mod imp {
         disable_saved(&mut prior, |original| console.set_mode(*original))
     }
 
+    /// Saves the console input mode for [`restore_mode_after_crash`]. The first call wins.
+    pub fn save_baseline_mode() {
+        if BASELINE_MODE.get().is_none()
+            && let Ok(mode) = input_mode().and_then(|console| console.mode())
+        {
+            let _ = BASELINE_MODE.set(mode);
+        }
+    }
+
+    /// Writes the mode from [`crash_restore_mode`] after `before_write(tui_saved)`; nothing if `None`.
+    pub fn restore_mode_after_crash(before_write: impl FnOnce(bool)) {
+        let mut prior = prior_mode();
+        let Ok(console) = input_mode() else { return };
+        let Some(mode) = crash_restore_mode(*prior, BASELINE_MODE.get().copied(), || console.mode().ok()) else {
+            return;
+        };
+        before_write(prior.is_some());
+        if console.set_mode(mode).is_ok() {
+            *prior = None;
+        }
+    }
+
     /// `(columns, rows)` of the visible console window.
     pub fn size() -> Option<(u16, u16)> {
         let window = ScreenBuffer::current().ok()?.info().ok()?.terminal_size();
@@ -185,73 +245,6 @@ mod imp {
     pub fn signal_resize() -> io::Result<()> {
         Ok(())
     }
-}
-
-/// Watches SIGWINCH on its own thread and runs `on_resize` for each delivery. The thread runs a
-/// private Tokio runtime, so it works with or without a runtime on the caller's thread.
-#[cfg(unix)]
-pub struct ResizeWatcher {
-    stop: tokio::sync::oneshot::Sender<()>,
-    thread: std::thread::JoinHandle<()>,
-}
-
-#[cfg(unix)]
-impl ResizeWatcher {
-    /// Returns once the SIGWINCH handler is installed, so a signal sent right after is seen.
-    pub fn spawn(mut on_resize: impl FnMut() + Send + 'static) -> Option<Self> {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-        let thread = std::thread::Builder::new()
-            .name("pi-tui-resize".into())
-            .spawn(move || {
-                let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_io().build() else {
-                    return;
-                };
-                runtime.block_on(async move {
-                    let Ok(mut resized) = signal(SignalKind::window_change()) else {
-                        return;
-                    };
-                    let _ = ready_tx.send(());
-                    loop {
-                        tokio::select! {
-                            biased;
-                            _ = &mut stopped => break,
-                            received = resized.recv() => match received {
-                                Some(()) => on_resize(),
-                                None => break,
-                            },
-                        }
-                    }
-                });
-            })
-            .ok()?;
-        if ready_rx.recv().is_err() {
-            let _ = thread.join();
-            return None;
-        }
-        Some(Self { stop, thread })
-    }
-
-    /// Stops the thread and waits for it. Dropping the watcher also stops it, without waiting.
-    pub fn stop(self) {
-        drop(self.stop);
-        let _ = self.thread.join();
-    }
-}
-
-/// Windows reports resizes through console input records, so no watcher thread is needed.
-#[cfg(windows)]
-pub struct ResizeWatcher;
-
-#[cfg(windows)]
-impl ResizeWatcher {
-    pub fn spawn(_on_resize: impl FnMut() + Send + 'static) -> Option<Self> {
-        Some(Self)
-    }
-
-    pub fn stop(self) {}
 }
 
 #[cfg(test)]

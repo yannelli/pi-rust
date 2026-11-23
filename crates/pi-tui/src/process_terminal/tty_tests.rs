@@ -1,13 +1,18 @@
 use std::cell::{Cell, RefCell};
 use std::io;
 
-use super::{NOT_RAW_INPUT_MASK, disable_saved, enable_saved, parse_tput_value, raw_input_mode};
+use super::{NOT_RAW_INPUT_MASK, crash_restore_mode, disable_saved, enable_saved, parse_tput_value, raw_input_mode};
 
 const PROCESSED: u32 = 0x0001;
 const LINE: u32 = 0x0002;
 const ECHO: u32 = 0x0004;
 const WINDOW_INPUT: u32 = 0x0008;
 const VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
+const EXTENDED_FLAGS: u32 = 0x0080;
+/// A fresh conhost input mode: insert, quick edit, and extended flags on top of cooked input.
+const COOKED: u32 = PROCESSED | LINE | ECHO | 0x0020 | 0x0040 | EXTENDED_FLAGS;
+/// The mode pi-js writes for `setRawMode(true)`, as libuv does.
+const EXTENSION_RAW: u32 = WINDOW_INPUT;
 
 /// A console input mode that records every write.
 struct FakeConsole {
@@ -82,6 +87,54 @@ fn failed_writes_leave_the_saved_state_unchanged() {
     prior = Some(LINE);
     assert!(console.disable(&mut prior).is_err());
     assert_eq!(prior, Some(LINE), "a failed restore keeps the mode for a retry");
+}
+
+fn crash_mode(saved: Option<u32>, baseline: Option<u32>, current: u32) -> Option<u32> {
+    crash_restore_mode(saved, baseline, || Some(current))
+}
+
+#[test]
+fn crash_restore_undoes_extension_raw_mode_outside_the_tui() {
+    assert_eq!(crash_mode(None, Some(COOKED), EXTENSION_RAW), Some(COOKED));
+}
+
+#[test]
+fn crash_restore_leaves_a_console_that_is_not_raw() {
+    assert_eq!(crash_mode(None, Some(COOKED), COOKED), None);
+    let quick_edit_off = COOKED & !0x0040;
+    assert_eq!(crash_mode(None, Some(COOKED), quick_edit_off), None, "unrelated host changes stay");
+    assert_eq!(crash_mode(None, Some(COOKED), PROCESSED), None, "a partly cooked console stays");
+    assert_eq!(crash_mode(None, None, COOKED), None);
+}
+
+#[test]
+fn crash_restore_keeps_a_host_that_started_raw() {
+    let host_raw = raw_input_mode(COOKED);
+    assert_eq!(crash_mode(None, Some(host_raw), host_raw), None);
+    assert_eq!(crash_mode(None, Some(host_raw), EXTENSION_RAW), Some(host_raw), "host bits come back");
+    assert_eq!(crash_mode(Some(host_raw), None, 0), Some(host_raw), "no cooked bits without a baseline");
+    assert_eq!(crash_mode(Some(host_raw), Some(host_raw), 0), Some(host_raw));
+}
+
+#[test]
+fn crash_restore_reaches_the_owner_mode_in_either_tui_and_extension_order() {
+    let tui_first = crash_mode(Some(COOKED & !0x0040), Some(COOKED), EXTENSION_RAW);
+    assert_eq!(tui_first, Some(COOKED & !0x0040), "a cooked TUI snapshot is newer than the baseline");
+    let extension_first = crash_mode(Some(EXTENSION_RAW), Some(COOKED), raw_input_mode(EXTENSION_RAW));
+    assert_eq!(extension_first, Some(COOKED), "the TUI snapshot is the extension's raw mode");
+}
+
+#[test]
+fn crash_restore_without_a_baseline_sets_the_cooked_bits_on_a_raw_console() {
+    assert_eq!(crash_mode(None, None, EXTENSION_RAW), Some(EXTENSION_RAW | NOT_RAW_INPUT_MASK));
+    assert_eq!(crash_mode(Some(COOKED), None, 0), Some(COOKED), "the TUI snapshot is written back");
+}
+
+#[test]
+fn crash_restore_skips_the_read_with_a_saved_mode_and_stops_when_the_read_fails() {
+    let saved = crash_restore_mode(Some(COOKED), Some(COOKED), || panic!("the live mode is the saved mode"));
+    assert_eq!(saved, Some(COOKED));
+    assert_eq!(crash_restore_mode(None, Some(COOKED), || None), None);
 }
 
 #[test]

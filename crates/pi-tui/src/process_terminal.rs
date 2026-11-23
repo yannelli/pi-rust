@@ -2,6 +2,7 @@
 
 mod input;
 mod reader;
+mod resize;
 pub(crate) mod tty;
 
 use std::io::Write;
@@ -373,19 +374,24 @@ impl Terminal for ProcessTerminal {
     }
 }
 
-/// Put the terminal back after a crash, when a TUI left it in raw mode: leave the alternate
-/// screen, turn off mouse, paste, and keyboard protocols, show the cursor, and leave raw mode.
-/// Does nothing when raw mode is off, so it is safe to call from a panic hook.
+/// Saves the input mode for [`restore_terminal_after_crash`] on Windows. Call it at startup.
+pub fn save_terminal_mode_for_crash() {
+    tty::save_baseline_mode();
+}
+
+/// After a crash that left the terminal raw, resets screen modes and the input mode, including
+/// Windows raw mode set outside a TUI. Without a TUI, only a terminal stdout gets the escapes.
 pub fn restore_terminal_after_crash() {
-    if !tty::is_raw_mode_enabled() {
-        return;
-    }
-    let sequence = "\x1b[?2026l\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?2031l\
-                    \x1b[<u\x1b[>4;0m\x1b[?7h\x1b[?1049l\x1b[0m\x1b[?25h\r\n";
-    let mut stdout = std::io::stdout();
-    let _ = std::io::Write::write_all(&mut stdout, sequence.as_bytes());
-    let _ = std::io::Write::flush(&mut stdout);
-    let _ = tty::disable_raw_mode();
+    tty::restore_mode_after_crash(|tui_saved| {
+        if !tui_saved && !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+            return;
+        }
+        let sequence = "\x1b[?2026l\x1b[?1006l\x1b[?1004l\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?2004l\x1b[?2031l\
+                        \x1b[<u\x1b[>4;0m\x1b[?7h\x1b[?1049l\x1b[0m\x1b[?25h\r\n";
+        let mut stdout = std::io::stdout();
+        let _ = std::io::Write::write_all(&mut stdout, sequence.as_bytes());
+        let _ = std::io::Write::flush(&mut stdout);
+    });
 }
 
 #[cfg(test)]
