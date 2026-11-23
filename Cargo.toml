@@ -23,7 +23,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.12.31"
+version = "0.12.32"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/yannelli/pi-rust"

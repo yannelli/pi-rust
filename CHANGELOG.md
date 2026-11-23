@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.32] - 2026-11-23
+
+### Fixed
+
+- **mcp:** accept server names with spaces and other characters ([1484e9e](https://github.com/yannelli/pi-rust/commit/1484e9e58d26e07e3171b0ac71d0f68accb4222f))
+
 ## [0.12.31] - 2026-11-23
 
 ### Changed
