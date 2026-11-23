@@ -29,6 +29,7 @@
 | Change the Cursor or Google Antigravity provider | [docs/providers/subscription-providers.md](docs/providers/subscription-providers.md) |
 | Change a `fancy-regex` markdown rule in pi-tui | [crates/pi-tui/docs/fancy-regex.md](crates/pi-tui/docs/fancy-regex.md) |
 | Change Markdown code block detection or Mermaid streaming | [crates/pi-tui/docs/marked-code-blocks.md](crates/pi-tui/docs/marked-code-blocks.md) |
+| Change UTF-8 validation in `pi-durable/src/env/utf8.rs` | [docs/agents/ci-triage.md](docs/agents/ci-triage.md#utf-8-kernel-assembly-check) |
 | Change RSA in `node:crypto` | [crates/pi-js/docs/rsa.md](crates/pi-js/docs/rsa.md) |
 
 All documents are listed in [docs/INDEX.md](docs/INDEX.md).
