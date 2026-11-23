@@ -26,7 +26,6 @@ use pi_coding_agent::files::process_cli_file_args;
 use pi_coding_agent::interactive::startup_ui::startup_project_trust;
 use pi_coding_agent::interactive::{InteractiveOptions, run_interactive};
 use pi_coding_agent::interactive_components::first_time_setup::should_run_first_time_setup;
-use pi_coding_agent::interactive_components::share_service::should_ask_share_service;
 use pi_coding_agent::mcp_cli::run_mcp_cli;
 use pi_coding_agent::output_schema::OutputSchema;
 use pi_coding_agent::packages::{PackageCommandOptions, run_config_command, run_package_command};
@@ -463,10 +462,6 @@ async fn start(raw: Vec<String>) -> anyhow::Result<i32> {
     {
         tokio::task::LocalSet::new().run_until(dialogs::show_first_time_setup(&startup_settings)).await;
         time("firstTimeSetup");
-    }
-    if mode == AppMode::Interactive && should_ask_share_service(&startup_settings, |name| std::env::var(name).ok()) {
-        tokio::task::LocalSet::new().run_until(dialogs::show_share_service_choice(&startup_settings)).await;
-        time("shareServiceChoice");
     }
     if let (AppMode::Interactive, Some(theme)) = (mode, &args.use_theme) {
         startup_settings.apply_overrides(serde_json::json!({ "theme": theme }));

@@ -23,6 +23,9 @@ use crate::export::share::{
     uses_pi_rust_account,
 };
 use crate::interactive_components::login::{LoginDialog, dialog_interaction};
+use crate::interactive_components::share_service::{
+    SHARE_SERVICE_TITLE, apply_share_service, parse_share_service, share_service_options, should_ask_share_service,
+};
 use crate::settings::schema::SessionShareViewer;
 
 /// Removes the temp directory of the share files when dropped.
@@ -39,6 +42,19 @@ impl InteractiveMode {
     /// in (unless `sessionShareViewer` is pi.dev), else Radius when signed in, else a secret GitHub
     /// gist of the HTML export.
     pub(super) fn handle_share_command(&self) {
+        // The first /share asks which service to use; Esc cancels and asks again next time.
+        if should_ask_share_service(&self.settings()) {
+            return self.spawn(move |mode| async move {
+                let answer = mode.ask_choice(SHARE_SERVICE_TITLE, share_service_options()).await.ok().flatten();
+                match parse_share_service(answer.as_deref()) {
+                    Some(service) => {
+                        apply_share_service(&mode.settings(), service);
+                        mode.handle_share_command();
+                    }
+                    None => mode.show_status("Share cancelled"),
+                }
+            });
+        }
         let session = self.session();
         let dir = ShareDir(std::env::temp_dir().join(format!("pi-share-{}", crate::session::ids::uuid_v4())));
         let jsonl = dir.0.join("session.jsonl");

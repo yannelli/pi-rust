@@ -50,41 +50,6 @@ async fn first_time_setup_saves_theme_and_analytics() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn share_service_question_saves_the_choice_once() {
-    use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
-    let _theme = global_state();
-    local(async {
-        let dir = tempfile::tempdir().unwrap();
-        let manager = settings(dir.path());
-        let terminal = VirtualTerminal::shared(100, 30);
-        feed(&terminal, &["\x1b[B", "\r"]);
-        show_share_service_choice_on(terminal.clone(), &manager).await;
-        let writes = terminal.borrow().writes();
-        assert!(writes.contains("Where should /share send your sessions?"), "{writes}");
-        assert!(
-            writes.contains("pi.dev: as upstream pi") && writes.contains("pi-rust.com: your pi-rust.com account"),
-            "{writes}"
-        );
-        assert_eq!(manager.session_share_viewer(), SessionShareViewer::PiRust);
-        assert_eq!(manager.session_share_destination(), SessionShareDestination::PiRust);
-        let saved = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
-        assert!(saved.contains("\"sessionShareViewer\": \"pi-rust\""), "{saved}");
-
-        let reopened = settings(dir.path());
-        assert!(reopened.session_share_viewer_chosen());
-
-        let dismissed = settings(&dir.path().join("other"));
-        let terminal = VirtualTerminal::shared(100, 30);
-        feed(&terminal, &["\x1b"]);
-        show_share_service_choice_on(terminal, &dismissed).await;
-        assert!(dismissed.session_share_viewer_chosen());
-        assert_eq!(dismissed.session_share_viewer(), SessionShareViewer::PiDev);
-        assert_eq!(dismissed.session_share_destination(), SessionShareDestination::Auto);
-    })
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn missing_cwd_prompt_offers_continue_and_cancel() {
     let _theme = global_state();
     local(async {
