@@ -2,6 +2,19 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.30] - 2026-11-22
+
+### Changed
+
+- **js:** keep built-in modules out of the Node backend's disk cache ([0dfa6ae](https://github.com/yannelli/pi-rust/commit/0dfa6ae8c42c07df29b0e3db5958bfe707feb948))
+
+### Fixed
+
+- **coding-agent:** ask for the share service at the first /share, not at startup ([58fe6fb](https://github.com/yannelli/pi-rust/commit/58fe6fbd5a21be5ff18c2330e55c7af7361f4205))
+- **tui:** resolve `..` in @ paths against a Windows working directory ([2ded4ac](https://github.com/yannelli/pi-rust/commit/2ded4ac4f9f5961ff1a5a58f0aeb31f363c6529d))
+- **packages:** keep package manager output off the protocol streams ([98ef52d](https://github.com/yannelli/pi-rust/commit/98ef52d34b89134582a0ed51761cc2da109197ad))
+- **js:** let fchmod change the mode through a read-only descriptor on Windows ([86cd2b8](https://github.com/yannelli/pi-rust/commit/86cd2b8b60bf43edbf9268e5738ffbf943c236c0))
+
 ## [0.12.29] - 2026-11-22
 
 Maintenance release.
