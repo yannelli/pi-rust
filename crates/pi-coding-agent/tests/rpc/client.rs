@@ -51,6 +51,59 @@ async fn explicit_local_and_cached_npm_packages_load_and_reload_offline() {
     client.stop().await;
 }
 
+/// An `npmCommand` that writes to stdout and fails when its stdin is a pipe.
+const NOISY_NPM: &str = r#"
+const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+if (args[0] === "view") return console.log('"1.0.0"');
+if (fs.fstatSync(0).isFIFO()) process.exit(3);
+const pkg = path.join(args[args.indexOf("--prefix") + 1], "node_modules", "@test", "noisy");
+fs.mkdirSync(path.join(pkg, "dist"), { recursive: true });
+fs.writeFileSync(path.join(pkg, "package.json"), '{"version":"1.0.0","pi":{"extensions":["./dist/entry.ts"]}}');
+fs.writeFileSync(path.join(pkg, "dist", "entry.ts"), 'export default pi => pi.registerCommand("noisy-check", { handler() {} });');
+console.log("noisy npm stdout");
+"#;
+
+#[test]
+fn package_installs_leave_the_rpc_streams_to_the_protocol() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let root = tempfile::tempdir().unwrap();
+    setup(root.path(), "http://127.0.0.1:9/v1");
+    let npm = root.path().join("npm.cjs");
+    std::fs::write(&npm, NOISY_NPM).unwrap();
+    let node = std::env::var("PI_NODE_PATH").unwrap_or_else(|_| "node".into());
+    let settings = json!({ "npmCommand": [node, npm] });
+    std::fs::write(root.path().join("agent/settings.json"), settings.to_string()).unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_pi"));
+    // Online so the package installs; the catalog refresh goes to a closed local port.
+    crate::cli_support::isolate(&mut command, root.path())
+        .env_remove("PI_OFFLINE")
+        .env("PI_CATALOG_URL", "http://127.0.0.1:9/catalog")
+        .env("PI_SKIP_VERSION_CHECK", "1")
+        .args(["--mode", "rpc", "--no-session", "--no-extensions", "--model", "mock-model"])
+        .args(["-e", "npm:@test/noisy@1.0.0"])
+        .current_dir(root.path().join("work"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    child.stdin.take().unwrap().write_all(b"{\"id\":\"1\",\"type\":\"get_commands\"}\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let records: Vec<serde_json::Value> = stdout
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap_or_else(|_| panic!("non-JSON RPC line {line:?}\n{stderr}")))
+        .collect();
+    let response = records.iter().find(|record| record["id"] == "1").expect("get_commands response");
+    let commands = response["data"]["commands"].as_array().unwrap();
+    assert!(commands.iter().any(|command| command["name"] == "noisy-check"), "{commands:?}\n{stderr}");
+    assert!(stderr.contains("noisy npm stdout"), "{stderr}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn drives_prompts_bash_and_session_commands() {
     let root = tempfile::tempdir().unwrap();

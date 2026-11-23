@@ -110,8 +110,12 @@ fn exit_code_text(status: std::process::ExitStatus) -> String {
 impl CommandRunner for ProcessRunner {
     async fn run(&self, spec: &CommandSpec) -> anyhow::Result<()> {
         let mut command = self.command(spec);
-        command.stdin(Stdio::inherit()).stderr(Stdio::inherit());
-        command.stdout(if self.stdout_to_stderr { Stdio::from(std::io::stderr()) } else { Stdio::inherit() });
+        // Upstream `["ignore", 2, 2]` while JSON, RPC, or print output owns stdout. Unix also
+        // redirects the descriptor, but Windows children would inherit the protocol pipes.
+        let protocol = crate::diagnostics::is_stdout_taken_over();
+        command.stdin(if protocol { Stdio::null() } else { Stdio::inherit() }).stderr(Stdio::inherit());
+        let to_stderr = self.stdout_to_stderr || protocol;
+        command.stdout(if to_stderr { Stdio::from(std::io::stderr()) } else { Stdio::inherit() });
         let status = command.status().await.with_context(|| format!("spawn {}", spec.program))?;
         if !status.success() {
             bail!("{} failed with code {}", spec.display(), exit_code_text(status));
