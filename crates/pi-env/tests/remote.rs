@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use futures::FutureExt;
 use pi_chord::{AbortController, with_abort_signal};
-use pi_durable::env::{FileSystem, Shell, ShellCommand, ShellExecOptions, ShellOutputWindow};
+use pi_durable::env::{FileSystem, Shell, ShellCommand, ShellExecOptions, ShellOutputWindow, ShellSpillOptions};
 use pi_env::{
     Connection, ConnectionOptions, Json, ListFilesOptions, NodePlatform, RemoteExecutionEnv, RemoteExecutionEnvOptions,
     RequestOptions, node_platform,
@@ -240,4 +240,26 @@ async fn writes_and_reads_files_larger_than_one_transfer_chunk_in_order() {
     let range = reader.read(1_000_003, 2_000_000, &ctx()).await.expect("range");
     reader.close(&ctx()).await;
     assert!(range[..] == read[1_000_003..3_000_003]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spills_raw_invalid_bytes_while_output_decodes_them_as_replacements() {
+    let (env, _guard) = environment();
+    let seen = Arc::new(Mutex::new(String::new()));
+    let sink = seen.clone();
+    let options = ShellExecOptions {
+        spill: Some(ShellSpillOptions { after_bytes: 0, after_lines: 0 }),
+        on_output: Some(Arc::new(move |text, _, _| sink.lock().unwrap().push_str(text))),
+        ..Default::default()
+    };
+    let result =
+        env.exec(argv(&["sh", "-c", "printf 'a\\377b\\303\\251\\342\\202'"]), options, &ctx()).await.expect("exec");
+    assert_eq!(result.exit_code, 0);
+    assert_eq!(seen.lock().unwrap().as_str(), "a\u{fffd}b\u{e9}\u{fffd}");
+    let path = result.spill_path.expect("a spill path");
+    let spilled = env.read_binary_file(&path, &ctx()).await.expect("read spill");
+    assert_eq!(spilled, b"a\xffb\xc3\xa9\xe2\x82");
+    std::fs::remove_file(&path).expect("remove spill file");
+    std::fs::remove_dir(std::path::Path::new(&path).parent().expect("spill directory"))
+        .expect("remove spill directory");
 }
