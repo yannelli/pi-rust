@@ -88,6 +88,26 @@ impl StreamDecoder {
         })
     }
 
+    /// `decode_vec` as bytes: the same text, in the chunk's buffer when its complete part is valid.
+    pub fn decode_bytes(&mut self, mut bytes: Vec<u8>) -> Vec<u8> {
+        if self.pending_len > 0 {
+            let (first, complete) = self.split(&bytes);
+            let mut text = Vec::with_capacity(first.map_or(0, char::len_utf8) + complete.len());
+            if let Some(first) = first {
+                text.extend_from_slice(first.encode_utf8(&mut [0; 4]).as_bytes());
+            }
+            push_pieces(&mut text, complete);
+            return text;
+        }
+        self.cut_complete(&mut bytes);
+        if std::str::from_utf8(&bytes).is_ok() {
+            return bytes;
+        }
+        let mut text = Vec::with_capacity(bytes.len());
+        push_pieces(&mut text, &bytes);
+        text
+    }
+
     /// Counts the bytes that decode would emit without allocating the decoded text.
     pub(crate) fn decoded_len(&mut self, bytes: &[u8]) -> usize {
         if self.pending_len == 0 && bytes.is_ascii() {
@@ -166,6 +186,20 @@ impl StreamDecoder {
         self.pending[..bytes.len()].copy_from_slice(bytes);
         self.pending_len = bytes.len();
     }
+
+    /// Holds back an unfinished character at the end of `bytes` and drops the stream's leading mark. Nothing may be
+    /// held already.
+    fn cut_complete(&mut self, bytes: &mut Vec<u8>) {
+        let end = complete_prefix(bytes);
+        self.hold(&bytes[end..]);
+        bytes.truncate(end);
+        if self.strip_bom && end > 0 {
+            self.strip_bom = false;
+            if starts_with_bom(bytes) {
+                bytes.drain(..3);
+            }
+        }
+    }
 }
 
 /// An unfinished UTF-8 character can occupy only the last one to three bytes.
@@ -193,6 +227,34 @@ fn push_replaced(text: &mut String, bytes: &[u8]) {
         if !chunk.invalid().is_empty() {
             text.push(char::REPLACEMENT_CHARACTER);
         }
+    }
+}
+
+/// Invalid text is replaced piece by piece, so one bad byte sends only its piece through `utf8_chunks`.
+const PIECE: usize = 4096;
+
+/// Appends the lossy text of `bytes`. A cut before a byte that is not a continuation byte, or after three continuation
+/// bytes, never falls inside a character or a maximal invalid subpart.
+fn push_pieces(text: &mut Vec<u8>, mut bytes: &[u8]) {
+    while !bytes.is_empty() {
+        let mut end = bytes.len().min(PIECE);
+        if end < bytes.len()
+            && let Some(back) = (0..=3).find(|back| bytes[end - back] & 0xc0 != 0x80)
+        {
+            end -= back;
+        }
+        let (piece, rest) = bytes.split_at(end);
+        if std::str::from_utf8(piece).is_ok() {
+            text.extend_from_slice(piece);
+        } else {
+            for chunk in piece.utf8_chunks() {
+                text.extend_from_slice(chunk.valid().as_bytes());
+                if !chunk.invalid().is_empty() {
+                    text.extend_from_slice("\u{fffd}".as_bytes());
+                }
+            }
+        }
+        bytes = rest;
     }
 }
 

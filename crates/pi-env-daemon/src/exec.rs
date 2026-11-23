@@ -193,12 +193,12 @@ fn spawn_reader(
     })
 }
 
-fn output_frame(id: u32, stream: &str, text: String, skipped: Option<Value>) -> Frame {
+fn output_frame(id: u32, stream: &str, text: Vec<u8>, skipped: Option<Value>) -> Frame {
     let mut json = json!({ "kind": "output", "stream": stream });
     if let Some(skipped) = skipped {
         json["skipped"] = skipped;
     }
-    Frame::with_payload(EVENT, id, json, text.into_bytes())
+    Frame::with_payload(EVENT, id, json, text)
 }
 
 /// Run one command, sending output events for request `id`, until it settles.
@@ -277,7 +277,7 @@ pub fn run(
     let mut pending = request.window.map(Pending::new);
     let unsent = Arc::new(AtomicUsize::new(0));
     let names = ["stdout", "stderr"];
-    let emit = |pending: &mut Option<Pending>, stream: usize, text: String| {
+    let emit = |pending: &mut Option<Pending>, stream: usize, text: Vec<u8>| {
         if text.is_empty() {
             return;
         }
@@ -346,7 +346,7 @@ pub fn run(
                 if let Some(spill) = &mut spill {
                     spill.push(&bytes, tmpdir);
                 }
-                emit(&mut pending, stream, decoders[stream].decode_vec(bytes));
+                emit(&mut pending, stream, decoders[stream].decode_bytes(bytes));
                 if spill.as_ref().is_some_and(|spill| spill.failed.is_some()) {
                     kill(&mut killed);
                 }
@@ -378,8 +378,8 @@ pub fn run(
         sys::interrupt_reader(reader);
     }
     groups.lock().unwrap().remove(&pid);
-    emit(&mut pending, 0, decoders[0].finish());
-    emit(&mut pending, 1, decoders[1].finish());
+    emit(&mut pending, 0, decoders[0].finish().into_bytes());
+    emit(&mut pending, 1, decoders[1].finish().into_bytes());
     if let Some(pending) = &mut pending
         && !pending.is_empty()
     {

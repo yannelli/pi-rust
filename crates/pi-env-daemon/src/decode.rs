@@ -1,4 +1,5 @@
-// Share the host decoder without linking the Durable runtime into the remote executable.
+// Share the host decoder without linking the Durable runtime into the remote executable. The daemon uses part of it.
+#[allow(dead_code)]
 #[path = "../../pi-durable/src/env/decode.rs"]
 mod durable;
 
@@ -66,12 +67,17 @@ mod tests {
                 for second in first..=bytes.len() {
                     let parts = [&bytes[..first], &bytes[first..second], &[], &bytes[second..]];
                     let (mut text, mut owned) = (fresh.clone(), fresh.clone());
+                    let mut as_bytes = fresh.clone();
                     let decoded: String =
                         parts.iter().map(|part| text.decode(part)).collect::<String>() + &text.finish();
                     let from_vecs: String =
                         parts.iter().map(|part| owned.decode_vec(part.to_vec())).collect::<String>() + &owned.finish();
+                    let mut from_bytes: Vec<u8> =
+                        parts.iter().flat_map(|part| as_bytes.decode_bytes(part.to_vec())).collect();
+                    from_bytes.extend(as_bytes.finish().into_bytes());
                     assert_eq!(decoded, expected, "decode split at {first} and {second}");
                     assert_eq!(from_vecs, expected, "decode_vec split at {first} and {second}");
+                    assert_eq!(from_bytes, expected.as_bytes(), "decode_bytes split at {first} and {second}");
                 }
             }
         }
@@ -89,6 +95,62 @@ mod tests {
         let mut decoder = StreamDecoder::new();
         assert_eq!(decoder.decode_vec(b"\xef\xbb\xbfok \xe2\x82".to_vec()), "ok ");
         assert_eq!(decoder.decode_vec(b"\xac".to_vec()) + &decoder.finish(), "\u{20ac}");
+    }
+
+    #[test]
+    fn decode_bytes_reuses_a_complete_chunk() {
+        let mut decoder = StreamDecoder::new();
+        for chunk in ["ls -la\n", "日本語 ✓\n"] {
+            let bytes = chunk.as_bytes().to_vec();
+            let address = bytes.as_ptr();
+            let text = decoder.decode_bytes(bytes);
+            assert_eq!((text.as_slice(), text.as_ptr()), (chunk.as_bytes(), address));
+        }
+    }
+
+    /// Random chunks of damaged text, long enough that runs cross the 4 KiB pieces: `decode_bytes` returns the bytes of
+    /// `decode`.
+    #[test]
+    fn byte_forms_match_decode_chunk_by_chunk() {
+        let alphabet: [&[u8]; 12] = [
+            b"a",
+            b"\n",
+            "\u{e9}".as_bytes(),
+            "\u{20ac}".as_bytes(),
+            "\u{1f600}".as_bytes(),
+            b"\xff",
+            b"\x80\x80\x80\x80\x80",
+            b"\xe2\x82",
+            b"\xed\xa0\x80",
+            b"\xf4\x90\x80\x80",
+            b"\xc0\x80",
+            b"\xef\xbb\xbf",
+        ];
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut below = |count: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % count as u64) as usize
+        };
+        let mut bytes = b"\xef\xbb\xbf".to_vec();
+        while bytes.len() < 40_000 {
+            let index = if below(512) == 0 { below(alphabet.len()) } else { below(5) };
+            bytes.extend_from_slice(alphabet[index]);
+        }
+        let sizes = [1, 2, 3, 5, 64, 4095, 4096, 4097, 9000];
+        for _ in 0..4 {
+            let (mut text, mut as_bytes) = (StreamDecoder::new(), StreamDecoder::new());
+            let mut rest = &bytes[..];
+            while !rest.is_empty() {
+                let (chunk, after) = rest.split_at(sizes[below(sizes.len())].min(rest.len()));
+                let expected = text.decode(chunk);
+                assert_eq!(as_bytes.decode_bytes(chunk.to_vec()), expected.as_bytes());
+                rest = after;
+            }
+            let expected = text.finish();
+            assert_eq!(as_bytes.finish(), expected);
+        }
     }
 
     #[test]
