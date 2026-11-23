@@ -19,6 +19,7 @@ use crate::providers::mock_server::{cancel_after_first_text, collect, kinds};
 enum Action {
     Reply(Vec<Value>),
     ReplyThenStall(Vec<Value>),
+    ReplyThenDrop(Vec<Value>),
     Stall,
 }
 
@@ -129,13 +130,17 @@ async fn serve_websocket(stream: TcpStream, script: Script, seen: Arc<Mutex<Seen
             _ => continue,
         };
         seen.lock().unwrap().bodies.push((connection, body.clone()));
-        let (events, stall) = match script(connection, &body) {
-            Action::Reply(events) => (events, false),
-            Action::ReplyThenStall(events) => (events, true),
-            Action::Stall => (Vec::new(), true),
+        let (events, stall, disconnect) = match script(connection, &body) {
+            Action::Reply(events) => (events, false, false),
+            Action::ReplyThenStall(events) => (events, true, false),
+            Action::ReplyThenDrop(events) => (events, false, true),
+            Action::Stall => (Vec::new(), true, false),
         };
         for event in events {
             let _ = socket.send(WsMessage::Text(event.to_string().into())).await;
+        }
+        if disconnect {
+            return;
         }
         if stall {
             tokio::time::sleep(Duration::from_secs(30)).await;
@@ -288,6 +293,21 @@ async fn idle_websockets_fall_back_before_output_and_fail_after_it() {
     let message = OpenAICodexResponses.stream(&model, &context(), quiet).result(&model).await;
     assert_eq!(message.error_message.as_deref(), Some("WebSocket idle timeout after 100ms"));
     assert_eq!(message.diagnostics[0]["details"]["phase"], "after_message_stream_start");
+    assert_eq!(server.seen(|seen| seen.http_requests), 0);
+}
+
+#[tokio::test]
+async fn a_connection_dropped_mid_reply_fails_with_a_retryable_error() {
+    let partial = events("response.completed", "completed", None)[..3].to_vec();
+    let server = Server::start(Arc::new(move |_, _| Action::ReplyThenDrop(partial.clone())), false).await;
+    let model = codex_model(&server.base_url);
+    let message = OpenAICodexResponses
+        .stream(&model, &context(), options(&mock_token("acc"), Transport::Auto, None))
+        .result(&model)
+        .await;
+    let error = message.error_message.clone().unwrap_or_default();
+    assert!(error.starts_with("WebSocket error: "), "{error}");
+    assert!(crate::retry::is_retryable_assistant_error(&message));
     assert_eq!(server.seen(|seen| seen.http_requests), 0);
 }
 

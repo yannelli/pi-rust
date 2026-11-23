@@ -332,7 +332,8 @@ async fn stream_response(
         };
         let text = match next {
             None => return Err(transport("WebSocket stream closed before response.completed".into())),
-            Some(Err(error)) => return Err(transport(error.to_string())),
+            // Upstream reports a failed socket as "WebSocket error", which auto-retry matches.
+            Some(Err(error)) => return Err(transport(format!("WebSocket error: {error}"))),
             Some(Ok(WsMessage::Text(text))) => text.to_string(),
             Some(Ok(WsMessage::Binary(bytes))) => String::from_utf8_lossy(&bytes).into_owned(),
             Some(Ok(WsMessage::Close(frame))) => return Err(transport(close_message(frame))),
