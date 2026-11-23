@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ContentBlock, ContentChunk, Cost, Error, MessageId, Meta, SessionConfigOption, SessionInfoUpdate,
     SessionNotification, SessionUpdate, TextContent, Usage, UsageUpdate,
 };

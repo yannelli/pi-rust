@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use agent_client_protocol_schema::{
-    Error, RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome,
-};
+use crate::acp::schema::{Error, RequestPermissionOutcome, RequestPermissionResponse, SelectedPermissionOutcome};
 use serde_json::{Value, json};
 
 use super::{FakeBackend, FakeClient, session_with, settle};

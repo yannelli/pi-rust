@@ -2,6 +2,7 @@
 //! and the LaTeX extensions. Positions are UTF-8 byte offsets.
 
 use std::collections::HashMap;
+use std::ops::Range;
 
 use super::latex_ext;
 use super::token::{Children, Token, children};
@@ -25,20 +26,37 @@ pub(crate) struct LexerState {
     pub top: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LexMode {
+    Render,
+    SourceBlocks,
+}
+
 pub(crate) struct Lexer {
     pub links: HashMap<String, LinkDef>,
     pub queue: Vec<InlineJob>,
     pub state: LexerState,
+    mode: LexMode,
+    /// Source byte range of each top-level token, when requested.
+    spans: Option<Vec<Range<usize>>>,
+}
+
+impl Lexer {
+    fn new(mode: LexMode) -> Self {
+        Lexer {
+            links: HashMap::new(),
+            queue: Vec::new(),
+            state: LexerState { in_link: false, in_raw_block: false, link_emitted: false, top: true },
+            mode,
+            spans: (mode == LexMode::SourceBlocks).then(Vec::new),
+        }
+    }
 }
 
 /// Lexes Markdown into block tokens with their inline children.
 pub(crate) fn lex(source: &str) -> Vec<Token> {
     let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
-    let mut lexer = Lexer {
-        links: HashMap::new(),
-        queue: Vec::new(),
-        state: LexerState { in_link: false, in_raw_block: false, link_emitted: false, top: true },
-    };
+    let mut lexer = Lexer::new(LexMode::Render);
     let mut tokens = Vec::new();
     lexer.block_tokens(&normalized, &mut tokens, false);
     let queue = std::mem::take(&mut lexer.queue);
@@ -47,6 +65,30 @@ pub(crate) fn lex(source: &str) -> Vec<Token> {
         lexer.inline_tokens(&job.src, &mut out);
     }
     tokens
+}
+
+/// Top-level block tokens of plain GFM `marked` (no LaTeX, inline children left empty) with the
+/// byte range each one consumed. `source` must already have `\r` line endings normalized.
+pub(crate) fn lex_top_level_blocks(source: &str) -> impl Iterator<Item = (Token, Range<usize>)> {
+    let mut lexer = Lexer::new(LexMode::SourceBlocks);
+    let mut tokens = Vec::new();
+    lexer.block_tokens(source, &mut tokens, false);
+    let spans = lexer.spans.expect("source block ranges");
+    debug_assert_eq!(tokens.len(), spans.len());
+    tokens.into_iter().zip(spans)
+}
+
+/// Records the span of the token an iteration pushed, or extends the last span when the iteration
+/// merged into the last token. A skipped duplicate definition changes neither.
+fn record_span(spans: &mut Vec<Range<usize>>, tokens: &[Token], before: (usize, usize), range: Range<usize>) {
+    let (count, last_raw_len) = before;
+    if tokens.len() > count {
+        spans.push(range);
+    } else if tokens.last().is_some_and(|last| last.raw().len() != last_raw_len)
+        && let Some(last) = spans.last_mut()
+    {
+        last.end = range.end;
+    }
 }
 
 /// Byte offset of the second character (JavaScript `slice(1)`).
@@ -74,7 +116,9 @@ impl Lexer {
     /// Queues inline lexing of `src` (marked's `inline`), returning the list it will fill.
     pub(crate) fn inline(&mut self, src: &str) -> Children {
         let tokens = children(Vec::new());
-        self.queue.push(InlineJob { src: src.to_string(), tokens: tokens.clone() });
+        if self.mode == LexMode::Render {
+            self.queue.push(InlineJob { src: src.to_string(), tokens: tokens.clone() });
+        }
         tokens
     }
 
@@ -105,13 +149,24 @@ impl Lexer {
     pub(crate) fn block_tokens(&mut self, source: &str, tokens: &mut Vec<Token>, mut last_paragraph_clipped: bool) {
         let mut src = source;
         let mut shortest = usize::MAX;
+        // Nested calls see `None`, so only the outermost call records spans.
+        let mut spans = self.spans.take();
+        let snapshot = |tokens: &[Token]| (tokens.len(), tokens.last().map_or(0, |last| last.raw().len()));
+        let mut iteration = (snapshot(tokens), 0);
         while !src.is_empty() {
+            let consumed = source.len() - src.len();
+            if let Some(spans) = spans.as_mut() {
+                record_span(spans, tokens, iteration.0, iteration.1..consumed);
+                iteration = (snapshot(tokens), consumed);
+            }
             if src.len() >= shortest {
                 break;
             }
             shortest = src.len();
 
-            if let Some(token) = latex_ext::tokenize_block(src) {
+            if self.mode == LexMode::Render
+                && let Some(token) = latex_ext::tokenize_block(src)
+            {
                 src = advance(src, token.raw());
                 tokens.push(token);
                 continue;
@@ -156,7 +211,11 @@ impl Lexer {
             }
 
             let first_len = after_first_char(src);
-            let cut = match latex_ext::block_start(&src[first_len..], first_len == 4) {
+            let block_start = match self.mode {
+                LexMode::Render => latex_ext::block_start(&src[first_len..], first_len == 4),
+                LexMode::SourceBlocks => None,
+            };
+            let cut = match block_start {
                 Some(start) => &src[..first_len + start],
                 None => src,
             };
@@ -207,6 +266,10 @@ impl Lexer {
                 continue;
             }
             break;
+        }
+        if let Some(mut recorded) = spans {
+            record_span(&mut recorded, tokens, iteration.0, iteration.1..source.len() - src.len());
+            self.spans = Some(recorded);
         }
         self.state.top = true;
     }

@@ -134,12 +134,12 @@ pub fn spawn_reader(core: Arc<Mutex<Core>>, sink: TerminalSink) -> ReaderThread 
         .spawn(move || {
             let Ok(console) = Handle::current_in_handle().map(Console::from) else { return };
             let mut high_surrogate: Option<u16> = None;
-            let mut last_size = crossterm::terminal::size().ok();
+            let mut last_size = super::tty::size();
             let mut last_size_check = Instant::now();
             while !stop_flag.load(Ordering::SeqCst) {
                 if last_size_check.elapsed() >= Duration::from_millis(250) {
                     last_size_check = Instant::now();
-                    let size = crossterm::terminal::size().ok();
+                    let size = super::tty::size();
                     if size != last_size {
                         last_size = size;
                         sink.resize();
@@ -187,48 +187,4 @@ pub fn decode_utf16_units(high_surrogate: &mut Option<u16>, units: &[u16]) -> St
         *high_surrogate = all.pop();
     }
     char::decode_utf16(all).map(|c| c.unwrap_or('\u{FFFD}')).collect()
-}
-
-/// Watches SIGWINCH and forwards resize notifications.
-#[cfg(unix)]
-pub struct ResizeWatcher {
-    handle: signal_hook::iterator::Handle,
-    thread: Option<JoinHandle<()>>,
-}
-
-#[cfg(unix)]
-impl ResizeWatcher {
-    pub fn spawn(sink: TerminalSink) -> Option<Self> {
-        let mut signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGWINCH]).ok()?;
-        let handle = signals.handle();
-        let thread = std::thread::Builder::new()
-            .name("pi-tui-resize".into())
-            .spawn(move || {
-                for _ in signals.forever() {
-                    sink.resize();
-                }
-            })
-            .ok()?;
-        Some(Self { handle, thread: Some(thread) })
-    }
-
-    pub fn stop(mut self) {
-        self.handle.close();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-
-/// Windows reports resizes through console input records, so no watcher thread is needed.
-#[cfg(windows)]
-pub struct ResizeWatcher;
-
-#[cfg(windows)]
-impl ResizeWatcher {
-    pub fn spawn(_sink: TerminalSink) -> Option<Self> {
-        Some(Self)
-    }
-
-    pub fn stop(self) {}
 }

@@ -343,7 +343,7 @@ pub fn run(
         }
         match receiver.recv_timeout(wait) {
             Ok(Message::Data(stream, bytes)) => {
-                emit(&mut pending, stream, decoders[stream].decode(&bytes, false));
+                emit(&mut pending, stream, decoders[stream].decode(&bytes));
                 if let Some(spill) = &mut spill {
                     spill.push(&bytes, tmpdir);
                     if spill.failed.is_some() {
@@ -378,8 +378,8 @@ pub fn run(
         sys::interrupt_reader(reader);
     }
     groups.lock().unwrap().remove(&pid);
-    emit(&mut pending, 0, decoders[0].decode(&[], true));
-    emit(&mut pending, 1, decoders[1].decode(&[], true));
+    emit(&mut pending, 0, decoders[0].finish());
+    emit(&mut pending, 1, decoders[1].finish());
     if let Some(pending) = &mut pending
         && !pending.is_empty()
     {

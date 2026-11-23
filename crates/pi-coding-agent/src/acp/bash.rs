@@ -3,7 +3,7 @@
 //! `terminal_exit` metadata. Every client also gets `rawInput` and `rawOutput`, and clients that
 //! show no such terminals get the output as text content.
 
-use agent_client_protocol_schema::{ContentBlock, Meta, Terminal, TextContent, ToolCallContent};
+use super::schema::{ContentBlock, Meta, Terminal, TextContent, ToolCallContent};
 use serde_json::{Map, Value, json};
 
 /// Whether the client renders the terminal metadata. Zed says so with

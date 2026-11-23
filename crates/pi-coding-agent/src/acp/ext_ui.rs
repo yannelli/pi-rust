@@ -4,7 +4,7 @@
 //! have the kind `allow_once`, so clients that approve tool calls on their own, such as Paseo
 //! with Auto Accept, take it for a choice and leave it to the user.
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SessionUpdate, TextContent, ToolCallStatus, ToolCallUpdate,
     ToolCallUpdateFields, ToolKind,

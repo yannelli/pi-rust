@@ -4,7 +4,7 @@
 use std::fmt;
 use std::path::Path;
 
-use agent_client_protocol_schema::{Error, McpServer, McpServerHttp, McpServerStdio, Meta};
+use super::schema::{Error, McpServer, McpServerHttp, McpServerStdio, Meta};
 use pi_mcp::{McpConfigScope, McpExposure, McpServerConfig, McpServerEntry, server_key};
 use serde_json::{Map, Value};
 
@@ -27,7 +27,7 @@ impl ClientMcpServers {
             let entry = match server {
                 McpServer::Stdio(stdio) => stdio_entry(stdio),
                 McpServer::Http(http) => http_entry(http),
-                _ => return Err(rejected(index, server_name(server), unsupported(server))),
+                McpServer::Sse(_) => return Err(rejected(index, server_name(server), SSE_UNSUPPORTED)),
             };
             let mut entry = entry.map_err(|problem| rejected(index, server_name(server), &problem))?;
             entry.config.exposure = exposure;
@@ -90,16 +90,10 @@ fn server_name(server: &McpServer) -> &str {
         McpServer::Http(http) => &http.name,
         McpServer::Sse(sse) => &sse.name,
         McpServer::Stdio(stdio) => &stdio.name,
-        _ => "",
     }
 }
 
-fn unsupported(server: &McpServer) -> &'static str {
-    match server {
-        McpServer::Sse(_) => "SSE transport is not supported (mcpCapabilities.sse is false); use HTTP",
-        _ => "this transport is not supported; use stdio or HTTP",
-    }
-}
+const SSE_UNSUPPORTED: &str = "SSE transport is not supported (mcpCapabilities.sse is false); use HTTP";
 
 fn client_entry(name: &str, config: McpServerConfig) -> McpServerEntry {
     let mut entry = McpServerEntry::new(name.to_string(), config, CLIENT_SOURCE);

@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use agent_client_protocol_schema::{AuthMethod, AuthMethodTerminal};
+use super::schema::{AuthMethod, AuthMethodTerminal};
 use serde_json::{Map, Value, json};
 
 pub const PI_SETUP_METHOD_ID: &str = "pi_terminal_login";

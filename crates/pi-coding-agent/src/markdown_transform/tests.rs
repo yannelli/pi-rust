@@ -149,12 +149,39 @@ fn finds_top_level_code_blocks_with_marked_raw_extents() {
     assert_eq!(blocks("```mermaid\nA")[0], ("```mermaid\nA".into(), "mermaid".into(), "A".into()));
     assert!(blocks("- item\n  ```mermaid\n  A\n  ```\n").is_empty());
     assert!(blocks("> ```mermaid\n> A\n> ```").is_empty());
-    assert!(blocks("    ```mermaid\n    A\n    ```").is_empty());
+    assert_eq!(blocks("    ```mermaid\n    A\n    ```")[0].1, "", "indented code has no info string");
     assert_eq!(
         blocks("~~~ Mermaid extra\nA\n~~~\n")[0],
         ("~~~ Mermaid extra\nA\n~~~\n".into(), "Mermaid extra".into(), "A".into())
     );
     assert_eq!(blocks("text\n```mermaid\nA\n```\nmore")[0].0, "```mermaid\nA\n```\n");
+}
+
+#[test]
+fn keeps_non_mermaid_source_byte_for_byte() {
+    let markdown = "a\r\n\r\n```js\r\nx\r\n```\r\n\r\n\r\n[a]: x\n\n[a]: y\n\t- item\r\n";
+    assert_eq!(transform(markdown, Options::default()), markdown);
+    let mermaid_word_only = "The word mermaid\r\n- ```mermaid\r\n  A --> B\r\n  ```\r\n";
+    assert_eq!(transform(mermaid_word_only, Options::default()), mermaid_word_only);
+}
+
+#[test]
+fn replaces_blocks_in_crlf_source_and_keeps_the_rest() {
+    let diagram = "```mermaid\r\nflowchart LR\r\n  A --> B\r\n```";
+    let markdown = format!("[a]: x\r\n\r\n[a]: y\r\n\r\nBefore\r\n\r\n{diagram}\r\nAfter\r\n");
+    let rendered = transform(&markdown, Options::default());
+    assert!(rendered.starts_with("[a]: x\r\n\r\n[a]: y\r\n\r\nBefore\r\n\r\n`"), "{rendered:?}");
+    assert!(rendered.ends_with("`\nAfter\r\n"), "{rendered:?}");
+    assert!(rendered.contains("───▶"), "{rendered:?}");
+    let oversized = transform(&markdown, Options { max_width: 5, ..Options::default() });
+    assert_eq!(oversized, markdown);
+}
+
+#[test]
+fn renders_mermaid_between_latex_delimiters_like_plain_marked() {
+    let rendered = transform("$$\n```mermaid\nflowchart LR\n  A --> B\n```\n$$", Options::default());
+    assert!(rendered.starts_with("$$\n`"), "{rendered:?}");
+    assert!(rendered.ends_with("`\n$$"), "{rendered:?}");
 }
 
 #[test]

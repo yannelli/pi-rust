@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use agent_client_protocol_schema::{NewSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest};
+use crate::acp::schema::{NewSessionRequest, SetSessionConfigOptionRequest, SetSessionModeRequest};
 use serde_json::{Value, json};
 
 use super::{Env, FakeBackend, FakeClient, FakeConfig, FakeFactory, run_after, session_with};
@@ -67,7 +67,7 @@ fn assert_updates(client: &FakeClient, level: &str, levels: &[&str]) {
     assert_eq!(values(thinking), levels);
 }
 
-async fn set_thinking(f: &Fixture, level: &str) -> Result<Value, agent_client_protocol_schema::Error> {
+async fn set_thinking(f: &Fixture, level: &str) -> Result<Value, crate::acp::schema::Error> {
     let request: SetSessionConfigOptionRequest =
         serde_json::from_value(json!({"sessionId": "s1", "configId": "thought_level", "value": level})).unwrap();
     f.agent.set_session_config_option(request).await.map(|response| serde_json::to_value(response).unwrap())

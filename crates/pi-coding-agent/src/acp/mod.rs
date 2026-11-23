@@ -18,6 +18,7 @@ pub mod listing;
 pub mod mcp_servers;
 pub mod permissions;
 pub mod runtime;
+pub mod schema;
 mod session;
 pub mod settings;
 pub mod startup;

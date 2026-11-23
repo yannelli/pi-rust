@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol_schema::{
+use super::schema::{
     CancelNotification, CloseSessionRequest, DeleteSessionRequest, Error, InitializeRequest, ListSessionsRequest,
     LoadSessionRequest, NewSessionRequest, PromptRequest, RequestPermissionRequest, RequestPermissionResponse,
     SessionNotification, SetSessionConfigOptionRequest, SetSessionModeRequest,

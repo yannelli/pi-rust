@@ -2,7 +2,7 @@
 //! `pi-commands`, `merge-commands`, `auth-methods-terminal-auth-meta`, and
 //! `pi-enable-embed-context-flag` tests, plus the bash translation.
 
-use agent_client_protocol_schema::{AvailableCommand, ContentBlock};
+use crate::acp::schema::{AvailableCommand, ContentBlock};
 use serde_json::{Value, json};
 
 use crate::acp::agent::embedded_context_enabled;

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_client_protocol_schema::{
+use crate::acp::schema::{
     Error, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionNotification,
 };

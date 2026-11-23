@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol_schema::Error;
+use super::schema::Error;
 use async_trait::async_trait;
 use futures::FutureExt;
 use pi_agent::{AgentEvent, QueueMode};

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use agent_client_protocol_schema::{Error, RequestPermissionRequest, RequestPermissionResponse, SessionNotification};
+use super::schema::{Error, RequestPermissionRequest, RequestPermissionResponse, SessionNotification};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;

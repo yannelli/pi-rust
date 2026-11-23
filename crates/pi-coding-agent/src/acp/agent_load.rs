@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use agent_client_protocol_schema::{
+use super::schema::{
     ContentBlock, ContentChunk, LoadSessionRequest, SessionNotification, SessionUpdate, TextContent, ToolCall,
     ToolCallContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };

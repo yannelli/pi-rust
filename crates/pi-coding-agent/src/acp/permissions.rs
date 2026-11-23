@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol_schema::{
+use super::schema::{
     Meta, PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest, SessionMode,
     SessionModeState, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };

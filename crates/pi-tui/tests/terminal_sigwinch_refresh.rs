@@ -41,14 +41,16 @@ fn preserves_other_error_codes() {
 #[cfg(unix)]
 #[test]
 fn sends_sigwinch_to_this_process() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
 
-    let received = Arc::new(AtomicBool::new(false));
-    let id = signal_hook::flag::register(signal_hook::consts::SIGWINCH, received.clone()).unwrap();
-    refresh_terminal_dimensions();
-    signal_hook::low_level::unregister(id);
-    assert!(received.load(Ordering::SeqCst));
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let mut resized = signal(SignalKind::window_change()).unwrap();
+        refresh_terminal_dimensions();
+        tokio::time::timeout(Duration::from_secs(5), resized.recv()).await.expect("SIGWINCH within 5s");
+    });
 }
 
 #[cfg(not(unix))]
