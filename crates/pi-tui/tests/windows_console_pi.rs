@@ -3,15 +3,15 @@
 
 use std::fmt::Write as _;
 use std::fs::{File, OpenOptions};
-use std::io::Write as _;
 use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Child as Process, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crossterm_winapi::{Console, ConsoleMode, Handle, InputRecord, ScreenBuffer};
 
-use crate::windows_console::{Backend, COOKED, is_raw, note, read_mode, record, run};
+use crate::windows_console::{Backend, CONPTY_INPUT_DIR, COOKED, is_raw, note, read_mode, record, run};
 
 const PI: &str = "PI_TUI_TEST_PI";
 const PI_ARGS: [&str; 7] = [
@@ -28,9 +28,6 @@ const QUIT_COMMAND: &str = "/quit\r";
 const WINDOW_INPUT: u32 = 0x0008;
 const VIRTUAL_TERMINAL_INPUT: u32 = 0x0200;
 const VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
-/// What pi writes at start on Windows (CI log), with one palette query and the DA1 query.
-const PI_NEGOTIATION: &str = "\x1b[?2004h\x1b[>7u\x1b[?u\x1b]7501;?\x1b\\\x1b[?2031h\x1b]4;0;?\x07\x1b[c\x1b[>4;2m";
-const PI_NEGOTIATION_RESET: &str = "\x1b[?2004l\x1b[<u\x1b[>4;0m\x1b[?2031l";
 const READY_DEADLINE: Duration = Duration::from_secs(40);
 const EXIT_WAIT: Duration = Duration::from_secs(15);
 
@@ -47,9 +44,33 @@ fn cursor() -> (i16, i16) {
     (info.cursor_pos().x, info.cursor_pos().y)
 }
 
-/// Types `keys` into this process's console as key records through a detached PowerShell, which
-/// leaves the console modes alone.
+/// Types `keys` the way a terminal would: through the ConPTY input pipe in a ConPTY child, else
+/// as virtual-key-0 records, which conhost passes through as text in VT input mode.
 fn send_keys(keys: &str) {
+    match std::env::var_os(CONPTY_INPUT_DIR) {
+        Some(dir) => send_through_pipe(Path::new(&dir), keys),
+        None => send_as_records(keys),
+    }
+}
+
+/// Hands `keys` to `windows-conpty-run.ps1` and waits until it wrote them to the ConPTY input.
+fn send_through_pipe(dir: &Path, keys: &str) {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let name = format!("{:04}", NEXT.fetch_add(1, Ordering::SeqCst));
+    let staged = dir.join(format!("{name}.tmp"));
+    std::fs::write(&staged, keys).unwrap();
+    std::fs::rename(&staged, dir.join(format!("{name}.keys"))).unwrap();
+    let sent = dir.join(format!("{name}.sent"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !sent.exists() {
+        assert!(Instant::now() < deadline, "the ConPTY host did not write {keys:?} to the input pipe");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Writes `keys` to this process's console through a detached PowerShell, which leaves the console
+/// modes alone.
+fn send_as_records(keys: &str) {
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/windows-console-keys.ps1");
     let output = Command::new("powershell.exe")
@@ -105,9 +126,9 @@ fn describe(records: &[InputRecord]) -> String {
     text
 }
 
-/// Puts this console in the raw input mode pi-tui uses, writes `negotiation` as pi-tui does, types
-/// Ctrl+D, and notes the records a pi-tui reader would read.
-fn probe_injection(report: &Path, label: &str, negotiation: &str) {
+/// Puts this console in pi-tui's raw input mode, types Ctrl+D, and checks that a pi-tui reader
+/// would read it as 0x04. The modes come back afterward.
+fn check_key_delivery(report: &Path) {
     let input_mode = ConsoleMode::from(Handle::current_in_handle().expect("CONIN$"));
     let output_mode = ConsoleMode::from(Handle::current_out_handle().expect("CONOUT$"));
     let (saved_input, saved_output) = (input_mode.mode().unwrap(), output_mode.mode().unwrap());
@@ -115,17 +136,15 @@ fn probe_injection(report: &Path, label: &str, negotiation: &str) {
     output_mode.set_mode(saved_output | VIRTUAL_TERMINAL_PROCESSING).unwrap();
     let console = input_console();
     let stale = read_records(&console);
-    let mut out = console_file("CONOUT$");
-    out.write_all(negotiation.as_bytes()).unwrap();
     send_keys(CTRL_D);
     let records = read_records(&console);
-    let line = format!("[probe {label}] stale {}; after Ctrl+D: {}", describe(&stale), describe(&records));
-    note(report, &line);
-    if !negotiation.is_empty() {
-        out.write_all(PI_NEGOTIATION_RESET.as_bytes()).unwrap();
-    }
     input_mode.set_mode(saved_input).unwrap();
     output_mode.set_mode(saved_output).unwrap();
+    let line = format!("[key check] stale {}; after Ctrl+D: {}", describe(&stale), describe(&records));
+    note(report, &line);
+    let delivered =
+        records.iter().any(|record| matches!(record, InputRecord::KeyEvent(key) if key.key_down && key.u_char == 4));
+    assert!(delivered, "the console did not deliver Ctrl+D as 0x04: {line}");
 }
 
 fn wait_for_exit(child: &mut Process) -> Option<ExitStatus> {
@@ -148,8 +167,7 @@ fn tail_since(path: &Path, from: usize) -> String {
 /// Console child side: runs pi on this console and records `running`, `exit`, and `after`.
 pub(crate) fn run_pi(report: &Path) {
     let pi = std::env::var_os(PI).unwrap_or_else(|| panic!("{PI} names the pi.exe to start"));
-    probe_injection(report, "plain", "");
-    probe_injection(report, "pi negotiation", PI_NEGOTIATION);
+    check_key_delivery(report);
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     let write_log = home.path().join("pi-output.log");
@@ -210,7 +228,7 @@ pub(crate) fn run_pi(report: &Path) {
 fn start_and_quit(backend: Backend) {
     assert!(std::env::var_os(PI).is_some(), "set {PI} to the absolute path of the built pi.exe");
     let child = run("pi", backend);
-    for line in child.log.lines().filter(|line| line.starts_with("[probe ")) {
+    for line in child.log.lines().filter(|line| line.starts_with("[key check]")) {
         eprintln!("{line}");
     }
     child.assert_exit(false);

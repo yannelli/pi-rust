@@ -1,5 +1,5 @@
-# Types $env:PI_CONSOLE_KEYS into the console of $env:PI_CONSOLE_ATTACH_PID as key records; a
-# control character is Ctrl plus its letter. Start it detached so PowerShell never owns the console.
+# Types $env:PI_CONSOLE_KEYS into the console of $env:PI_CONSOLE_ATTACH_PID as key-down records with
+# virtual key 0, which conhost passes through as text in VT input mode. Start it detached.
 $ErrorActionPreference = 'Stop'
 
 Add-Type -TypeDefinition @'
@@ -8,17 +8,17 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 public static class PiConsoleKeys {
-    [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Explicit, Size = 16)]
     struct KeyEventRecord {
         [FieldOffset(0)] public int KeyDown;
         [FieldOffset(4)] public ushort RepeatCount;
         [FieldOffset(6)] public ushort VirtualKeyCode;
         [FieldOffset(8)] public ushort VirtualScanCode;
-        [FieldOffset(10)] public char UnicodeChar;
+        [FieldOffset(10)] public ushort UnicodeChar;
         [FieldOffset(12)] public uint ControlKeyState;
     }
 
-    [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Unicode)]
+    [StructLayout(LayoutKind.Explicit, Size = 20)]
     struct InputRecord {
         [FieldOffset(0)] public ushort EventType;
         [FieldOffset(4)] public KeyEventRecord KeyEvent;
@@ -36,23 +36,6 @@ public static class PiConsoleKeys {
     static extern bool CloseHandle(IntPtr handle);
 
     const ushort KeyEventType = 1;
-    const uint LeftCtrlPressed = 0x0008;
-
-    static void Key(InputRecord[] records, int index, char ch, bool down) {
-        ushort key = 0;
-        uint state = 0;
-        if (ch == '\r') { key = 0x0D; }
-        else if (ch == '/') { key = 0xBF; }
-        else if (ch >= 'a' && ch <= 'z') { key = (ushort)(ch - 'a' + 'A'); }
-        else if (ch >= (char)1 && ch <= (char)26) { key = (ushort)(ch + 0x40); state = LeftCtrlPressed; }
-        else { throw new ArgumentException("no key for U+" + ((int)ch).ToString("X4")); }
-        records[index].EventType = KeyEventType;
-        records[index].KeyEvent.KeyDown = down ? 1 : 0;
-        records[index].KeyEvent.RepeatCount = 1;
-        records[index].KeyEvent.VirtualKeyCode = key;
-        records[index].KeyEvent.UnicodeChar = ch;
-        records[index].KeyEvent.ControlKeyState = state;
-    }
 
     public static void Type(uint processId, string text) {
         FreeConsole();
@@ -60,10 +43,12 @@ public static class PiConsoleKeys {
         IntPtr input = CreateFileW("CONIN$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
         if (input == new IntPtr(-1)) throw new Win32Exception();
         try {
-            InputRecord[] records = new InputRecord[text.Length * 2];
+            InputRecord[] records = new InputRecord[text.Length];
             for (int i = 0; i < text.Length; i++) {
-                Key(records, 2 * i, text[i], true);
-                Key(records, 2 * i + 1, text[i], false);
+                records[i].EventType = KeyEventType;
+                records[i].KeyEvent.KeyDown = 1;
+                records[i].KeyEvent.RepeatCount = 1;
+                records[i].KeyEvent.UnicodeChar = text[i];
             }
             uint written;
             if (!WriteConsoleInputW(input, records, (uint)records.Length, out written)) throw new Win32Exception();

@@ -19,6 +19,8 @@ use pi_tui::{Tui, TuiOptions, TuiStopOptions};
 
 const SCENARIO: &str = "PI_TUI_CONSOLE_SCENARIO";
 const REPORT: &str = "PI_TUI_CONSOLE_REPORT";
+/// Set in a ConPTY child: files the child drops here go to the ConPTY input pipe.
+pub(crate) const CONPTY_INPUT_DIR: &str = "PI_CONPTY_INPUT_DIR";
 const CHILD_TEST: &str = "windows_console::console_child";
 pub(crate) const COOKED: u32 = 0x0001 | 0x0002 | 0x0004;
 const WINDOW_INPUT: u32 = 0x0008;
@@ -69,7 +71,9 @@ pub(crate) fn run(scenario: &str, backend: Backend) -> Child {
             let command_line = format!("\"{}\" {}", exe.display(), test_args.join(" "));
             let mut command = Command::new("powershell.exe");
             command.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]);
-            command.arg(script).env("PI_CONPTY_COMMAND_LINE", command_line);
+            let input = dir.path().join("input");
+            std::fs::create_dir(&input).unwrap();
+            command.arg(script).env("PI_CONPTY_COMMAND_LINE", command_line).env(CONPTY_INPUT_DIR, input);
             command
         }
     };

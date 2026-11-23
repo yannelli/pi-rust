@@ -1,5 +1,5 @@
-# Runs the command line in $env:PI_CONPTY_COMMAND_LINE in a new ConPTY, exits with its code, and
-# copies the pseudo console output to stderr. Used by crates/pi-tui/tests/windows_console.rs.
+# Runs $env:PI_CONPTY_COMMAND_LINE in a new ConPTY, exits with its code, and copies its output to
+# stderr. Each N.keys file in $env:PI_CONPTY_INPUT_DIR goes to the ConPTY input, then becomes N.sent.
 $ErrorActionPreference = 'Stop'
 
 Add-Type -TypeDefinition @'
@@ -57,7 +57,7 @@ public static class PiConPty {
     const int UseStdHandles = 0x00000100;
     const int PseudoConsoleAttribute = 0x00020016;
 
-    public static int Run(string commandLine, int timeoutMs) {
+    public static int Run(string commandLine, int timeoutMs, string inputDir) {
         SafeFileHandle inputRead, inputWrite, outputRead, outputWrite;
         if (!CreatePipe(out inputRead, out inputWrite, IntPtr.Zero, 0)) throw new Win32Exception();
         if (!CreatePipe(out outputRead, out outputWrite, IntPtr.Zero, 0)) throw new Win32Exception();
@@ -76,6 +76,25 @@ public static class PiConPty {
         });
         drain.IsBackground = true;
         drain.Start();
+
+        FileStream input = new FileStream(inputWrite, FileAccess.Write);
+        Thread feeder = new Thread(() => {
+            try {
+                while (!string.IsNullOrEmpty(inputDir)) {
+                    string[] requests = Directory.GetFiles(inputDir, "*.keys");
+                    Array.Sort(requests, StringComparer.Ordinal);
+                    foreach (string request in requests) {
+                        byte[] bytes = File.ReadAllBytes(request);
+                        input.Write(bytes, 0, bytes.Length);
+                        input.Flush();
+                        File.Move(request, Path.ChangeExtension(request, ".sent"));
+                    }
+                    Thread.Sleep(20);
+                }
+            } catch (IOException) { } catch (ObjectDisposedException) { }
+        });
+        feeder.IsBackground = true;
+        feeder.Start();
 
         IntPtr listSize = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref listSize);
@@ -105,7 +124,7 @@ public static class PiConPty {
             CloseHandle(process.hProcess);
             ClosePseudoConsole(console);
             drain.Join(5000);
-            inputWrite.Dispose();
+            input.Dispose();
             Console.Error.WriteLine(Encoding.UTF8.GetString(output.ToArray()));
             return (int)code;
         } finally {
@@ -117,4 +136,4 @@ public static class PiConPty {
 '@
 
 if (-not $env:PI_CONPTY_COMMAND_LINE) { throw 'PI_CONPTY_COMMAND_LINE is not set' }
-exit [PiConPty]::Run($env:PI_CONPTY_COMMAND_LINE, 170000)
+exit [PiConPty]::Run($env:PI_CONPTY_COMMAND_LINE, 170000, $env:PI_CONPTY_INPUT_DIR)
