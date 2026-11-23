@@ -348,7 +348,8 @@ mod kernel {
         }
         let starts_badly = breaks::<4>(bytes[0], 0, 0, 0)
             | breaks::<4>(bytes[1], bytes[0], 0, 0)
-            | breaks::<4>(bytes[2], bytes[1], bytes[0], 0);
+            | breaks::<4>(bytes[2], bytes[1], bytes[0], 0)
+            | bytes[..3].iter().any(|byte| *byte > 0xf4);
         if starts_badly {
             return 0;
         }
@@ -362,7 +363,9 @@ mod kernel {
                 0..0x80 => false,
                 0x80..0xe0 => block_breaks::<2>(c, p1, p2, p3),
                 0xe0..0xf0 => block_breaks::<3>(c, p1, p2, p3),
-                _ => block_breaks::<4>(c, p1, p2, p3),
+                0xf0..0xf5 => block_breaks::<4>(c, p1, p2, p3),
+                // f5..ff is in no character. The bytes before the block passed, so it is in the block.
+                _ => true,
             };
             if broken {
                 return last_start_before(bytes, 3 + index * BLOCK);
@@ -391,7 +394,7 @@ mod kernel {
     }
 
     /// Whether byte `c` cannot follow `p3 p2 p1` in valid UTF-8, when none of them leads a character longer than
-    /// `WIDTH` bytes. A bad lead byte (c0, c1, f5..ff) is reported on the byte after it.
+    /// `WIDTH` bytes and none is f5..ff. A bad lead byte (c0, c1) is reported on the byte after it.
     #[inline(always)]
     fn breaks<const WIDTH: usize>(c: u8, p1: u8, p2: u8, p3: u8) -> bool {
         let continuation = (c as i8) < -64;
@@ -408,8 +411,8 @@ mod kernel {
             broken |= p1 == if (c as i8) < -96 { 0xe0 } else { 0xed };
         }
         if WIDTH >= 4 {
-            // f0 takes 90..bf next and f4 takes 80..8f; f5..ff start nothing.
-            broken |= (p1 == if (c as i8) < -112 { 0xf0 } else { 0xf4 }) | (p1 > 0xf4);
+            // f0 takes 90..bf next and f4 takes 80..8f. A block with f5..ff does not get here.
+            broken |= p1 == if (c as i8) < -112 { 0xf0 } else { 0xf4 };
         }
         broken
     }
