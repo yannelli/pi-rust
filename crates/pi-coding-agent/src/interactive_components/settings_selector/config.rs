@@ -147,7 +147,7 @@ impl Default for SettingsConfig {
             follow_up_mode: QueueMode::OneAtATime,
             transport: Transport::Auto,
             session_share_destination: SessionShareDestination::Auto,
-            session_share_viewer: SessionShareViewer::PiRust,
+            session_share_viewer: SessionShareViewer::PiDev,
             http_idle_timeout_ms: DEFAULT_HTTP_IDLE_TIMEOUT_MS,
             cache_warming_mode: CacheWarmingMode::Streaming,
             retry: RetryConfig {

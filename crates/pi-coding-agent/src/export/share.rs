@@ -17,9 +17,10 @@ use super::theme::ExportTheme;
 use super::tool_renderer::ToolHtmlRenderer;
 use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
 
-/// The default gist viewer (pi-rust extension); upstream's is [`PI_DEV_SHARE_VIEWER_URL`].
-pub const DEFAULT_SHARE_VIEWER_URL: &str = "https://pi-rust.com/session/";
+/// Upstream's gist viewer, the default.
 pub const PI_DEV_SHARE_VIEWER_URL: &str = "https://pi.dev/session/";
+/// pi-rust.com's gist viewer (pi-rust extension), for `sessionShareViewer: "pi-rust"`.
+pub const PI_RUST_SHARE_VIEWER_URL: &str = "https://pi-rust.com/session/";
 pub const DEFAULT_RADIUS_GATEWAY: &str = "https://radius.pi.dev";
 pub const ENV_SHARE_VIEWER_URL: &str = "PI_SHARE_VIEWER_URL";
 /// The share title when the session has no name.
@@ -28,7 +29,7 @@ pub const DEFAULT_SHARE_TITLE: &str = "Pi session";
 /// The viewer base URL of a `sessionShareViewer` value.
 pub fn viewer_base_url(viewer: SessionShareViewer) -> &'static str {
     match viewer {
-        SessionShareViewer::PiRust => DEFAULT_SHARE_VIEWER_URL,
+        SessionShareViewer::PiRust => PI_RUST_SHARE_VIEWER_URL,
         SessionShareViewer::PiDev => PI_DEV_SHARE_VIEWER_URL,
     }
 }
@@ -56,6 +57,16 @@ pub enum ShareRoute {
 }
 
 pub const RADIUS_NOT_CONFIGURED: &str = "Radius authentication is not configured. Run '/login radius' first.";
+
+/// Whether `/share` looks for a pi-rust.com account: always for `pi-rust`, and for `auto` unless
+/// the user chose pi.dev's viewer, so `auto` then behaves as upstream (Radius, else a gist).
+pub fn uses_pi_rust_account(destination: SessionShareDestination, viewer: SessionShareViewer) -> bool {
+    match destination {
+        SessionShareDestination::PiRust => true,
+        SessionShareDestination::Auto => viewer == SessionShareViewer::PiRust,
+        SessionShareDestination::Gist | SessionShareDestination::Radius => false,
+    }
+}
 
 /// Whether choosing a route for `destination` needs to know about a Radius credential.
 pub fn route_needs_radius(destination: SessionShareDestination, pi_rust_signed_in: bool) -> bool {

@@ -321,7 +321,7 @@ fn dispatches_parsed_values() {
     use crate::settings::schema::SessionShareDestination::{Auto, Gist, PiRust, Radius};
     assert_eq!(share.get(), [Gist, Radius, PiRust, Auto]);
     use crate::settings::schema::SessionShareViewer;
-    assert_eq!(viewer.get(), [SessionShareViewer::PiDev, SessionShareViewer::PiRust]);
+    assert_eq!(viewer.get(), [SessionShareViewer::PiRust, SessionShareViewer::PiDev]);
     assert_eq!(format_http_idle_timeout_ms(45_500), "45.5 sec");
     assert_eq!(format_http_idle_timeout_ms(90_000), "90 sec");
     let trust = list.borrow().items().iter().find(|item| item.id == "default-project-trust").cloned();
@@ -401,5 +401,5 @@ fn persisting_callbacks_write_settings_and_config_reads_them() {
     assert_eq!(settings.provider_identity(), crate::settings::schema::ProviderIdentity::Pi);
     let invalid = SettingsManager::in_memory(json!({"sessionShareDestination": "dropbox", "sessionShareViewer": "x"}));
     assert_eq!(invalid.session_share_destination(), crate::settings::schema::SessionShareDestination::Auto);
-    assert_eq!(invalid.session_share_viewer(), crate::settings::schema::SessionShareViewer::PiRust);
+    assert_eq!(invalid.session_share_viewer(), crate::settings::schema::SessionShareViewer::PiDev);
 }

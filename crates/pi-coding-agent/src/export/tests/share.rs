@@ -12,7 +12,7 @@ use crate::export::pi_rust_share::PiRustAccount;
 use crate::export::share::{
     CommandOutput, RADIUS_NOT_CONFIGURED, RadiusTarget, ShareCommandRunner, ShareError, ShareOutcome, ShareRequest,
     ShareRoute, check_gh_auth, create_gist, route_needs_radius, share_route, share_session, share_viewer_url,
-    share_viewer_url_with, upload_radius_artifact,
+    share_viewer_url_with, upload_radius_artifact, uses_pi_rust_account,
 };
 use crate::platform::test_http::{TestReply, TestServer};
 use crate::settings::schema::{SessionShareDestination, SessionShareViewer};
@@ -95,7 +95,7 @@ fn viewer_url_appends_the_gist_id() {
     assert_eq!(share_viewer_url_with(None, pi_rust, "abc"), "https://pi-rust.com/session/#abc");
     assert_eq!(share_viewer_url_with(Some(""), pi_rust, "abc"), "https://pi-rust.com/session/#abc");
     assert_eq!(share_viewer_url_with(None, pi_dev, "abc"), "https://pi.dev/session/#abc");
-    assert_eq!(SessionShareViewer::default(), pi_rust);
+    assert_eq!(SessionShareViewer::default(), pi_dev);
 }
 
 #[test]
@@ -112,6 +112,16 @@ fn auto_prefers_the_pi_rust_account_then_radius_then_a_gist() {
     assert_eq!(route(Gist, true, true), Ok(ShareRoute::Gist));
     assert!(route_needs_radius(Auto, false) && route_needs_radius(Radius, true));
     assert!(!route_needs_radius(Auto, true) && !route_needs_radius(Gist, false) && !route_needs_radius(PiRust, false));
+}
+
+#[test]
+fn auto_skips_the_pi_rust_account_for_pi_dev_users() {
+    use SessionShareDestination::{Auto, Gist, PiRust, Radius};
+    use SessionShareViewer::{PiDev, PiRust as PiRustViewer};
+    assert!(uses_pi_rust_account(Auto, PiRustViewer));
+    assert!(!uses_pi_rust_account(Auto, PiDev));
+    assert!(uses_pi_rust_account(PiRust, PiDev));
+    assert!(!uses_pi_rust_account(Radius, PiRustViewer) && !uses_pi_rust_account(Gist, PiRustViewer));
 }
 
 #[tokio::test]

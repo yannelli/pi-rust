@@ -49,11 +49,18 @@ Attribution headers, such as OpenRouter's `HTTP-Referer` and `X-OpenRouter-Title
 
 ## Session sharing
 
-`/share` uploads the current session. `sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
+`/share` uploads the current session. By default it works as in upstream pi: Radius when you are signed in to it, else a secret GitHub gist viewed on pi.dev. The first time pi runs in interactive mode, it asks where `/share` should send sessions:
+
+- **pi.dev** (the default) sets `sessionShareDestination` to `"auto"` and `sessionShareViewer` to `"pi.dev"`.
+- **pi-rust.com** sets `sessionShareDestination` to `"pi-rust"` and `sessionShareViewer` to `"pi-rust"`.
+
+Esc keeps the pi.dev default. pi asks once: it asks while the global settings have no `sessionShareViewer`, so people who installed an earlier version are asked once too. It does not ask when `PI_CODING_AGENT_DIR` is set, or in print, JSON, and RPC modes.
+
+`sessionShareDestination` chooses where. Set it in `settings.json`, or open `/settings` and change **Session share destination**.
 
 | Value | Behavior |
 | --- | --- |
-| `"auto"` (default) | Your pi-rust.com account when you are signed in, else Radius when the `radius` provider has a credential, else a secret GitHub gist. |
+| `"auto"` (default) | Radius when the `radius` provider has a credential, else a secret GitHub gist, as upstream pi. With `sessionShareViewer` set to `"pi-rust"`, your pi-rust.com account comes first when you are signed in. |
 | `"pi-rust"` | Your pi-rust.com account. If you are not signed in, `/share` signs you in first. |
 | `"radius"` | A Radius artifact. Run `/login radius` first. |
 | `"gist"` | A secret GitHub gist, created with the `gh` CLI. |
@@ -66,8 +73,8 @@ To sign in, `/share` shows a code and a sign-in URL. Press Enter to open the pag
 
 | Value | Link |
 | --- | --- |
-| `"pi-rust"` (default) | `https://pi-rust.com/session/#<gist id>` |
-| `"pi.dev"` | `https://pi.dev/session/#<gist id>`, as upstream pi |
+| `"pi.dev"` (default) | `https://pi.dev/session/#<gist id>`, as upstream pi |
+| `"pi-rust"` | `https://pi-rust.com/session/#<gist id>` |
 
 Environment variables:
 
