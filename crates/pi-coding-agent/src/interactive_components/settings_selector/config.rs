@@ -13,7 +13,8 @@ use crate::settings::defaults::{
 };
 use crate::settings::schema::{
     CacheWarmingMode, DoubleEscapeAction, FullscreenExitOutput, FullscreenScrollbar, MermaidRenderingMode,
-    ProviderIdentity, SessionShareDestination, SessionShareViewer, TreeFilterMode, TuiMode,
+    ProviderIdentity, SessionShareDestination, SessionShareExpiry, SessionShareViewer, SessionShareVisibility,
+    TreeFilterMode, TuiMode,
 };
 use crate::settings::{ProviderRetryConfig, QuietStartup, RetryConfig};
 use crate::theme::{SYSTEM_THEME_NAME, TerminalTheme};
@@ -88,6 +89,8 @@ pub struct SettingsConfig {
     pub transport: Transport,
     pub session_share_destination: SessionShareDestination,
     pub session_share_viewer: SessionShareViewer,
+    pub session_share_expiry: SessionShareExpiry,
+    pub session_share_visibility: SessionShareVisibility,
     pub http_idle_timeout_ms: u64,
     pub cache_warming_mode: CacheWarmingMode,
     pub retry: RetryConfig,
@@ -148,6 +151,8 @@ impl Default for SettingsConfig {
             transport: Transport::Auto,
             session_share_destination: SessionShareDestination::Auto,
             session_share_viewer: SessionShareViewer::PiDev,
+            session_share_expiry: SessionShareExpiry::Never,
+            session_share_visibility: SessionShareVisibility::Link,
             http_idle_timeout_ms: DEFAULT_HTTP_IDLE_TIMEOUT_MS,
             cache_warming_mode: CacheWarmingMode::Streaming,
             retry: RetryConfig {
@@ -218,6 +223,8 @@ pub struct SettingsCallbacks {
     pub on_transport_change: OnChange<Transport>,
     pub on_session_share_destination_change: OnChange<SessionShareDestination>,
     pub on_session_share_viewer_change: OnChange<SessionShareViewer>,
+    pub on_session_share_expiry_change: OnChange<SessionShareExpiry>,
+    pub on_session_share_visibility_change: OnChange<SessionShareVisibility>,
     pub on_http_idle_timeout_ms_change: OnChange<u64>,
     pub on_cache_warming_mode_change: OnChange<CacheWarmingMode>,
     pub on_retry_enabled_change: OnChange<bool>,
@@ -283,6 +290,8 @@ impl Default for SettingsCallbacks {
             on_transport_change: ignore(),
             on_session_share_destination_change: ignore(),
             on_session_share_viewer_change: ignore(),
+            on_session_share_expiry_change: ignore(),
+            on_session_share_visibility_change: ignore(),
             on_http_idle_timeout_ms_change: ignore(),
             on_cache_warming_mode_change: ignore(),
             on_retry_enabled_change: ignore(),

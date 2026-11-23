@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::html::{ExportTool, HtmlExportOptions, export_session_html};
 use super::jsonl::export_session_to_jsonl;
-use super::pi_rust_share::{PiRustAccount, PiRustError, upload_share};
+use super::pi_rust_share::{PiRustAccount, PiRustError, ShareOptions, upload_share};
 use super::session_file::random_hex;
 use super::theme::ExportTheme;
 use super::tool_renderer::ToolHtmlRenderer;
@@ -296,6 +296,8 @@ pub struct ShareRequest<'a> {
     pub pi_rust: Option<PiRustAccount>,
     /// The share title on pi-rust.com.
     pub title: String,
+    /// Expiry and visibility on pi-rust.com.
+    pub pi_rust_options: ShareOptions,
     pub viewer: SessionShareViewer,
     pub runner: &'a dyn ShareCommandRunner,
     pub http: reqwest::Client,
@@ -327,7 +329,8 @@ pub async fn share_session(request: ShareRequest<'_>) -> Result<ShareOutcome, Sh
         if let Some(account) = &request.pi_rust {
             export_share_html(&request, &html_file)?;
             let html = std::fs::read(&html_file).map_err(|error| export_failed(&error))?;
-            let share = upload_share(&request.http, account, &request.title, html, &cancel).await;
+            let options = request.pi_rust_options;
+            let share = upload_share(&request.http, account, &request.title, options, html, &cancel).await;
             return match share {
                 Ok(share) => Ok(ShareOutcome::PiRust { url: share.url }),
                 Err(PiRustError::Cancelled) => Err(ShareError::Cancelled),

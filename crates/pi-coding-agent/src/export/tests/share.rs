@@ -70,6 +70,7 @@ fn request<'a>(
         radius,
         pi_rust: None,
         title: "Pi session".into(),
+        pi_rust_options: Default::default(),
         viewer: SessionShareViewer::PiRust,
         runner,
         http: reqwest::Client::builder().no_proxy().build().unwrap(),

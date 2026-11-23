@@ -14,8 +14,8 @@ use tokio_util::sync::CancellationToken;
 use super::components::bordered_loader::BorderedLoader;
 use super::mode::InteractiveMode;
 use crate::export::pi_rust_share::{
-    ACCOUNT_LABEL, PiRustAccount, PiRustError, delete_account, load_account_for, revoke_token, save_account, share_url,
-    sign_in, upload_share,
+    ACCOUNT_LABEL, PiRustAccount, PiRustError, ShareOptions, delete_account, load_account_for, revoke_token,
+    save_account, share_url, sign_in, upload_share,
 };
 use crate::export::share::{
     DEFAULT_RADIUS_GATEWAY, DEFAULT_SHARE_TITLE, ShareOutcome, ShareRoute, SystemCommandRunner, check_gh_auth,
@@ -182,9 +182,12 @@ impl InteractiveMode {
         };
         let title = self.session().session_name().filter(|name| !name.trim().is_empty());
         let title = title.unwrap_or_else(|| DEFAULT_SHARE_TITLE.to_string());
+        let settings = self.settings();
+        let options =
+            ShareOptions { expiry: settings.session_share_expiry(), visibility: settings.session_share_visibility() };
         let upload = {
             let cancel = cancel.clone();
-            async move { upload_share(&pi_ai::http::shared_client(), &account, &title, body, &cancel).await }
+            async move { upload_share(&pi_ai::http::shared_client(), &account, &title, options, body, &cancel).await }
         };
         let task = tokio::spawn(upload);
         let result = tokio::select! {
@@ -194,7 +197,13 @@ impl InteractiveMode {
         loader.borrow_mut().dispose();
         self.selector.restore_editor();
         match result {
-            Ok(Ok(share)) => self.show_status(&format!("Share URL: {}", hyperlink(&share.url, &share.url))),
+            Ok(Ok(share)) => {
+                let link = format!("Share URL: {}", hyperlink(&share.url, &share.url));
+                match options.note() {
+                    Some(note) => self.show_status(&format!("{link}\n{note}")),
+                    None => self.show_status(&link),
+                }
+            }
             Ok(Err(PiRustError::Cancelled)) => {}
             Ok(Err(PiRustError::Unauthorized)) => {
                 // The service revoked the token: forget it so the next /share signs in again.

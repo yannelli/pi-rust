@@ -176,7 +176,7 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
         item(
             "share-destination",
             "Session share destination",
-            "Where to upload sessions with /share (auto prefers your pi-rust.com account when signed in, then Radius when authenticated, otherwise GitHub Gist)",
+            "Where /share uploads sessions (auto: Radius when signed in, otherwise GitHub Gist; with the pi-rust viewer, your pi-rust.com account first)",
             enum_str(config.session_share_destination),
             &["auto", "gist", "radius", "pi-rust"],
         ),
@@ -186,6 +186,20 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
             "Viewer that GitHub Gist links from /share open: upstream pi.dev or pi-rust.com",
             enum_str(config.session_share_viewer),
             &["pi.dev", "pi-rust"],
+        ),
+        item(
+            "share-expiry",
+            "Session share expiry",
+            "When shares to your pi-rust.com account expire and are deleted",
+            enum_str(config.session_share_expiry),
+            &["never", "1h", "1d", "7d", "30d"],
+        ),
+        item(
+            "share-visibility",
+            "Session share visibility",
+            "Who can open shares on your pi-rust.com account: anyone with the link, or only you",
+            enum_str(config.session_share_visibility),
+            &["link", "private"],
         ),
         item(
             "http-idle-timeout",
@@ -363,6 +377,8 @@ pub(super) fn dispatch_change(callbacks: &mut SettingsCallbacks, id: &str, value
             parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_destination_change)
         }
         "share-viewer" => parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_viewer_change),
+        "share-expiry" => parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_expiry_change),
+        "share-visibility" => parse_enum(value).into_iter().for_each(&mut callbacks.on_session_share_visibility_change),
         "http-idle-timeout" => {
             let choice = HTTP_IDLE_TIMEOUT_CHOICES.iter().find(|(label, _)| *label == value);
             choice.into_iter().for_each(|(_, ms)| (callbacks.on_http_idle_timeout_ms_change)(*ms));

@@ -218,7 +218,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
             "steering-mode",
         ]
     );
-    assert_eq!(ids.len(), 46);
+    assert_eq!(ids.len(), 48);
     let network = ids.iter().position(|id| id == "http-idle-timeout").unwrap();
     assert_eq!(
         &ids[network..network + 10],
@@ -239,7 +239,7 @@ fn orders_settings_like_upstream_with_and_without_image_support() {
     let without = SettingsSelector::with_image_support(SettingsConfig::default(), SettingsCallbacks::default(), false);
     let without = self::ids(&without);
     assert_eq!(without[..2], ["autocompact", "auto-resize-images"]);
-    assert_eq!(without.len(), 44);
+    assert_eq!(without.len(), 46);
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn renders_between_borders_and_navigates_with_a_terminal() {
     assert!(screen.contains("→ Auto-compact"), "{screen}");
     assert!(screen.contains("Automatically compact context when it gets too large"), "{screen}");
     assert!(screen.contains("Type to search · Enter/Space to change · Esc to cancel"), "{screen}");
-    assert!(screen.contains("(1/44)"), "{screen}");
+    assert!(screen.contains("(1/46)"), "{screen}");
     harness.send(keys::DOWN);
     let screen = harness.screen();
     assert!(screen.contains("→ Auto-resize images"), "{screen}");
