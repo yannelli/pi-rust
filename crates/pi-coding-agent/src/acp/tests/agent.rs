@@ -436,6 +436,23 @@ async fn startup_info_lists_resources_unless_quiet() {
     assert_eq!(handled.response["_meta"]["piAcp"]["startupInfo"], Value::Null);
 }
 
+/// A `session_start` handler can open a dialog before `session/new` answers. The client gets it
+/// once the response gave it the session.
+#[tokio::test]
+async fn startup_dialogs_wait_for_the_session_new_response() {
+    let env = Env::new();
+    let (client, backend) = (FakeClient::new(), FakeBackend::new());
+    backend.emit(json!({"type": "extension_ui_request", "id": "d1", "method": "confirm", "title": "Run hook?"}));
+    let agent = env.agent(client.clone(), FakeFactory::returning(backend.clone()));
+    let handled = agent.new_session(new_request(&env.work())).await.unwrap();
+    settle().await;
+    assert!(client.permission_requests.lock().unwrap().is_empty());
+    super::run_after(handled).await;
+    settle().await;
+    assert_eq!(client.permission_requests.lock().unwrap().len(), 1);
+    assert_eq!(backend.ui_responses.lock().unwrap().len(), 1);
+}
+
 #[test]
 fn update_notices_need_a_newer_release() {
     use crate::acp::startup::update_notice;

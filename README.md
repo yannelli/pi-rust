@@ -144,6 +144,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   - Extension prompts that were waiting to start do not run. Upstream pi starts them.
 
   See [RPC mode](crates/pi-coding-agent/docs/rpc.md#abort).
+- In RPC mode, extension dialogs wait until the client sends a command other than a `get_*` query. `get_commands` answers while a `session_start` handler waits for a dialog. Upstream pi sends dialogs at once and reads no input until its `session_start` handlers finish. See [RPC mode](crates/pi-coding-agent/docs/rpc.md#extension-dialogs).
 - `grep` and `find` use the Rust `ignore` crate, so pi-rust does not download `rg` or `fd`.
 - The version check and `pi update --self` use the releases of this repository.
 - Newer models come from the catalog at `pi-rust.com` (`PI_CATALOG_URL` overrides it), which this repository generates from upstream's catalog generator at the upstream commit of the latest release. Upstream pi reads its catalog from `pi.dev`. See [Model catalog](docs/model-catalog.md).

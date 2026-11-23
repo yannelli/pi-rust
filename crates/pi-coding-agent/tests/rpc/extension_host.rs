@@ -91,6 +91,41 @@ async fn get_commands_waits_for_the_skills_extensions_discover() {
     rpc.finish().await;
 }
 
+const TRUST: &str = r#"export default function (pi) {
+	pi.on("session_start", async (_event, ctx) => {
+		const choice = await ctx.ui.select("Run untrusted hook?", ["Allow once", "Deny"]);
+		ctx.ui.notify(`hook ${choice}`);
+	});
+	pi.registerCommand("hooks", { handler: async () => {} });
+}
+"#;
+
+/// Paseo probes a new pi with `get_commands` alone and never answers dialogs, and it listens for
+/// dialogs only after `get_state`. A `session_start` dialog waits for the prompt.
+#[tokio::test(flavor = "multi_thread")]
+async fn startup_dialogs_wait_for_a_command_that_acts_on_the_session() {
+    let options = Options { responses: vec![FauxResponse::text("done")], ..Options::default() };
+    let rpc_options = RpcModeOptions { extension_host: Some(ExtensionRpcHost::shared()), handle_signals: false };
+    let mut rpc = start_with(options, rpc_options, |h, _| {
+        std::fs::create_dir_all(h.agent_dir.join("extensions")).unwrap();
+        std::fs::write(h.agent_dir.join("extensions/trust.ts"), TRUST).unwrap();
+    })
+    .await;
+    rpc.data(json!({"id": "s", "type": "get_state"})).await;
+    let commands = rpc.data(json!({"id": "c", "type": "get_commands"})).await["commands"].clone();
+    assert!(commands.as_array().unwrap().iter().any(|command| command["name"] == "hooks"), "{commands}");
+    assert!(rpc.records_of("extension_ui_request").is_empty(), "held while the client only queries");
+
+    rpc.send(json!({"id": "p", "type": "prompt", "message": "hello"})).await;
+    let select = rpc.wait_for(|record| record["method"] == "select").await;
+    assert_eq!(select["title"], "Run untrusted hook?");
+    assert!(rpc.h.requests().is_empty(), "the prompt waits for session_start");
+    rpc.send(json!({"type": "extension_ui_response", "id": select["id"], "value": "Allow once"})).await;
+    notified(&rpc, "hook Allow once").await;
+    rpc.settled(1).await;
+    rpc.finish().await;
+}
+
 const NOTES: &str = r#"export default function (pi) {
 	pi.registerCommand("notes", { handler: async () => {
 		pi.sendMessage({ customType: "unset", content: "no display" });

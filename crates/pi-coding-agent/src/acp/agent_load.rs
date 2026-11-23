@@ -132,7 +132,10 @@ impl AcpAgent {
             "_meta": {"piAcp": {"startupInfo": null}},
         });
         let (agent, cwd) = (self.this(), params.cwd.clone());
-        let after = async move { agent.advertise_commands(&session, &cwd).await };
+        let after = async move {
+            session.start_event_pump();
+            agent.advertise_commands(&session, &cwd).await;
+        };
         Ok(Handled { response, after: Some(Box::pin(after)) })
     }
 }

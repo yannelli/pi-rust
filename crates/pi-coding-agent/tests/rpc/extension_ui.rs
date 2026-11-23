@@ -86,6 +86,7 @@ fn without_id(mut record: Value) -> Value {
 #[tokio::test]
 async fn dialogs_round_trip_through_extension_ui_responses() {
     let (mut rpc, host) = start_host(Options::default()).await;
+    rpc.data(json!({"id": "q", "type": "clear_queue"})).await;
     let ui = binding(&host).ui;
     assert_eq!(binding(&host).mode(), ExtensionMode::Rpc);
     assert!(binding(&host).mode().has_ui());
@@ -144,13 +145,14 @@ async fn dialogs_round_trip_through_extension_ui_responses() {
     rpc.send(json!({"type": "extension_ui_response", "id": record["id"], "cancelled": true})).await;
     assert!(!cancelled.await.unwrap());
     assert_eq!(ui.pending_count(), 0);
-    assert!(rpc.records_of("response").is_empty(), "UI responses get no command response");
+    assert_eq!(rpc.records_of("response").len(), 1, "UI responses get no command response");
     rpc.finish().await;
 }
 
 #[tokio::test]
 async fn dialogs_resolve_to_defaults_on_timeout_and_cancellation() {
     let (mut rpc, host) = start_host(Options::default()).await;
+    rpc.data(json!({"id": "q", "type": "clear_queue"})).await;
     let ui = binding(&host).ui;
     let answer = ui.select("Pick", &["a".into()], DialogOptions::with_timeout(Duration::from_millis(50))).await;
     assert_eq!(answer, None);

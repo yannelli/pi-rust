@@ -35,6 +35,16 @@ A `/reload` or an extension change binds the extensions again. Extensions from `
 
 An extension command with the same name as a built-in command replaces it: the prompt runs the extension command, and `get_commands` lists only the extension command. Upstream pi has no built-in RPC commands, so its extension commands always run.
 
+## Extension dialogs
+
+pi holds extension dialogs (`select`, `confirm`, `input`, and `editor`) until the client sends a command other than a `get_*` query. Then pi sends the held dialogs and sends later dialogs at once. A client can start pi, query it with `get_state` or `get_commands`, and start to read records before the first dialog arrives. A client that only queries pi, such as the Paseo probe that checks `get_commands` for `/mcp`, gets no dialogs. pi sends notifications and the other records that need no answer at once.
+
+The timeout of a held dialog starts when pi sends the dialog.
+
+`get_commands` waits for the `session_start` and `resources_discover` handlers, as in upstream pi. While a dialog waits for the client, `get_commands` answers at once. That list does not have the skills and prompts that `resources_discover` adds after the dialog. A `prompt` waits until the `session_start` handlers finish.
+
+Upstream pi sends dialogs at once and reads no input until its `session_start` handlers finish. A `session_start` dialog without a timeout stops upstream pi.
+
 ## agentInvoked
 
 The `prompt` response data has `agentInvoked` when pi knows whether the prompt reached the model:
