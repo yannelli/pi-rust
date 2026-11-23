@@ -22,7 +22,7 @@ const REPORT: &str = "PI_TUI_CONSOLE_REPORT";
 /// Set in a ConPTY child: files the child drops here go to the ConPTY input pipe.
 pub(crate) const CONPTY_INPUT_DIR: &str = "PI_CONPTY_INPUT_DIR";
 const CHILD_TEST: &str = "windows_console::console_child";
-pub(crate) const COOKED: u32 = 0x0001 | 0x0002 | 0x0004;
+const COOKED: u32 = 0x0001 | 0x0002 | 0x0004;
 const WINDOW_INPUT: u32 = 0x0008;
 const QUICK_EDIT: u32 = 0x0040;
 const EXTENDED_FLAGS: u32 = 0x0080;
@@ -91,9 +91,8 @@ pub(crate) fn run(scenario: &str, backend: Backend) -> Child {
         }
     };
     let log = format!(
-        "{scenario} on {backend:?}, exit {:?}\nnotes:\n{}\nstdout:\n{}\nstderr:\n{}",
+        "{scenario} on {backend:?}, exit {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
-        std::fs::read_to_string(report.with_extension("notes")).unwrap_or_default(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -124,14 +123,6 @@ pub(crate) fn record(report: &Path, key: &str, mode: u32) {
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new().create(true).append(true).open(report).unwrap();
     writeln!(file, "{key}={mode:x}").unwrap();
-}
-
-/// Appends a free-form line that the parent test shows in [`Child::log`].
-pub(crate) fn note(report: &Path, line: &str) {
-    use std::io::Write;
-    let path = report.with_extension("notes");
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap();
-    writeln!(file, "{line}").unwrap();
 }
 
 fn start_tui() -> Tui {
