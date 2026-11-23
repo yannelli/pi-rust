@@ -230,3 +230,18 @@ fn sorts_directories_first_then_by_name() {
         suggest(&provider, "", 0, true).expect("suggestions").items.into_iter().map(|item| item.label).collect();
     assert_eq!(labels, ["Alpha/", "beta/", "a.md", "A.txt", "b.txt"]);
 }
+
+/// `..` steps out of the working directory, whose Windows path uses `\` and a drive prefix.
+#[test]
+fn parent_directory_prefixes_resolve_against_the_working_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let base = root.path().join("cwd");
+    std::fs::create_dir_all(&base).unwrap();
+    setup_folder(&root.path().join("outside"), &[], &[("nested/alpha.ts", ""), ("nested/zzz.ts", "")]);
+    let provider = provider(&base);
+    let found = values(&suggest(&provider, "@../outside/a", 13, false));
+    assert!(found.contains(&"@../outside/nested/alpha.ts".to_string()), "{found:?}");
+    assert!(!found.contains(&"@../outside/nested/zzz.ts".to_string()), "{found:?}");
+    assert_eq!(values(&suggest(&provider, "../", 3, true)), ["../cwd/", "../outside/"]);
+    assert_eq!(values(&suggest(&provider, "../outside/nested/al", 20, true)), ["../outside/nested/alpha.ts"]);
+}

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::AutocompleteItem;
 use super::paths::{
-    basename, build_completion_value, dirname, join, locale_compare, parse_path_prefix, to_display_path,
+    basename, build_completion_value, dirname, join, join_native, locale_compare, parse_path_prefix, to_display_path,
 };
 
 /// The user's home directory as a string.
@@ -18,7 +18,9 @@ pub(crate) fn home_dir() -> String {
 /// Expands `~` and `~/...` to the home directory, keeping a trailing slash.
 pub(crate) fn expand_home_path(path: &str) -> String {
     if let Some(rest) = path.strip_prefix("~/") {
-        let expanded = join(&[&home_dir(), rest]);
+        let expanded = join_native(&home_dir(), rest);
+        // Callers split the expansion with the `/`-only `dirname` and `basename`.
+        let expanded = if cfg!(windows) { to_display_path(&expanded) } else { expanded };
         if path.ends_with('/') && !expanded.ends_with('/') { format!("{expanded}/") } else { expanded }
     } else if path == "~" {
         home_dir()
@@ -39,12 +41,12 @@ pub(crate) fn get_file_suggestions(base_path: &str, prefix: &str) -> Vec<Autocom
 
     let is_root_prefix = matches!(raw, "" | "./" | "../" | "~" | "~/" | "/");
     let (search_dir, search_prefix) = if is_root_prefix || raw.ends_with('/') {
-        let dir = if is_absolute_like(raw, &expanded) { expanded.clone() } else { join(&[base_path, &expanded]) };
+        let dir = if is_absolute_like(raw, &expanded) { expanded.clone() } else { join_native(base_path, &expanded) };
         (dir, String::new())
     } else {
         let dir = dirname(&expanded);
         let file = basename(&expanded);
-        let dir = if is_absolute_like(raw, &expanded) { dir } else { join(&[base_path, &dir]) };
+        let dir = if is_absolute_like(raw, &expanded) { dir } else { join_native(base_path, &dir) };
         (dir, file)
     };
 
