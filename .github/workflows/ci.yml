@@ -52,9 +52,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, shard: 1, shards: 2 }
-          - { os: ubuntu-latest, shard: 2, shards: 2 }
-          - { os: macos-latest, shard: 1, shards: 1 }
+          - { os: ubuntu-latest, shard: 1, shards: 4 }
+          - { os: ubuntu-latest, shard: 2, shards: 4 }
+          - { os: ubuntu-latest, shard: 3, shards: 4 }
+          - { os: ubuntu-latest, shard: 4, shards: 4 }
+          - { os: macos-latest, shard: 1, shards: 2 }
+          - { os: macos-latest, shard: 2, shards: 2 }
           - { os: windows-latest, shard: 1, shards: 6 }
           - { os: windows-latest, shard: 2, shards: 6 }
           - { os: windows-latest, shard: 3, shards: 6 }
