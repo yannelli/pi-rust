@@ -125,6 +125,18 @@ pub(crate) fn shell_config(custom: Option<&str>) -> Result<ShellConfig, Executio
     Ok(ShellConfig { shell: "sh".into(), args: vec!["-c".into()], command_from_stdin: false })
 }
 
+/// Make `command` start in a new session without a controlling terminal, as Node's `detached` does,
+/// so it cannot open the terminal through `/dev/tty` and take its foreground process group. The
+/// command also leads a new process group, which `kill_process_tree` signals.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+pub fn run_in_new_session(command: &mut tokio::process::Command) {
+    // SAFETY: the hook runs between fork and exec and only makes the async-signal-safe setsid call.
+    unsafe {
+        command.pre_exec(|| rustix::process::setsid().map(drop).map_err(Into::into));
+    }
+}
+
 /// Kill a process and its descendants: its process group on Unix, `taskkill /F /T` on Windows. Best effort.
 #[cfg(unix)]
 pub(crate) fn kill_process_tree(pid: u32) {

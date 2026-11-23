@@ -45,5 +45,10 @@ anyhow.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
 
-[lints]
-workspace = true
+# Same lints as the workspace, except `unsafe_code` is `deny` instead of `forbid`: `run_in_new_session`
+# in `env/local/process.rs` allows it for the `setsid` call between fork and exec.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

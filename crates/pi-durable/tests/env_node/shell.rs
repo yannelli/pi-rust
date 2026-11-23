@@ -125,6 +125,27 @@ async fn uses_stdin_command_transport_for_legacy_wsl_bash_paths() {
     assert!(output.contains("args:-s"), "{output}");
 }
 
+/// Not in upstream: a command outside the host's session cannot open its terminal and take the foreground group.
+#[cfg(unix)]
+#[tokio::test]
+async fn runs_commands_in_their_own_session() {
+    use rustix::process::{Pid, getsid};
+    let dir = temp_dir();
+    let (ctx, controller) = abortable();
+    let session: Arc<Mutex<Option<(Pid, Pid)>>> = Arc::default();
+    let seen = session.clone();
+    let on_output = Arc::new(move |text: &str, _: &Context, _: &_| {
+        let pid = text.trim().parse().ok().and_then(Pid::from_raw).unwrap();
+        *seen.lock().unwrap() = Some((pid, getsid(Some(pid)).unwrap()));
+        controller.abort(None);
+    });
+    let options = ShellExecOptions { on_output: Some(on_output), ..Default::default() };
+    let error = local_env(dir.path()).exec("echo $$; sleep 30".into(), options, &ctx).await.unwrap_err();
+    assert_eq!(error.code, ExecutionErrorCode::Aborted, "{error:?}");
+    let (pid, sid) = session.lock().unwrap().unwrap();
+    assert_eq!(sid, pid);
+}
+
 // "settles after the shell exits when a detached descendant keeps inherited stdio open" runs only on Windows upstream
 // and spawns Node; the exit grace period it checks is the code path of the last spill test in `spill.rs`.
 

@@ -202,7 +202,7 @@ pub async fn execute_bash_command(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     #[cfg(unix)]
-    process.process_group(0);
+    pi_durable::env::local::run_in_new_session(&mut process);
     let mut child = process.spawn().map_err(|error| anyhow::anyhow!("Failed to start shell: {error}"))?;
     let _tracked = crate::signals::DetachedChildGuard::new(child.id());
     if let Some(mut stdin) = child.stdin.take() {

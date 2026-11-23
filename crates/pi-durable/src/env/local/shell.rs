@@ -236,7 +236,7 @@ impl Shell for LocalExecutionEnv {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         #[cfg(unix)]
-        process.process_group(0);
+        super::process::run_in_new_session(&mut process);
         #[cfg(windows)]
         process.creation_flags(super::process::CREATE_NO_WINDOW);
         let mut child = process.spawn().map_err(|error| {
