@@ -79,7 +79,7 @@ pub trait ShellOperations: Send + Sync {
 
 type ShellResolver = Arc<dyn Fn() -> anyhow::Result<ShellConfig> + Send + Sync>;
 
-/// Runs commands as local processes, each in its own process group.
+/// Runs commands as local processes, each in its own session and process group.
 #[derive(Clone)]
 pub struct LocalShellOperations {
     shell_name: String,
@@ -237,7 +237,7 @@ impl ShellOperations for LocalShellOperations {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         #[cfg(unix)]
-        process.process_group(0);
+        pi_durable::env::local::run_in_new_session(&mut process);
         #[cfg(windows)]
         process.creation_flags(CREATE_NO_WINDOW);
         let mut child = process.spawn().map_err(|e| anyhow!("Failed to start {}: {e}", self.shell_name))?;
@@ -322,5 +322,26 @@ mod tests {
             powershell_shell_config().unwrap_err().to_string(),
             "The powershell tool is only available on Windows."
         );
+    }
+
+    /// A command outside pi's session cannot open pi's terminal and take its foreground group.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_commands_in_their_own_session() {
+        use rustix::process::{Pid, getsid};
+        let dir = tempfile::tempdir().unwrap();
+        let cancel = CancellationToken::new();
+        let session: Arc<std::sync::Mutex<Option<(Pid, Pid)>>> = Arc::default();
+        let (stop, seen) = (cancel.clone(), session.clone());
+        let on_data: ShellDataCallback = Arc::new(move |data| {
+            let pid = String::from_utf8_lossy(data).trim().parse().ok().and_then(Pid::from_raw).unwrap();
+            *seen.lock().unwrap() = Some((pid, getsid(Some(pid)).unwrap()));
+            stop.cancel();
+        });
+        let options = ShellExecOptions { on_data, cancel, timeout: None, env: None };
+        let result = LocalShellOperations::bash(None).exec("echo $$; sleep 30", dir.path(), options).await;
+        assert!(matches!(result, Err(ShellExecError::Aborted)), "{result:?}");
+        let (pid, sid) = session.lock().unwrap().unwrap();
+        assert_eq!(sid, pid);
     }
 }

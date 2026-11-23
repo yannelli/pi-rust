@@ -13,6 +13,8 @@ mod watch_scan;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(unix)]
+pub use process::run_in_new_session;
 pub use watch::LocalFileWatcher;
 
 /// How a `LocalExecutionEnv` watches.
