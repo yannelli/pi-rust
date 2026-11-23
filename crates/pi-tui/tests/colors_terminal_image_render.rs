@@ -341,7 +341,9 @@ fn wraps_shortened_absolute_paths_in_osc_8_file_links_when_hyperlinks_are_enable
     let abs = home_path(&[".pi", "agent", "shot.png"]).to_string_lossy().into_owned();
     let result = image_fallback("image/png", Some(dims(10, 10)), Some(&abs));
     assert!(result.contains("\x1b]8;;file://"), "expected OSC 8 file link");
-    assert!(result.contains(&abs.replace('\\', "/")) || result.contains(&abs), "file URL should target the path");
+    // The URL percent-encodes spaces, which a Windows profile path often has.
+    let url_path = abs.replace('\\', "/").replace(' ', "%20");
+    assert!(result.contains(&url_path), "file URL should target the path: {result:?}");
     let visible = Regex::new(r"\x1b\]8;;.*?\x1b\\").unwrap().replace_all(&result, "");
     assert_eq!(visible, format!("[Image: {} [image/png] 10x10]", short_shot()));
 }
