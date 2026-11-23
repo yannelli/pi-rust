@@ -263,6 +263,7 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "http2 request did not get a response",
     // Codex CLI mid-stream disconnect, relayed by proxies that wrap the Codex CLI.
     "stream disconnected before completion",
+    "cut short after the reply had begun",
     "pending stream has been canceled",
     "retry delay",
     "you can retry your request",

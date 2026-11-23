@@ -132,6 +132,7 @@ fn classifies_retryable_assistant_errors() {
         "stream disconnected before completion: stream closed before response.completed",
         "503",
         "(HTTP 502) Bad Gateway",
+        "Claude Code's stream from Anthropic was cut short after the reply had begun",
     ] {
         assert!(is_retryable_assistant_error(&error_message(text)), "{text}");
     }
