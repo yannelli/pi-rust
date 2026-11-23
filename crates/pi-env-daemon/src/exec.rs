@@ -1,6 +1,6 @@
 //! `exec`: Durable's `NodeExecutionEnv.exec` semantics (docs/semantics.md), output streamed as `output` events.
 
-use crate::decode::StreamDecoder;
+use crate::decode::{StreamDecoder, count_newlines};
 use crate::errors::Failure;
 use crate::frame::{EVENT, Frame};
 use crate::output::Output;
@@ -126,7 +126,7 @@ impl Spill {
         }
         if self.file.is_none() {
             self.seen_bytes += chunk.len() as u64;
-            self.seen_newlines += chunk.iter().filter(|byte| **byte == b'\n').count() as u64;
+            self.seen_newlines += count_newlines(chunk) as u64;
             let lines = self.seen_newlines + u64::from(chunk.last() != Some(&b'\n'));
             if self.seen_bytes <= self.after_bytes && lines <= self.after_lines {
                 self.prefix.push(chunk.to_vec());

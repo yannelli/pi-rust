@@ -8,6 +8,29 @@ pub fn starts_with_bom(first_bytes: &[u8]) -> bool {
     first_bytes.starts_with(&[0xef, 0xbb, 0xbf])
 }
 
+/// The number of `\n` bytes in `bytes`, counted eight at a time in a `u64` so the speed does not depend on the
+/// optimizer vectorizing a loop.
+pub fn count_newlines(bytes: &[u8]) -> usize {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    let mut total = 0;
+    // Each byte lane counts to at most 255 before the lanes are summed.
+    for run in bytes.chunks(255 * 8) {
+        let mut words = run.chunks_exact(8);
+        let mut lanes = 0u64;
+        for word in &mut words {
+            let other = u64::from_le_bytes(word.try_into().expect("8 bytes")) ^ (ONES * u64::from(b'\n'));
+            // A lane's high bit is set when the lane is nonzero, without carries between lanes.
+            let nonzero = ((other & LOW7) + LOW7) | other;
+            lanes += (!nonzero >> 7) & ONES;
+        }
+        let pairs = (lanes & 0x00ff_00ff_00ff_00ff) + ((lanes >> 8) & 0x00ff_00ff_00ff_00ff);
+        total += (pairs.wrapping_mul(0x0001_0001_0001_0001) >> 48) as usize;
+        total += words.remainder().iter().filter(|byte| **byte == b'\n').count();
+    }
+    total
+}
+
 /// Decodes one stream chunk by chunk exactly like decoding all of it at once.
 #[derive(Clone, Debug)]
 pub struct StreamDecoder {

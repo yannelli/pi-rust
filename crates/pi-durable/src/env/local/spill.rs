@@ -56,7 +56,7 @@ impl Spill {
             return self.write(chunk).await;
         }
         self.seen_bytes += chunk.len() as u64;
-        self.seen_newlines += chunk.iter().filter(|&&byte| byte == b'\n').count() as u64;
+        self.seen_newlines += crate::env::decode::count_newlines(chunk) as u64;
         let lines = self.seen_newlines + u64::from(chunk.last() != Some(&b'\n'));
         if self.seen_bytes <= self.options.after_bytes && lines <= self.options.after_lines {
             self.prefix.push(chunk.to_vec());

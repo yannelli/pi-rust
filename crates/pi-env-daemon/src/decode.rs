@@ -2,11 +2,35 @@
 #[path = "../../pi-durable/src/env/decode.rs"]
 mod durable;
 
-pub(crate) use durable::{StreamDecoder, starts_with_bom};
+pub(crate) use durable::{StreamDecoder, count_newlines, starts_with_bom};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_newlines_like_a_byte_filter() {
+        let mut inputs: Vec<Vec<u8>> = vec![Vec::new(), b"\n".repeat(255 * 8 * 3 + 7), (0..=255).collect()];
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        for length in 0..600 {
+            inputs.push(
+                (0..length)
+                    .map(|_| {
+                        state ^= state << 13;
+                        state ^= state >> 7;
+                        state ^= state << 17;
+                        [b'\n', b'\n' ^ 0x80, b'\n' + 1, b'a', 0xff][(state % 5) as usize]
+                    })
+                    .collect(),
+            );
+        }
+        for bytes in inputs {
+            for start in 0..bytes.len().min(9) {
+                let part = &bytes[start..];
+                assert_eq!(count_newlines(part), part.iter().filter(|byte| **byte == b'\n').count(), "{part:02x?}");
+            }
+        }
+    }
 
     #[test]
     fn keeps_a_feff_that_does_not_start_the_stream() {
