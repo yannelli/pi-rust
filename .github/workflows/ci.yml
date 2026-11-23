@@ -47,7 +47,8 @@ jobs:
       - run: cargo fmt --all --check
       - name: Check raw mode and crash recovery in Windows Console Host and ConPTY
         if: runner.os == 'Windows'
-        run: cargo test --locked -p pi-tui --test integration windows_console:: -- --include-ignored --test-threads=1
+        run: >-
+          cargo test --locked -p pi-tui --test integration windows_console:: -- --include-ignored --test-threads=1
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - uses: actions/setup-node@v4
         with:
