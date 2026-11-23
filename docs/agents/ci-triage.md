@@ -1,17 +1,17 @@
 # CI triage
 
-Created: 2026-10-21. Last updated: 2026-11-22.
+Created: 2026-10-21. Last updated: 2026-11-23.
 
 CI (`.github/workflows/ci.yml`) runs the repository checks from the [README](../../README.md#development) on each OS in its matrix. Each job stops after 60 minutes.
 
 ## Jobs and shards
 
-- `lint (<os>)` runs `cargo fmt --check` and `cargo clippy`.
+- `lint (<os>)` runs `cargo fmt --check` and `cargo clippy`. On macOS it also runs `scripts/test-install.sh`.
 - `test (<os>, <k>/<n>)` builds every test and runs slice `k` of `n` with [`cargo nextest run --partition slice:k/n`](https://nexte.st/docs/ci-features/partitioning/) (nextest 0.9.127 or later). Slices deal the listed tests round-robin, so a test can move to another shard when tests are added or removed. The Node backend step splits the same way.
 - Shard 1 of each OS also runs the tests with their own harness and the doc tests.
-- Shards: Linux 4, macOS 2, Windows 6. GitHub runs at most 5 macOS jobs at once, and a run has 4: lint, 2 shards and install scripts. The 2026-11-22 main run before the split took 27 minutes on Windows: 7m51 test build, 8m07 nextest run, 6m05 Node backend run. Change a count in the `include` list of the `test` job.
-- Only shard 1 of each OS saves the rust-cache entry.
-- macOS runners have 3 CPUs, 7.5 GB of memory and no swap. With a full cache hit, the macOS test build took 2m38 to 15m09 on 2026-11-22 and 23, so the macOS shards usually finish last.
+- Shards: Linux 4, Windows 6. macOS splits by target: `test (macos-latest, unit 1/1)` runs the lib unit tests (`--workspace --exclude pi-evals --lib`), and `test (macos-latest, integration k/2)` runs the bin and integration tests (`--workspace --bins --test '*'`). Integration shard 2 runs all Node backend tests. GitHub runs at most 5 macOS jobs at once, and a run has 4: lint and 3 test jobs. The 2026-11-22 main run before the split took 27 minutes on Windows: 7m51 test build, 8m07 nextest run, 6m05 Node backend run. Change a count in the `include` list of the `test` job.
+- Only shard 1 of each OS saves the rust-cache entry (on macOS, integration shard 1).
+- macOS runners have 3 CPUs, 7.5 GB of memory and no swap. With a full cache hit, the macOS test build took 2m38 to 15m09 on 2026-11-22 and 23, so the macOS jobs usually finish last. The `pi-coding-agent` lib unit tests take 3.7 GB to compile, and the lib and its integration test binary 2.8 GB each; the target split keeps the first apart from the other two. Each macOS test job prints its CPU model, CPU count and memory, and a `vm_stat` sample every 30 seconds.
 - The `test` job links the Windows MSVC target with `rust-lld`. x86_64 Linux uses `rust-lld` by default since [Rust 1.90](https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/).
 
 To repeat a failure locally, run the failing test by name. Slice numbers do not match across machines, because the test list differs by OS.
