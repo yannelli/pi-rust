@@ -5,15 +5,21 @@ use std::path::{Path, PathBuf};
 
 use super::write;
 use crate::resources::brand::{project_config_path, project_settings_dir};
-use crate::resources::load_project_context_files;
+use crate::resources::context::{ContextFile, load_context_files_up_to};
+
+/// The fixture's context files. The walk stops at the temp folder that holds `agent`, because a
+/// machine can keep its own context files above it, such as `/AGENTS.md`.
+fn load(cwd: &Path, agent: &Path) -> Vec<ContextFile> {
+    load_context_files_up_to(cwd, agent, agent.parent())
+}
 
 fn contents(cwd: &Path, agent: &Path) -> Vec<String> {
-    load_project_context_files(cwd, agent).into_iter().map(|file| file.content).collect()
+    load(cwd, agent).into_iter().map(|file| file.content).collect()
 }
 
 #[cfg(unix)]
 fn paths(cwd: &Path, agent: &Path) -> Vec<PathBuf> {
-    load_project_context_files(cwd, agent).into_iter().map(|file| file.path).collect()
+    load(cwd, agent).into_iter().map(|file| file.path).collect()
 }
 
 #[test]
@@ -27,7 +33,7 @@ fn prefers_override_per_directory_and_skips_directories() {
     write(&nested.join("AGENTS.md"), "service instructions");
     write(&nested.join("AGENTS.override.md"), "service override");
     assert_eq!(
-        load_project_context_files(&nested, &agent).into_iter().map(|f| (f.path, f.content)).collect::<Vec<_>>(),
+        load(&nested, &agent).into_iter().map(|f| (f.path, f.content)).collect::<Vec<_>>(),
         [
             (agent.join("AGENTS.override.md"), "global override".to_string()),
             (cwd.join("AGENTS.md"), "project instructions".to_string()),
@@ -39,7 +45,7 @@ fn prefers_override_per_directory_and_skips_directories() {
     std::fs::create_dir_all(other.join("AGENTS.override.md")).unwrap();
     std::fs::create_dir_all(other.join("AGENTS.md")).unwrap();
     write(&other.join("CLAUDE.md"), "\u{feff}Fallback instructions");
-    let files = load_project_context_files(&other, &temp.path().join("none"));
+    let files = load(&other, &temp.path().join("none"));
     assert_eq!(files.last().unwrap().path, other.join("CLAUDE.md"));
     assert_eq!(files.last().unwrap().content, "Fallback instructions");
 }

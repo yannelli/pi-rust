@@ -66,6 +66,9 @@ async fn load_project_context_files_matches_upstream() {
     let parent = tempfile::tempdir().unwrap();
     let parent_path = std::fs::canonicalize(parent.path()).unwrap();
     let (insensitive, root) = probe_volume(&parent_path);
+    // A machine can keep its own context files above the temp folder, such as `/AGENTS.md`. Every case
+    // loads them, so each case's `outside` count is compared without them.
+    let above = pi_coding_agent::config::load_context_files(&parent_path, &parent_path.join("no-agent")).len() as i64;
     let (golden, text) = if insensitive { CASE_INSENSITIVE } else { CASE_SENSITIVE };
     let expected: Value = serde_json::from_str(text).unwrap();
     assert_generated(&expected, golden);
@@ -89,13 +92,16 @@ async fn load_project_context_files_matches_upstream() {
     assert_eq!(actual.len(), cases.len(), "{:?}", actual.keys().collect::<Vec<_>>());
     let (mut compared, mut skipped) = (0, 0);
     for (name, case) in &cases {
-        let value = &actual[name.as_str()];
+        let mut value = actual[name.as_str()].clone();
+        if let Some(outside) = value["outside"].as_i64() {
+            value["outside"] = (outside - above).into();
+        }
         if (name.as_str(), value.as_str()) == (PERMISSION_CASE.0, Some(PERMISSION_CASE.1)) {
             skipped += 1;
             continue;
         }
         assert!(!value.as_str().is_some_and(|text| text.starts_with("skipped:")), "{name}: unexpected skip {value}");
-        assert_eq!(value, *case, "{name}");
+        assert_eq!(&value, *case, "{name}");
         compared += 1;
     }
     let kind = if insensitive { "case-insensitive" } else { "case-sensitive" };

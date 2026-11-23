@@ -275,13 +275,16 @@ fn legacy_options_keep_builtin_tool_snippets() {
     assert_eq!(build_system_prompt(&custom), "Custom.\n\n<cwd>\n/w\n</cwd>");
 }
 
-fn prompt_from_loader(cwd: &Path, agent: &Path, home: &Path, trusted: bool) -> String {
-    let mut options = ResourceLoaderOptions::new(cwd, agent);
-    options.home = home.to_path_buf();
+/// The prompt for `<root>/p`, with the agent dir `<root>/agent` and the home `<root>/home`.
+fn prompt_from_loader(root: &Path, trusted: bool) -> String {
+    let cwd = root.join("p");
+    let mut options = ResourceLoaderOptions::new(&cwd, &root.join("agent"));
+    options.home = root.join("home");
+    options.context_files_ceiling = Some(root.to_path_buf());
     options.project_trusted = trusted;
     let mut loader = ResourceLoader::new(options);
     loader.reload();
-    let mut prompt = BuildSystemPromptOptions::new(cwd).with_resources(loader.resources());
+    let mut prompt = BuildSystemPromptOptions::new(&cwd).with_resources(loader.resources());
     prompt.selected_tools = vec!["read".into()];
     prompt.tool_snippets.insert("read".into(), "Read file contents".into());
     render(&prompt)
@@ -290,7 +293,7 @@ fn prompt_from_loader(cwd: &Path, agent: &Path, home: &Path, trusted: bool) -> S
 #[test]
 fn snapshots_with_system_and_append_system_files() {
     let temp = tempfile::tempdir().unwrap();
-    let (agent, cwd, home) = (temp.path().join("agent"), temp.path().join("p"), temp.path().join("home"));
+    let (agent, cwd) = (temp.path().join("agent"), temp.path().join("p"));
     write(&agent.join("APPEND_SYSTEM.md"), "Global addendum.");
     write(&agent.join("skills/lint/SKILL.md"), "---\nname: lint\ndescription: Lint & fix.\n---\nRun it.");
     std::fs::create_dir_all(&cwd).unwrap();
@@ -299,7 +302,7 @@ fn snapshots_with_system_and_append_system_files() {
     let skills = format!(
         "<skills>\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>lint</name>\n    <description>Lint &amp; fix.</description>\n    <location>{skill_path}</location>\n  </skill>\n</available_skills>\n</skills>"
     );
-    let default_prompt = prompt_from_loader(&cwd, &agent, &home, true);
+    let default_prompt = prompt_from_loader(temp.path(), true);
     let head = "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<tools>\n- read: Read file contents\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.\n</tools>\n\n<rules>\n- Be concise in your responses\n- Show file paths clearly when working with files\n</rules>\n\n<docs>\n";
     assert!(default_prompt.starts_with(head), "{default_prompt}");
     let tail = format!("</docs>\n\n<addendum>\nGlobal addendum.\n</addendum>\n\n{skills}\n\n<cwd>\n{cwd_text}\n</cwd>");
@@ -311,6 +314,6 @@ fn snapshots_with_system_and_append_system_files() {
     let expected = |system: &str, addendum: &str| {
         format!("{system}\n\n<addendum>\n{addendum}\n</addendum>\n\n{skills}\n\n<cwd>\n{cwd_text}\n</cwd>")
     };
-    assert_eq!(prompt_from_loader(&cwd, &agent, &home, true), expected("Project system.", "Project addendum."));
-    assert_eq!(prompt_from_loader(&cwd, &agent, &home, false), expected("Global system.", "Global addendum."));
+    assert_eq!(prompt_from_loader(temp.path(), true), expected("Project system.", "Project addendum."));
+    assert_eq!(prompt_from_loader(temp.path(), false), expected("Global system.", "Global addendum."));
 }

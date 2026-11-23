@@ -124,6 +124,7 @@ impl AppOptions {
             no_prompt_templates: args.no_prompt_templates,
             no_themes: args.no_themes,
             no_context_files: args.no_context_files,
+            context_files_ceiling: None,
             system_prompt: args.system_prompt.as_deref().map(|input| resolve_prompt_arg(input, cwd)),
             append_system_prompt: (!append.is_empty())
                 .then(|| append.iter().map(|input| resolve_prompt_arg(input, cwd)).collect()),

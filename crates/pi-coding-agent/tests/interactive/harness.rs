@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use pi_ai::auth::InMemoryCredentialStore;
 use pi_ai::providers::faux::{FauxProvider, FauxResponse};
 use pi_ai::register_api_provider;
+use pi_coding_agent::agent_session::ResourceOptions;
 use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::interactive::{InteractiveMode, InteractiveOptions};
 use pi_coding_agent::keybindings::KeybindingsManager;
@@ -98,6 +99,10 @@ pub async fn start(options: Options) -> Ui {
         credential_env: Some(crate::offline_guard::credential_free_env()),
         run_limits: options.run_limits,
         oauth: options.oauth.clone(),
+        resources: ResourceOptions {
+            context_files_ceiling: Some(root.path().to_path_buf()),
+            ..ResourceOptions::default()
+        },
         ..AppOptions::default()
     };
     let manager = SessionManager::create(&cwd, Some(&agent_dir.join("sessions")));

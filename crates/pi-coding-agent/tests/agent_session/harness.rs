@@ -123,7 +123,11 @@ pub async fn harness_with(options: Options, configure: impl FnOnce(&mut CreateAg
         settings: Some(settings.clone()),
         credentials: Some(Arc::new(InMemoryCredentialStore::new(options.credentials.clone()))),
         credential_env: Some(offline_guard::credential_free_env()),
-        resources: ResourceOptions { home: Some(root.path().to_path_buf()), ..ResourceOptions::default() },
+        resources: ResourceOptions {
+            home: Some(root.path().to_path_buf()),
+            context_files_ceiling: Some(root.path().to_path_buf()),
+            ..ResourceOptions::default()
+        },
         ..CreateServicesOptions::new(&cwd, &agent_dir)
     })
     .await;

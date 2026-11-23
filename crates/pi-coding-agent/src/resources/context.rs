@@ -116,11 +116,18 @@ fn find_shadowed_context_file(cwd: &Path) -> Option<PathBuf> {
 /// The agent directory's context file, then one per directory from the filesystem root
 /// down to `cwd`. Context files load whether or not the project is trusted.
 pub fn load_project_context_files(cwd: &Path, agent_dir: &Path) -> Vec<ContextFile> {
+    load_context_files_up_to(cwd, agent_dir, None)
+}
+
+/// [`load_project_context_files`], searching no directory above `ceiling` when one is given.
+pub(crate) fn load_context_files_up_to(cwd: &Path, agent_dir: &Path, ceiling: Option<&Path>) -> Vec<ContextFile> {
     let cwd = absolute(cwd);
+    let ceiling = ceiling.map(absolute);
     let mut files: Vec<ContextFile> = context_file_in(&absolute(agent_dir)).into_iter().collect();
     let shadowed = find_shadowed_context_file(&cwd);
     let mut ancestors = Vec::new();
-    for dir in cwd.ancestors() {
+    let below_ceiling = |dir: &&Path| ceiling.as_ref().is_none_or(|ceiling| dir.starts_with(ceiling));
+    for dir in cwd.ancestors().take_while(below_ceiling) {
         let Some(file) = context_file_in(dir) else { continue };
         let is_shadowed = shadowed.as_ref().is_some_and(|shadowed| {
             file.path.file_name().is_some_and(|name| canonicalize(dir).join(name) == *shadowed)

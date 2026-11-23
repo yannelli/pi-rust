@@ -50,6 +50,9 @@ pub struct ResourceOptions {
     pub no_prompt_templates: bool,
     pub no_themes: bool,
     pub no_context_files: bool,
+    /// Highest directory searched for context files; `None` searches up to the filesystem root.
+    #[doc(hidden)]
+    pub context_files_ceiling: Option<PathBuf>,
     /// `--system-prompt`: replaces `SYSTEM.md`.
     pub system_prompt: Option<String>,
     /// `--append-system-prompt` values: replace `APPEND_SYSTEM.md`.
@@ -133,6 +136,7 @@ pub fn resource_loader_options(
     options.no_prompt_templates = resources.no_prompt_templates;
     options.no_themes = resources.no_themes;
     options.no_context_files = resources.no_context_files;
+    options.context_files_ceiling = resources.context_files_ceiling.clone();
     options.system_prompt = resources.system_prompt.clone();
     options.append_system_prompt = resources.append_system_prompt.clone();
     options.output_schema_prompt = resources.output_schema_prompt.clone();
