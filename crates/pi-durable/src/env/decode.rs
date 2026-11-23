@@ -108,6 +108,18 @@ impl StreamDecoder {
         text
     }
 
+    /// Raw bytes for a reader that decodes each result on its own: the held-back bytes, then the chunk, cut before an
+    /// unfinished character and without the stream's leading mark. Nothing is validated. `String::from_utf8_lossy` of
+    /// the result is the text `decode` returns for the same chunk.
+    pub fn pass_through(&mut self, mut bytes: Vec<u8>) -> Vec<u8> {
+        if self.pending_len > 0 {
+            bytes.splice(..0, self.pending[..self.pending_len].iter().copied());
+            self.pending_len = 0;
+        }
+        self.cut_complete(&mut bytes);
+        bytes
+    }
+
     /// Counts the bytes that decode would emit without allocating the decoded text.
     pub(crate) fn decoded_len(&mut self, bytes: &[u8]) -> usize {
         if self.pending_len == 0 && bytes.is_ascii() {
@@ -131,6 +143,16 @@ impl StreamDecoder {
         self.pending_len = 0;
         self.strip_bom = false;
         char::REPLACEMENT_CHARACTER.to_string()
+    }
+
+    /// The end of a `pass_through` stream: the held-back bytes, which decode to the U+FFFD that `finish` returns.
+    pub fn finish_raw(&mut self) -> Vec<u8> {
+        let held = self.pending[..self.pending_len].to_vec();
+        if !held.is_empty() {
+            self.pending_len = 0;
+            self.strip_bom = false;
+        }
+        held
     }
 
     /// The character that ends the held-back bytes, if `bytes` ends it, and the complete bytes after it.

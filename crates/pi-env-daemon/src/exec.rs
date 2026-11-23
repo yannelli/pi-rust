@@ -275,6 +275,8 @@ pub fn run(
         failed: None,
     });
     let mut pending = request.window.map(Pending::new);
+    // The window counts decoded bytes. Without it the host decodes each payload, so the bytes go out unvalidated.
+    let windowed = pending.is_some();
     let unsent = Arc::new(AtomicUsize::new(0));
     let names = ["stdout", "stderr"];
     let emit = |pending: &mut Option<Pending>, stream: usize, text: Vec<u8>| {
@@ -346,7 +348,9 @@ pub fn run(
                 if let Some(spill) = &mut spill {
                     spill.push(&bytes, tmpdir);
                 }
-                emit(&mut pending, stream, decoders[stream].decode_bytes(bytes));
+                let text =
+                    if windowed { decoders[stream].decode_bytes(bytes) } else { decoders[stream].pass_through(bytes) };
+                emit(&mut pending, stream, text);
                 if spill.as_ref().is_some_and(|spill| spill.failed.is_some()) {
                     kill(&mut killed);
                 }
@@ -378,8 +382,10 @@ pub fn run(
         sys::interrupt_reader(reader);
     }
     groups.lock().unwrap().remove(&pid);
-    emit(&mut pending, 0, decoders[0].finish().into_bytes());
-    emit(&mut pending, 1, decoders[1].finish().into_bytes());
+    for (stream, decoder) in decoders.iter_mut().enumerate() {
+        let text = if windowed { decoder.finish().into_bytes() } else { decoder.finish_raw() };
+        emit(&mut pending, stream, text);
+    }
     if let Some(pending) = &mut pending
         && !pending.is_empty()
     {

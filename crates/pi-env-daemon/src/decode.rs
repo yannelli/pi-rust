@@ -67,7 +67,7 @@ mod tests {
                 for second in first..=bytes.len() {
                     let parts = [&bytes[..first], &bytes[first..second], &[], &bytes[second..]];
                     let (mut text, mut owned) = (fresh.clone(), fresh.clone());
-                    let mut as_bytes = fresh.clone();
+                    let (mut as_bytes, mut raw) = (fresh.clone(), fresh.clone());
                     let decoded: String =
                         parts.iter().map(|part| text.decode(part)).collect::<String>() + &text.finish();
                     let from_vecs: String =
@@ -75,9 +75,15 @@ mod tests {
                     let mut from_bytes: Vec<u8> =
                         parts.iter().flat_map(|part| as_bytes.decode_bytes(part.to_vec())).collect();
                     from_bytes.extend(as_bytes.finish().into_bytes());
+                    let passed: String = parts
+                        .iter()
+                        .map(|part| String::from_utf8_lossy(&raw.pass_through(part.to_vec())).into_owned())
+                        .collect::<String>()
+                        + &String::from_utf8_lossy(&raw.finish_raw());
                     assert_eq!(decoded, expected, "decode split at {first} and {second}");
                     assert_eq!(from_vecs, expected, "decode_vec split at {first} and {second}");
                     assert_eq!(from_bytes, expected.as_bytes(), "decode_bytes split at {first} and {second}");
+                    assert_eq!(passed, expected, "pass_through split at {first} and {second}");
                 }
             }
         }
@@ -109,7 +115,7 @@ mod tests {
     }
 
     /// Random chunks of damaged text, long enough that runs cross the 4 KiB pieces: `decode_bytes` returns the bytes of
-    /// `decode`.
+    /// `decode`, and the lossy text of each `pass_through` result is the text `decode` returns for the same chunk.
     #[test]
     fn byte_forms_match_decode_chunk_by_chunk() {
         let alphabet: [&[u8]; 12] = [
@@ -140,16 +146,18 @@ mod tests {
         }
         let sizes = [1, 2, 3, 5, 64, 4095, 4096, 4097, 9000];
         for _ in 0..4 {
-            let (mut text, mut as_bytes) = (StreamDecoder::new(), StreamDecoder::new());
+            let (mut text, mut as_bytes, mut raw) = (StreamDecoder::new(), StreamDecoder::new(), StreamDecoder::new());
             let mut rest = &bytes[..];
             while !rest.is_empty() {
                 let (chunk, after) = rest.split_at(sizes[below(sizes.len())].min(rest.len()));
                 let expected = text.decode(chunk);
                 assert_eq!(as_bytes.decode_bytes(chunk.to_vec()), expected.as_bytes());
+                assert_eq!(String::from_utf8_lossy(&raw.pass_through(chunk.to_vec())), expected);
                 rest = after;
             }
             let expected = text.finish();
             assert_eq!(as_bytes.finish(), expected);
+            assert_eq!(String::from_utf8_lossy(&raw.finish_raw()), expected);
         }
     }
 
