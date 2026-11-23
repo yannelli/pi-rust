@@ -104,3 +104,22 @@ fn cache_reuses_entries_by_content() {
     assert_eq!(*a, *c);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 }
+
+#[test]
+fn in_memory_lookups_neither_write_nor_read_the_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = TranspileCache::new(TranspileOptions::default(), Some(dir.path().to_path_buf()));
+    let built_in = cache.get_or_transpile_in_memory(Path::new("/host.ts"), "export const b: number = 2;").unwrap();
+    assert!(Arc::ptr_eq(
+        &built_in,
+        &cache.get_or_transpile_in_memory(Path::new("/host.ts"), "export const b: number = 2;").unwrap()
+    ));
+    assert_eq!(std::fs::read_dir(dir.path()).map(Iterator::count).unwrap_or(0), 0);
+    let disk = TranspileCache::new(TranspileOptions::default(), Some(dir.path().to_path_buf()));
+    disk.get_or_transpile(Path::new("/user.ts"), "export const c: number = 3;").unwrap();
+    let entry = std::fs::read_dir(dir.path()).unwrap().next().unwrap().unwrap().path();
+    std::fs::write(&entry, "not json").unwrap();
+    let fresh = TranspileCache::new(TranspileOptions::default(), Some(dir.path().to_path_buf()));
+    let again = fresh.get_or_transpile_in_memory(Path::new("/user.ts"), "export const c: number = 3;").unwrap();
+    assert!(again.code.contains("const c = 3"), "{}", again.code);
+}

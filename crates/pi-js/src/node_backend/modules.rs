@@ -44,8 +44,25 @@ fn file_url(path: &Path) -> Result<String, JsError> {
         .map_err(|()| JsError::new(format!("cannot make a file URL of {}", path.display())))
 }
 
+/// Whether a string literal in `source` could hold an absolute path: a quote before `/`, `\`,
+/// or a drive letter. Most modules have none, and then [`file_specifiers`] skips its parse.
+fn may_have_absolute_specifier(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    bytes.iter().enumerate().any(|(index, byte)| {
+        matches!(byte, b'"' | b'\'' | b'`')
+            && match &bytes[index + 1..] {
+                [b'/' | b'\\', ..] => true,
+                [letter, b':', ..] => letter.is_ascii_alphabetic(),
+                _ => false,
+            }
+    })
+}
+
 // Node 22's require(ESM) asserts on Windows drive paths before it calls the resolve hook.
 fn file_specifiers(source: &str) -> Result<String, JsError> {
+    if !may_have_absolute_specifier(source) {
+        return Ok(source.to_string());
+    }
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, source, SourceType::mjs()).parse();
     if !parsed.diagnostics.is_empty() {
@@ -100,17 +117,23 @@ pub(crate) fn load(shared: &Shared, client: &NodeClient, path: &str) -> Result<V
     }
     let key = path.display().to_string();
     let inline = client.inline_sources.read().unwrap_or_else(|poison| poison.into_inner()).get(&key).cloned();
-    let source = match inline.or_else(|| crate::modules::registered_source(shared, &key)) {
-        Some(source) => source.to_string(),
+    let (source, in_memory) = match inline.or_else(|| crate::modules::registered_source(shared, &key)) {
+        Some(source) => (source.to_string(), true),
         None if crate::transpile::needs_transform(path) => {
-            std::fs::read_to_string(path).map_err(|error| JsError::from_io(&error, "open", Some(&key)))?
+            let source = std::fs::read_to_string(path).map_err(|error| JsError::from_io(&error, "open", Some(&key)))?;
+            (source, false)
         }
         None => return Ok(Value::Null),
     };
     if path.extension().is_some_and(|ext| ext == "json") {
         return Ok(json!({ "format": "json", "source": source }));
     }
-    let transpiled = shared.transpiler.get_or_transpile(path, &source)?;
+    // The host modules and their vendored packages are about 800 registered sources.
+    let transpiled = if in_memory {
+        shared.transpiler.get_or_transpile_in_memory(path, &source)?
+    } else {
+        shared.transpiler.get_or_transpile(path, &source)?
+    };
     Ok(match transpiled.format {
         ModuleFormat::Esm => {
             let mut prefix = String::new();
@@ -163,6 +186,24 @@ fn json_module(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_possible_absolute_specifiers_need_the_rewrite_parse() {
+        for source in
+            ["import a from \"./a.mjs\";", "export * from '../b.js';", "const s = `x/y`;", "import(\"pkg\");", ""]
+        {
+            assert!(!may_have_absolute_specifier(source), "{source}");
+            assert_eq!(file_specifiers(source).unwrap(), source);
+        }
+        for source in [
+            "import \"/abs/a.js\";",
+            "import 'C:/x/a.js';",
+            "import \"c:\\\\x\\\\a.js\";",
+            "import(`\\\\\\\\s\\\\a.js`);",
+        ] {
+            assert!(may_have_absolute_specifier(source), "{source}");
+        }
+    }
 
     #[test]
     fn virtual_names_round_trip_through_paths() {
