@@ -240,6 +240,10 @@ const RETRYABLE_PATTERNS: &[&str] = &[
     "connection.?lost",
     "other side closed",
     "fetch failed",
+    // reqwest's words for Node's "fetch failed" and "terminated": the request got no response,
+    // or the response body broke off mid-stream.
+    "error sending request",
+    "error decoding response body",
     r"request to \S+ failed, reason:",
     "getaddrinfo",
     "enotfound",
