@@ -304,12 +304,13 @@ pub enum SessionShareDestination {
     PiRust,
 }
 
-/// `sessionShareViewer` (pi-rust extension): the viewer that gist links from `/share` open.
+/// `sessionShareViewer` (pi-rust extension): the viewer that gist links from `/share` open. The
+/// default is upstream's pi.dev, so `/share` works as in upstream pi until the user picks pi-rust.com.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionShareViewer {
-    #[default]
     #[serde(rename = "pi-rust")]
     PiRust,
+    #[default]
     #[serde(rename = "pi.dev")]
     PiDev,
 }

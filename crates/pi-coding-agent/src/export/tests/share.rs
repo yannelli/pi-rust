@@ -95,7 +95,7 @@ fn viewer_url_appends_the_gist_id() {
     assert_eq!(share_viewer_url_with(None, pi_rust, "abc"), "https://pi-rust.com/session/#abc");
     assert_eq!(share_viewer_url_with(Some(""), pi_rust, "abc"), "https://pi-rust.com/session/#abc");
     assert_eq!(share_viewer_url_with(None, pi_dev, "abc"), "https://pi.dev/session/#abc");
-    assert_eq!(SessionShareViewer::default(), pi_rust);
+    assert_eq!(SessionShareViewer::default(), pi_dev);
 }
 
 #[test]

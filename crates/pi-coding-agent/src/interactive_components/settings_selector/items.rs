@@ -183,9 +183,9 @@ pub(super) fn build_items(config: &SettingsConfig, supports_images: bool, submen
         item(
             "share-viewer",
             "Session share viewer",
-            "Viewer that GitHub Gist links from /share open: pi-rust.com or upstream pi.dev",
+            "Viewer that GitHub Gist links from /share open: upstream pi.dev or pi-rust.com",
             enum_str(config.session_share_viewer),
-            &["pi-rust", "pi.dev"],
+            &["pi.dev", "pi-rust"],
         ),
         item(
             "http-idle-timeout",

@@ -62,13 +62,13 @@ async fn share_service_question_saves_the_choice_once() {
         let writes = terminal.borrow().writes();
         assert!(writes.contains("Where should /share send your sessions?"), "{writes}");
         assert!(
-            writes.contains("pi-rust.com: your pi-rust.com account") && writes.contains("pi.dev: upstream pi"),
+            writes.contains("pi.dev: as upstream pi") && writes.contains("pi-rust.com: your pi-rust.com account"),
             "{writes}"
         );
-        assert_eq!(manager.session_share_viewer(), SessionShareViewer::PiDev);
-        assert_eq!(manager.session_share_destination(), SessionShareDestination::Auto);
+        assert_eq!(manager.session_share_viewer(), SessionShareViewer::PiRust);
+        assert_eq!(manager.session_share_destination(), SessionShareDestination::PiRust);
         let saved = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
-        assert!(saved.contains("\"sessionShareViewer\": \"pi.dev\""), "{saved}");
+        assert!(saved.contains("\"sessionShareViewer\": \"pi-rust\""), "{saved}");
 
         let reopened = settings(dir.path());
         assert!(reopened.session_share_viewer_chosen());
@@ -78,7 +78,8 @@ async fn share_service_question_saves_the_choice_once() {
         feed(&terminal, &["\x1b"]);
         show_share_service_choice_on(terminal, &dismissed).await;
         assert!(dismissed.session_share_viewer_chosen());
-        assert_eq!(dismissed.session_share_viewer(), SessionShareViewer::PiRust);
+        assert_eq!(dismissed.session_share_viewer(), SessionShareViewer::PiDev);
+        assert_eq!(dismissed.session_share_destination(), SessionShareDestination::Auto);
     })
     .await;
 }
