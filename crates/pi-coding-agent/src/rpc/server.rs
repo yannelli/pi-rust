@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use serde_json::{Value, json};
 use tokio::io::AsyncRead;
+use tokio::sync::watch;
 
 use super::host::{RpcExtensionBinding, RpcExtensionHost, RpcShutdownHandle};
 use super::jsonl::JsonlReader;
@@ -38,10 +39,28 @@ pub(super) struct RpcServer {
     pub host: Option<Arc<dyn RpcExtensionHost>>,
     pub shutdown: RpcShutdownHandle,
     subscription: Mutex<Option<(Arc<AgentSession>, u64)>>,
+    /// Commands read during an extension binding that have not run since it ended.
+    held: watch::Sender<usize>,
     weak: Weak<RpcServer>,
 }
 
 type Task = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Counts a command in [`RpcServer::held`] until dropped.
+struct Held<'a>(&'a watch::Sender<usize>);
+
+impl<'a> Held<'a> {
+    fn new(count: &'a watch::Sender<usize>) -> Self {
+        count.send_modify(|count| *count += 1);
+        Self(count)
+    }
+}
+
+impl Drop for Held<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
+    }
+}
 
 /// Run `task` until its first real wait, then let it continue in the background. Like a
 /// JavaScript async call, work that does not wait finishes before the next record is read.
@@ -69,7 +88,7 @@ async fn termination_signal() -> i32 {
 }
 
 impl RpcServer {
-    fn this(&self) -> Arc<Self> {
+    pub(super) fn this(&self) -> Arc<Self> {
         self.weak.upgrade().expect("the server outlives its tasks")
     }
 
@@ -137,21 +156,42 @@ impl RpcServer {
         if command.as_ref().is_ok_and(|command| !command.is_query()) {
             self.ui.open_dialogs();
         }
-        let reply = match command {
-            Err(message) => Some(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))),
-            Ok(command) => match self.handle_command(id.as_ref(), command).await {
-                Ok(reply) => reply,
-                Err(failure) => {
-                    let message = format!("{failure:#}");
-                    self.reply(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))).await;
-                    return;
-                }
-            },
+        let session = self.runtime.session();
+        let handling = async {
+            let reply = match command {
+                Err(message) => Some(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))),
+                Ok(command) => match self.handle_command(id.as_ref(), command).await {
+                    Ok(reply) => reply,
+                    Err(failure) => {
+                        let message = format!("{failure:#}");
+                        self.reply(Reply::Json(error(id.as_ref(), kind.as_ref(), &message))).await;
+                        return;
+                    }
+                },
+            };
+            if let Some(reply) = reply {
+                self.reply(reply).await;
+            }
+            self.shutdown.check();
         };
-        if let Some(reply) = reply {
-            self.reply(reply).await;
+        self.run_past_binding(&session, handling).await;
+    }
+
+    /// Run `handling` and hold the end of input until it ran once after the extensions of
+    /// `session` were bound, the point where upstream, which reads no input before, starts it.
+    pub(super) async fn run_past_binding(&self, session: &AgentSession, handling: impl Future<Output = ()>) {
+        let held = Held::new(&self.held);
+        let mut handling = std::pin::pin!(handling);
+        tokio::select! {
+            biased;
+            () = &mut handling => return,
+            () = session.wait_extensions_bound() => {}
         }
-        self.shutdown.check();
+        let first = futures::poll!(handling.as_mut());
+        drop(held);
+        if first.is_pending() {
+            handling.await;
+        }
     }
 
     /// Read and dispatch records until the loop must stop; returns the exit code.
@@ -164,7 +204,7 @@ impl RpcServer {
             tokio::select! {
                 line = reader.next_line() => match line {
                     Ok(Some(line)) => run_eagerly(Box::pin(self.this().handle_line(line))).await,
-                    Ok(None) => return 0,
+                    Ok(None) => break,
                     Err(failure) => {
                         eprintln!("Error: could not read RPC input: {failure}");
                         return 0;
@@ -174,6 +214,15 @@ impl RpcServer {
                 _ = self.shutdown.token().cancelled() => return 0,
                 code = &mut signal => return code,
             }
+        }
+        // Answer the commands that still wait for the extensions. No dialog can be answered now.
+        self.ui.close_input();
+        let mut held = self.held.subscribe();
+        tokio::select! {
+            _ = held.wait_for(|count| *count == 0) => 0,
+            _ = closed.cancelled() => 1,
+            _ = self.shutdown.token().cancelled() => 0,
+            code = &mut signal => code,
         }
     }
 
@@ -207,6 +256,7 @@ pub async fn serve_rpc(
         host: options.extension_host.clone(),
         shutdown: RpcShutdownHandle::default(),
         subscription: Mutex::new(None),
+        held: watch::channel(0).0,
         weak: weak.clone(),
     });
     server.bind(&runtime.session());

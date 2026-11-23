@@ -366,6 +366,7 @@ impl RpcServer {
             ..PromptOptions::default()
         };
         let (output, id) = (self.output.clone(), id.cloned());
+        let (server, bound) = (self.this(), session.clone());
         let run = async move {
             if let Err(failure) = session.prompt_with(&message, options).await
                 && !accepted.load(Ordering::SeqCst)
@@ -373,7 +374,8 @@ impl RpcServer {
                 output.send(&error(id.as_ref(), Some(&json!("prompt")), &format!("{failure:#}")));
             }
         };
-        run_eagerly(Box::pin(run)).await;
+        // The run outlives the command, so it holds the end of input itself.
+        run_eagerly(Box::pin(async move { server.run_past_binding(&bound, run).await })).await;
     }
 
     async fn bash(
