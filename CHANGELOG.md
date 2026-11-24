@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.37] - 2026-11-24
+
+### Added
+
+- **ai:** fast mode for openai, xai, claude fable 5.2, and cursor claude models ([b229937](https://github.com/yannelli/pi-rust/commit/b2299373c036defe95f2f4f890aaf70b9e4cf16a))
+
 ## [0.12.36] - 2026-11-23
 
 ### Added
