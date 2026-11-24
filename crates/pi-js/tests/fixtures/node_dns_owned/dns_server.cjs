@@ -88,22 +88,25 @@ function serveTcp(socket, server, respond) {
   socket.on("close", () => server.record({ transport: "tcp", event: "close" }));
 }
 
-async function bindPair(tcp, host) {
+// TCP picks the port and UDP takes the same one. The other order fails on Windows, where a UDP
+// port can fall in a TCP range that Hyper-V or WSL reserves (listen EACCES).
+async function bindPair(onConnection, host) {
   const type = host.includes(":") ? "udp6" : "udp4";
   for (let attempt = 0; ; attempt++) {
-    const udp = dgram.createSocket(type);
+    const tcp = net.createServer(onConnection);
     await new Promise((resolve, reject) => {
-      udp.once("error", reject);
-      udp.bind(0, host, () => (udp.off("error", reject), resolve()));
+      tcp.once("error", reject);
+      tcp.listen(0, host, () => (tcp.off("error", reject), resolve()));
     });
-    const port = udp.address().port;
-    const listened = await new Promise((resolve) => {
-      tcp.once("error", (error) => resolve(error));
-      tcp.listen(port, host, () => resolve(null));
+    const port = tcp.address().port;
+    const udp = dgram.createSocket(type);
+    const bound = await new Promise((resolve) => {
+      udp.once("error", (error) => resolve(error));
+      udp.bind(port, host, () => resolve(null));
     });
-    if (!listened) return [udp, port];
-    if (attempt === 20) throw listened;
-    await new Promise((resolve) => udp.close(resolve));
+    if (!bound) return [tcp, udp, port];
+    if (attempt === 20) throw bound;
+    await new Promise((resolve) => tcp.close(resolve));
   }
 }
 
@@ -131,12 +134,11 @@ async function start(handler, host = "127.0.0.1") {
     const spec = await handler(query);
     if (spec) send(encode(query, spec), spec);
   };
-  const tcp = net.createServer((socket) => {
+  const [tcp, udp, port] = await bindPair((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     serveTcp(socket, server, respond);
-  });
-  const [udp, port] = await bindPair(tcp, host);
+  }, host);
   server.port = port;
   server.address = host.includes(":") ? `[${host}]:${server.port}` : `${host}:${server.port}`;
   udp.on("message", (message, rinfo) => respond("udp", message, rinfo.address, (reply) => udp.send(reply, rinfo.port, rinfo.address)));

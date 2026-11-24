@@ -175,6 +175,8 @@ mod tests {
         }
         std::fs::write(root.join(".gitignore"), "*.log\n").unwrap();
         let before = take(&root);
+        // File times follow a coarse clock (about 15.6 ms on Windows) that can lag the snapshot time.
+        std::thread::sleep(std::time::Duration::from_millis(20));
         let modified = std::fs::metadata(root.join("same.txt")).unwrap().modified().unwrap();
         std::fs::write(root.join("same.txt"), "xyz").unwrap();
         std::fs::File::options().write(true).open(root.join("same.txt")).unwrap().set_modified(modified).unwrap();
