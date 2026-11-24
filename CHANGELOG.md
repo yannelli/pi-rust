@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.36] - 2026-11-23
+
+### Added
+
+- **mermaid:** render Gantt charts and git graphs ([59cf181](https://github.com/yannelli/pi-rust/commit/59cf181ae0a0eff75aab40a48af3b1cfdbb08769))
+
 ## [0.12.35] - 2026-11-23
 
 ### Fixed
