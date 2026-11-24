@@ -228,6 +228,11 @@ impl InteractiveMode {
         if text.is_empty() {
             return;
         }
+        // The built-in /clear must report that it cannot run, not become a follow-up prompt.
+        if self.builtin_clear_args(&text).is_some() {
+            self.handle_submit(&text);
+            return;
+        }
         let session = self.session();
         if session.is_compacting() {
             self.editor.record_prompt(&text);

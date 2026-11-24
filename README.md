@@ -184,6 +184,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 | Addition | Upstream pi | Docs |
 | --- | --- | --- |
 | The slash commands `/diff`, `/init`, `/review`, `/context`, `/undo`, and `/retry` | Has none of them. Shows context use only in the footer. | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |
+| `/clear` clears the chat on the screen and keeps the session and the model context. An extension's `/clear` replaces it. | No built-in `/clear` | [/clear](crates/pi-coding-agent/docs/commands.md#clear) |
 | Markdown export: `/export notes.md` and `pi --export session.jsonl notes.md` | Exports only HTML and JSONL | [Export](crates/pi-coding-agent/docs/commands.md#export) |
 | Prompt history across sessions, with the Ctrl+R search and the `promptHistory` settings | Keeps prompt history only while the process runs | [Prompt history](crates/pi-coding-agent/docs/commands.md#prompt-history) |
 | Alt+Down (Alt+S on Windows, `app.message.sendNow`) sends the queued follow-ups after the current turn. It moves them to the steering queue. | Can only edit the queue or abort the turn | [Interactive commands](crates/pi-coding-agent/docs/commands.md) |

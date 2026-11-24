@@ -493,6 +493,10 @@
     {
       "item": "usage",
       "reason": "pi-rust extension: /usage shows the subscription limits of the current provider login. See docs/providers/usage.md."
+    },
+    {
+      "item": "clear",
+      "reason": "pi-rust extension: /clear clears the chat on the screen and keeps the session and the model context. An extension's /clear replaces it."
     }
   ],
   "tools": [],
