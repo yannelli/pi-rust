@@ -98,16 +98,21 @@ async fn clear_hides_the_chat_and_preserves_the_session_in_both_terminal_modes()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn clear_during_a_turn_does_not_queue_a_prompt() {
     local(async {
-        let ui = start(Options { responses: vec![FauxResponse::Hang], ..Options::default() }).await;
-        ui.submit("active prompt").await;
-        ui.wait_until("the active turn", |ui| ui.session().is_streaming()).await;
-        ui.submit("/clear").await;
-        ui.wait_for("Wait for the current work to finish before clearing chat.").await;
-        assert!(ui.screen().contains("active prompt"), "{}", ui.screen());
-        assert!(ui.session().is_streaming());
-        assert_eq!(ui.session().pending_message_count(), 0);
-        ui.send("\x1b").await;
-        ui.wait_until("the abort", |ui| !ui.session().is_streaming()).await;
+        let windows = pi_coding_agent::keybindings::use_windows_keybindings();
+        let follow_up = if windows { "\x11" } else { "\x1b\r" };
+        for submit in ["\r", follow_up] {
+            let ui = start(Options { responses: vec![FauxResponse::Hang], ..Options::default() }).await;
+            ui.submit("active prompt").await;
+            ui.wait_until("the active turn", |ui| ui.session().is_streaming()).await;
+            ui.send("/clear").await;
+            ui.send(submit).await;
+            ui.wait_for("Wait for the current work to finish before clearing chat.").await;
+            assert!(ui.screen().contains("active prompt"), "{}", ui.screen());
+            assert!(ui.session().is_streaming());
+            assert_eq!(ui.session().pending_message_count(), 0);
+            ui.send("\x1b").await;
+            ui.wait_until("the abort", |ui| !ui.session().is_streaming()).await;
+        }
     })
     .await;
 }

@@ -124,9 +124,7 @@ impl InteractiveMode {
         } else if text == "/new" {
             clear();
             self.handle_new_session();
-        } else if let Some(args) = argument(text, "clear")
-            && !self.has_extension_command("clear")
-        {
+        } else if let Some(args) = self.builtin_clear_args(text) {
             clear();
             if args.is_some() {
                 self.show_warning("Usage: /clear");
@@ -328,6 +326,10 @@ impl InteractiveMode {
                 Err(error) => mode.handle_fatal_runtime_error("Failed to create session", &error),
             }
         });
+    }
+
+    pub(super) fn builtin_clear_args<'a>(&self, text: &'a str) -> Option<Option<&'a str>> {
+        argument(text, "clear").filter(|_| !self.has_extension_command("clear"))
     }
 
     fn handle_clear_command(&self) {
