@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use pi_ai::Model;
-use pi_ai::auth::{ApiKeyCredential, AuthOverrides, AuthResolver, Credential};
+use pi_ai::auth::{ApiKeyCredential, AuthOverrides, AuthResolver, Credential, DEFAULT_OAUTH_MIN_VALIDITY_MS};
 use tokio_util::sync::CancellationToken;
 
 use super::store::{ModelsStore, ModelsStoreEntry};
@@ -68,8 +68,8 @@ pub trait DynamicCatalog: Send + Sync {
     }
 }
 
-/// Credentials from an [`AuthResolver`]: OAuth tokens refreshed as needed, API keys from
-/// `auth.json`, `models.json`, or the environment.
+/// Credentials from an [`AuthResolver`]: valid OAuth tokens, API keys from `auth.json`,
+/// `models.json`, or the environment.
 pub struct ResolverCredentials {
     resolver: Arc<AuthResolver>,
 }
@@ -86,7 +86,14 @@ impl RefreshCredentials for ResolverCredentials {
         self.resolver.store().read(provider_id).await.map_err(|error| anyhow::anyhow!("{error}"))
     }
 
-    async fn resolve(&self, provider_id: &str, _stored: Option<&Credential>) -> anyhow::Result<Option<Credential>> {
+    async fn resolve(&self, provider_id: &str, stored: Option<&Credential>) -> anyhow::Result<Option<Credential>> {
+        // A catalog refresh does not rotate an expiring login, which pi may not save when a client
+        // stops it right after startup. The next model request refreshes it.
+        if let Some(Credential::OAuth(credential)) = stored
+            && credential.expires_within(pi_ai::now_ms(), DEFAULT_OAUTH_MIN_VALIDITY_MS)
+        {
+            return Ok(None);
+        }
         let resolved = self.resolver.resolve(provider_id, &AuthOverrides::default()).await;
         let resolved = resolved.map_err(|error| anyhow::anyhow!("{error}"))?;
         Ok(resolved

@@ -3,12 +3,18 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use pi_ai::auth::{ApiKeyCredential, Credential, InMemoryCredentialStore};
+use async_trait::async_trait;
+use pi_ai::auth::{
+    ApiKeyCredential, AuthError, AuthInteraction, AuthResult, Credential, CredentialStore, InMemoryCredentialStore,
+    LoginOptions, ModelAuth, OAuthAuth, OAuthCredential,
+};
 use pi_coding_agent::agent_session::{CatalogSetup, ModelRuntime, ModelRuntimeOptions};
 use pi_coding_agent::catalog::{CatalogConfig, FileModelsStore};
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_session::http_mock::{Reply, Server};
 
@@ -140,6 +146,78 @@ async fn disabled_providers_stay_hidden_after_refresh_and_can_be_reenabled() {
     assert!(runtime.get_model("anthropic", "cached").is_some());
     assert!(runtime.available_models().iter().any(|model| model.provider == "anthropic"));
     assert!(server.requests().is_empty());
+}
+
+/// A login that counts its token requests.
+#[derive(Default)]
+struct CountingOAuth {
+    requests: AtomicUsize,
+}
+
+#[async_trait]
+impl OAuthAuth for CountingOAuth {
+    fn name(&self) -> &str {
+        "Counting"
+    }
+
+    async fn login(
+        &self,
+        _interaction: &dyn AuthInteraction,
+        _options: &LoginOptions,
+        _cancel: CancellationToken,
+    ) -> AuthResult<OAuthCredential> {
+        Err(AuthError::other("unused"))
+    }
+
+    async fn refresh(&self, _credential: &OAuthCredential, _cancel: CancellationToken) -> AuthResult<OAuthCredential> {
+        self.requests.fetch_add(1, Ordering::SeqCst);
+        Err(AuthError::other("unexpected token request"))
+    }
+
+    fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth {
+        ModelAuth { api_key: Some(credential.access.clone()), ..ModelAuth::default() }
+    }
+}
+
+// Upstream #11692: a client may stop pi right after startup, before a rotated single-use refresh
+// token is saved, so a catalog refresh uses a valid login and leaves an expiring one alone.
+#[tokio::test]
+async fn catalog_refreshes_do_not_rotate_an_expiring_login() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(|request| match request.path() {
+        "/v1/models" => Reply::json(&json!({"data": [{"id": "claude-opus-4-8"}]})),
+        _ => Reply::status(404),
+    })
+    .await;
+    route_anthropic(dir.path(), &server.url);
+    let login = |expires| Credential::OAuth(OAuthCredential { access: "token".into(), expires, ..Default::default() });
+    let store = Arc::new(InMemoryCredentialStore::new(BTreeMap::from([("anthropic".to_string(), login(0))])));
+    let oauth = Arc::new(CountingOAuth::default());
+    let lookup = oauth.clone();
+    let options = ModelRuntimeOptions {
+        models_path: dir.path().join("models.json"),
+        credentials: store.clone(),
+        oauth: Some(Arc::new(move |id: &str| (id == "anthropic").then(|| lookup.clone() as Arc<dyn OAuthAuth>))),
+        credential_env: crate::offline_guard::credential_free_env(),
+    };
+    let runtime = ModelRuntime::create(options).await;
+    let setup = CatalogSetup {
+        store: Arc::new(FileModelsStore::new(dir.path().join("models-store.json"))),
+        config: CatalogConfig { catalog_base_url: Some(server.url.clone()), ..CatalogConfig::default() },
+    };
+    runtime.enable_dynamic_catalogs(setup).await;
+
+    let result = runtime.refresh_catalogs(true, Some(vec!["anthropic".into()]), true).await;
+    assert!(result.errors.is_empty(), "{result:?}");
+    assert_eq!(oauth.requests.load(Ordering::SeqCst), 0);
+    assert_eq!(server.count("/v1/models"), 0, "the expiring login is not used");
+    assert_eq!(store.read("anthropic").await.unwrap(), Some(login(0)));
+
+    store.update("anthropic", Box::new(move |_| Box::pin(async move { Ok(Some(login(i64::MAX))) }))).await.unwrap();
+    let result = runtime.refresh_catalogs(true, Some(vec!["anthropic".into()]), true).await;
+    assert!(result.errors.is_empty(), "{result:?}");
+    assert_eq!(server.count("/v1/models"), 1, "a valid login lists the account's models");
+    assert_eq!(oauth.requests.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
