@@ -84,7 +84,8 @@ pub(crate) fn model_ids(id: &str) -> (String, String, Vec<(&'static str, String)
 
 /// The route a discovered model keeps in `compat`: the `cursorLevels` entry of the thinking
 /// level, else `cursorSlug` and `cursorParameters`. With `fast`, the same keys of `cursorFast`
-/// apply when the model has it. Other models use the route [`model_ids`] derives from the id.
+/// apply when the model has it. A route with `maxMode` asks for max mode. Other models use the
+/// route [`model_ids`] derives from the id.
 fn route(model: &Model, level: Option<ThinkingLevel>, fast: bool) -> (String, String, Vec<(String, String)>, bool) {
     let Some(requested) = compat_str(model, "cursorModel") else {
         let (details, requested, params, max_mode) = model_ids(&model.id);
@@ -102,6 +103,7 @@ fn route(model: &Model, level: Option<ThinkingLevel>, fast: bool) -> (String, St
         ),
     };
     let chosen = levels.and_then(|levels| levels.get(level.as_str()));
+    let max_route = chosen.or(fast_set).is_some_and(|route| route["maxMode"] == true);
     let slug = chosen.and_then(|route| route["slug"].as_str()).or(slug);
     let params = chosen.map(|route| &route["parameters"]).or(params);
     let params = params
@@ -110,7 +112,7 @@ fn route(model: &Model, level: Option<ThinkingLevel>, fast: bool) -> (String, St
         .flatten()
         .filter_map(|param| Some((param["id"].as_str()?.to_string(), param["value"].as_str()?.to_string())))
         .collect();
-    let max_mode = compat_value(model, "cursorMaxMode").and_then(|max| max.as_bool()).unwrap_or(false);
+    let max_mode = max_route || compat_value(model, "cursorMaxMode").and_then(|max| max.as_bool()).unwrap_or(false);
     (slug.unwrap_or(&model.id).to_string(), requested.to_string(), params, max_mode)
 }
 
@@ -351,5 +353,15 @@ mod tests {
         assert_eq!(params[1], ("fast".to_string(), "true".to_string()));
         assert_eq!(route(&with_levels, Some(ThinkingLevel::Low), false).0, "grok-4.7-low");
         assert_eq!(route(&model(false), Some(ThinkingLevel::Low), true).0, "grok-4.7-high-fast");
+        assert!(!route(&with_levels, Some(ThinkingLevel::Low), true).3);
+
+        let mut max = model(false);
+        max.compat.as_mut().unwrap()["cursorFast"]["maxMode"] = json!(true);
+        assert!(route(&max, Some(ThinkingLevel::Low), true).3, "max mode fast route");
+        assert!(!route(&max, Some(ThinkingLevel::Low), false).3);
+        let mut max_level = model(true);
+        max_level.compat.as_mut().unwrap()["cursorFast"]["levels"]["low"]["maxMode"] = json!(true);
+        assert!(route(&max_level, Some(ThinkingLevel::Low), true).3, "max mode level route");
+        assert!(!route(&max_level, Some(ThinkingLevel::High), true).3);
     }
 }

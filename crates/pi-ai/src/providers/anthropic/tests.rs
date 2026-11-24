@@ -290,14 +290,18 @@ async fn fast_request(id: &str, fast: bool) -> crate::providers::mock_server::Re
 
 #[tokio::test]
 async fn fast_mode_sends_speed_and_beta_only_for_fast_models() {
-    let request = fast_request("claude-opus-5-5", true).await;
-    assert_eq!(request.body["speed"], "fast");
-    assert!(request.headers["anthropic-beta"].split(',').any(|beta| beta == "fast-mode-2026-02-01"));
+    let betas = |request: &crate::providers::mock_server::RecordedRequest| {
+        request.headers.get("anthropic-beta").map(String::as_str).unwrap_or_default().contains("fast-mode")
+    };
+    for (id, beta) in [("claude-opus-5-5", false), ("claude-fable-5-2", false), ("claude-opus-5", true)] {
+        let request = fast_request(id, true).await;
+        assert_eq!(request.body["speed"], "fast", "{id}");
+        assert_eq!(betas(&request), beta, "{id}");
+    }
     for (id, fast) in [("claude-opus-5-5", false), ("claude-sonnet-5-5", true)] {
         let request = fast_request(id, fast).await;
         assert!(request.body.get("speed").is_none(), "{id} fast={fast}");
-        let betas = request.headers.get("anthropic-beta").map(String::as_str).unwrap_or_default();
-        assert!(!betas.contains("fast-mode"), "{id} fast={fast}");
+        assert!(!betas(&request), "{id} fast={fast}");
     }
 }
 

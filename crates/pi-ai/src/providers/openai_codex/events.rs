@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 
 use crate::providers::common::SseHandler;
-use crate::providers::openai_responses::ResponsesStream;
+use crate::providers::openai_responses::{ResponsesStream, service_tier_multiplier};
 use crate::registry::OnProviderStreamEventFn;
 use crate::sse::SseEvent;
 use crate::stream::MessageBuilder;
@@ -119,12 +119,7 @@ impl CodexEvents {
         }
         event["type"] = json!("response.completed");
         self.feed(builder, event.to_string())?;
-        let multiplier = match service_tier.as_deref() {
-            Some("flex") => 0.5,
-            Some("priority") if self.model.id == "gpt-5.5" => 2.5,
-            Some("priority") => 2.0,
-            _ => 1.0,
-        };
+        let multiplier = service_tier_multiplier(&self.model.id, service_tier.as_deref());
         if multiplier != 1.0 {
             let cost = &mut builder.message_mut().usage.cost;
             cost.input *= multiplier;

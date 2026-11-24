@@ -186,7 +186,7 @@ pub fn format_user_agent(identity: Option<&ClientIdentity>) -> String {
     }
 }
 
-fn matches_host(base_url: &str, expected: &str) -> bool {
+pub(crate) fn matches_host(base_url: &str, expected: &str) -> bool {
     Url::parse(base_url).ok().is_some_and(|url| url.host_str() == Some(expected))
 }
 

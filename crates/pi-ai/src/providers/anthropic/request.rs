@@ -25,6 +25,8 @@ const MID_CONVERSATION_OUTPUT_CONFIG_BETA: &str = "mid-conversation-output-confi
 const THINKING_BINDING_CONTROLS_BETA: &str = "thinking-binding-controls-2026-08-01";
 const INLINE_TOOLS_BETA: &str = "inline-tools-2026-09-15";
 const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
+/// Fast mode models that no longer need [`FAST_MODE_BETA`].
+const FAST_MODE_WITHOUT_BETA: [&str; 3] = ["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5"];
 
 /// Resolved `AnthropicMessagesCompat` flags with upstream defaults.
 #[derive(Clone)]
@@ -330,7 +332,7 @@ fn beta_features(params: &Params, native_tools: bool) -> Vec<String> {
     if native_tools {
         push(INLINE_TOOLS_BETA);
     }
-    if fast(params) {
+    if fast(params) && !FAST_MODE_WITHOUT_BETA.contains(&model.id.as_str()) {
         push(FAST_MODE_BETA);
     }
     features

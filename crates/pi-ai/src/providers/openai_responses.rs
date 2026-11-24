@@ -11,8 +11,8 @@ mod tests;
 #[cfg(test)]
 mod tests_transcript;
 
-use self::request::configuration_update_effort;
 pub(crate) use self::request::{Compat, build_body, grammar_properties};
+use self::request::{configuration_update_effort, service_tier};
 use crate::identity::identity_headers;
 use crate::providers::common::{HttpRequest, endpoint, has_header, header_map_with, spawn_provider_stream};
 use crate::providers::github_copilot::copilot_dynamic_headers;
@@ -23,7 +23,7 @@ use crate::transcript::{normalize_context, resolve_transcript};
 use crate::types::{Context, Model, StopReason};
 
 pub(crate) use self::convert::{ConvertOptions, convert_messages, responses_tool_support};
-pub(crate) use self::events::ResponsesStream;
+pub(crate) use self::events::{ResponsesStream, service_tier_multiplier};
 
 pub struct OpenAIResponses;
 
@@ -71,7 +71,7 @@ impl ApiProvider for OpenAIResponses {
         };
         let handler = ResponsesStream::new(model)
             .with_grammar_tool_input_properties(grammar)
-            .with_service_tier_pricing(model, options.service_tier.clone())
+            .with_service_tier_pricing(model, service_tier(model, &options))
             .with_provider_thinking_level(configuration_update_effort(model, &options, &compat));
         spawn_provider_stream(model, &options, request, handler)
     }

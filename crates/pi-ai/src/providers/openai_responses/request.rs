@@ -14,7 +14,7 @@ use crate::providers::constrained_sampling::{
 use crate::registry::{CacheRetention, StreamOptions};
 use crate::simple_options::{
     MappedLevel, clamp_max_tokens_to_context, clamp_openai_prompt_cache_key, clamp_thinking_level,
-    mapped_thinking_level, provider_thinking_value, resolve_cache_retention, resolve_sampling_params,
+    mapped_thinking_level, provider_thinking_value, resolve_cache_retention, resolve_sampling_params, supports_fast,
 };
 use crate::transcript::{declared_tools, resolve_transcript_tools};
 use crate::types::{Message, Model, ThinkingLevel};
@@ -23,6 +23,11 @@ use crate::types::{Message, Model, ThinkingLevel};
 const MIN_OUTPUT_TOKENS: u64 = 16;
 /// Fixed `reasoning.effort` while `configuration_update` items carry the thinking level.
 const CONFIGURATION_UPDATE_REQUEST_EFFORT: &str = "medium";
+
+/// The requested service tier, else `priority` in fast mode on a model that has it.
+pub(crate) fn service_tier(model: &Model, options: &StreamOptions) -> Option<String> {
+    options.service_tier.clone().or_else(|| (options.fast && supports_fast(model)).then(|| "priority".into()))
+}
 
 /// Resolved `OpenAIResponsesCompat` flags with upstream defaults.
 pub(crate) struct Compat {
@@ -143,7 +148,7 @@ pub(crate) fn build_body(
     if let (Some(temperature), false) = (options.temperature, omit_unsupported) {
         body.insert("temperature".into(), json!(temperature));
     }
-    if let Some(tier) = &options.service_tier {
+    if let Some(tier) = service_tier(model, options) {
         body.insert("service_tier".into(), json!(tier));
     }
     if !tools.request_tools.is_empty() {
@@ -217,5 +222,21 @@ mod summary_tests {
         let plain = StreamOptions { reasoning: Some(ThinkingLevel::Low), ..Default::default() };
         assert_eq!(body(&model, &plain)["reasoning"], json!({"effort": "low", "summary": "auto"}));
         assert_eq!(body(&model, &StreamOptions::default())["reasoning"], json!({"effort": "none"}));
+    }
+
+    #[test]
+    fn fast_mode_requests_the_priority_tier_unless_a_tier_is_set() {
+        let fast = StreamOptions { fast: true, ..Default::default() };
+        let tier = |model: &Model, options: &StreamOptions| body(model, options).get("service_tier").cloned();
+        let gpt =
+            Model { id: "gpt-6.2-sol".into(), ..test_model("openai-responses", "openai", "https://api.openai.com/v1") };
+        assert_eq!(tier(&gpt, &fast), Some(json!("priority")));
+        assert_eq!(tier(&gpt, &StreamOptions::default()), None);
+        let flex = StreamOptions { service_tier: Some("flex".into()), ..fast.clone() };
+        assert_eq!(tier(&gpt, &flex), Some(json!("flex")));
+        let nano = Model { id: "gpt-5-nano".into(), ..gpt };
+        assert_eq!(tier(&nano, &fast), None, "no Fast tier");
+        let grok = Model { id: "grok-4.7".into(), ..test_model("openai-responses", "xai", "https://api.x.ai/v1") };
+        assert_eq!(tier(&grok, &fast), Some(json!("priority")));
     }
 }

@@ -497,9 +497,9 @@ async fn grammar_tool_calls_stream_into_their_input_property() {
 
 #[tokio::test]
 async fn service_tiers_are_sent_and_priced() {
-    for (requested, reported, multiplier) in
-        [("flex", None, 0.5), ("auto", Some("priority"), 2.0), ("default", None, 1.0)]
-    {
+    let cases = [(Some("flex"), None, 0.5), (Some("auto"), Some("priority"), 2.0), (Some("default"), None, 1.0)];
+    // Without a tier, fast mode on an xAI model asks for `priority` and prices it.
+    for (requested, reported, multiplier) in cases.into_iter().chain([(None, None, 2.0)]) {
         let mut response = json!({"id": "r", "status": "completed",
             "usage": {"input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000}});
         if let Some(tier) = reported {
@@ -507,13 +507,13 @@ async fn service_tiers_are_sent_and_priced() {
         }
         let frames = vec![frame(None, &json!({"type": "response.completed", "response": response}))];
         let mut server = MockServer::start(MockResponse::Sse(frames)).await;
-        let model = test_model(API, "openai", &server.base_url);
+        let model = test_model(API, if requested.is_some() { "openai" } else { "xai" }, &server.base_url);
         let context = Context { messages: vec![Message::user("x")], ..Context::default() };
-        let options = StreamOptions { service_tier: Some(requested.into()), ..options() };
+        let options = StreamOptions { service_tier: requested.map(Into::into), fast: true, ..options() };
         let (_, message) = collect(OpenAIResponses.stream(&model, &context, options)).await;
         let expected = (1000.0 * 1.0 + 1000.0 * 2.0) / 1e6 * multiplier;
-        assert!((message.usage.cost.total - expected).abs() < 1e-12, "{requested}: {}", message.usage.cost.total);
-        assert_eq!(server.request().await.body["service_tier"], requested);
+        assert!((message.usage.cost.total - expected).abs() < 1e-12, "{requested:?}: {}", message.usage.cost.total);
+        assert_eq!(server.request().await.body["service_tier"], requested.unwrap_or("priority"));
     }
 }
 

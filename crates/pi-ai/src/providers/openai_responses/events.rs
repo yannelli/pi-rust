@@ -84,7 +84,7 @@ pub(crate) struct ResponsesStream {
 }
 
 /// Cost multiplier of an OpenAI service tier.
-fn service_tier_multiplier(model_id: &str, tier: Option<&str>) -> f64 {
+pub(crate) fn service_tier_multiplier(model_id: &str, tier: Option<&str>) -> f64 {
     match tier {
         Some("flex") => 0.5,
         Some("priority" | "fast") if model_id == "gpt-5.5" => 2.5,
