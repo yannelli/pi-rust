@@ -2,6 +2,13 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.38] - 2026-11-24
+
+### Fixed
+
+- **catalog:** leave an expiring OAuth login alone during a model refresh ([63b03ad](https://github.com/yannelli/pi-rust/commit/63b03adf49850b25cef08a368d88638ec00f0a11))
+- **auth:** wait for an OAuth refresh in progress before exit (upstream b2cb62923) ([6ddf2b0](https://github.com/yannelli/pi-rust/commit/6ddf2b0d63a4d010d00447432cf31bc9e647845a))
+
 ## [0.12.37] - 2026-11-24
 
 ### Added
