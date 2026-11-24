@@ -36,10 +36,11 @@ async fn nonzero_exit_is_error_result_with_output() {
 #[tokio::test]
 async fn timeout_kills_and_reports() {
     let dir = tempfile::tempdir().unwrap();
+    // Git Bash on a loaded Windows runner can take over a second to reach the echo.
     let started = Instant::now();
-    let err = run("bash", dir.path(), json!({ "command": "echo before; sleep 10", "timeout": 0.5 })).await.unwrap_err();
-    assert!(started.elapsed() < Duration::from_secs(5));
-    assert_eq!(err.to_string(), "before\n\n\nCommand timed out after 0.5 seconds");
+    let err = run("bash", dir.path(), json!({ "command": "echo before; sleep 60", "timeout": 3 })).await.unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(8));
+    assert_eq!(err.to_string(), "before\n\n\nCommand timed out after 3 seconds");
     let err = run("bash", dir.path(), json!({ "command": "true", "timeout": -1 })).await.unwrap_err();
     assert!(err.to_string().starts_with("Invalid timeout"));
 }
@@ -80,17 +81,20 @@ async fn cancellation_kills_process_group() {
     let tool = create_tool("bash", dir.path()).unwrap();
     let cancel = CancellationToken::new();
     let (trigger, pid_file) = (cancel.clone(), dir.path().join("child.pid"));
+    let cancelled_at = Arc::new(Mutex::new(None));
+    let mark = cancelled_at.clone();
     tokio::spawn(async move {
         // Cancel once the background child exists, however slowly the shell starts.
         while !std::fs::read_to_string(&pid_file).is_ok_and(|pid| pid.ends_with('\n')) {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        *mark.lock().unwrap() = Some(Instant::now());
         trigger.cancel();
     });
     let args = json!({ "command": "sleep 30 & echo $! > child.pid; wait" });
-    let started = Instant::now();
     let err = tool.execute("c", args, cancel, super::noop()).await.unwrap_err();
-    assert!(started.elapsed() < Duration::from_secs(5));
+    let cancelled_at = cancelled_at.lock().unwrap().expect("cancelled");
+    assert!(cancelled_at.elapsed() < Duration::from_secs(5));
     assert_eq!(err.to_string(), "Command aborted");
 
     let pid = std::fs::read_to_string(dir.path().join("child.pid")).unwrap();
