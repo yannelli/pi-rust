@@ -33,7 +33,7 @@ async fn drop_does_not_wait_for_a_grandchild_holding_stdout() {
     let (_dir, root) = tempdir();
     let Some((runtime, _capture)) = node_runtime(&root) else { return };
     let spawn = r#"const child = process.getBuiltinModule("node:child_process")
-  .spawn("sleep", ["6"], { stdio: "inherit", detached: true });
+  .spawn("sleep", ["30"], { stdio: "inherit", detached: true });
 child.unref();
 child.pid"#;
     let pid = within(runtime.eval(spawn)).await.unwrap().into_json();
@@ -41,7 +41,8 @@ child.pid"#;
     drop(runtime);
     let elapsed = started.elapsed();
     let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
-    assert!(elapsed < Duration::from_millis(900), "drop took {elapsed:?}");
+    // Far below the grandchild's 30 s; Node can take over a second to exit on a loaded runner.
+    assert!(elapsed < Duration::from_secs(5), "drop took {elapsed:?}");
 }
 
 fn kill_node(pid: &serde_json::Value) {
