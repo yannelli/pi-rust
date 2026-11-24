@@ -124,10 +124,12 @@ impl InteractiveMode {
         } else if text == "/new" {
             clear();
             self.handle_new_session();
-        } else if let Some(args) = argument(text, "clear") {
+        } else if let Some(args) = argument(text, "clear")
+            && !self.has_extension_command("clear")
+        {
             clear();
             if args.is_some() {
-                self.show_status("Usage: /clear");
+                self.show_warning("Usage: /clear");
             } else {
                 self.handle_clear_command();
             }
@@ -340,6 +342,10 @@ impl InteractiveMode {
         state.pending_bash_components.clear();
         drop(state);
         self.update_pending_messages_display();
+        let tui = self.tui();
+        if tui.is_viewport() {
+            tui.reset_text_selection();
+        }
         self.ui.transcript.scroll_to_end();
         self.request_full_render();
     }

@@ -106,6 +106,34 @@ async fn clear_during_a_turn_does_not_queue_a_prompt() {
         assert!(ui.screen().contains("active prompt"), "{}", ui.screen());
         assert!(ui.session().is_streaming());
         assert_eq!(ui.session().pending_message_count(), 0);
+        ui.send("\x1b").await;
+        ui.wait_until("the abort", |ui| !ui.session().is_streaming()).await;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_extension_clear_command_replaces_the_built_in_one() {
+    local(async {
+        let extension = r#"export default function (pi) {
+	pi.registerCommand("clear", {
+		description: "Clear with the extension",
+		handler: async (_args, ctx) => ctx.ui.notify("extension clear ran"),
+	});
+}
+"#;
+        let files = vec![(".pi/extensions/clear.ts", extension)];
+        let ui =
+            start(Options { responses: vec![FauxResponse::text("kept answer")], files, ..Options::default() }).await;
+        ui.submit("kept prompt").await;
+        ui.wait_for("kept answer").await;
+        ui.wait_until("the turn to finish", |ui| ui.session().is_idle()).await;
+        ui.send("/clear").await;
+        ui.wait_for("Clear with the extension").await;
+        assert!(!ui.screen().contains("Clear visible chat"), "{}", ui.screen());
+        ui.send("\r").await;
+        ui.wait_for("extension clear ran").await;
+        assert!(ui.screen().contains("kept answer"), "{}", ui.screen());
     })
     .await;
 }

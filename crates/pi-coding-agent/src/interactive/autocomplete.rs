@@ -132,10 +132,11 @@ impl InteractiveMode {
     /// Commands, templates, and skills for the editor, plus `@` file search without `fd`.
     pub(super) fn setup_autocomplete_provider(&self) {
         let mut commands: Vec<CommandEntry> = Vec::new();
-        // `/mcp` and `/llama` belong to built-in extensions; an extension may replace them.
+        // An extension may replace `/mcp` and `/llama`, which belong to built-in extensions, and `/clear`.
         let enabled = |name: &str| match name {
             "mcp" => self.session().builtin_extension_enabled("mcp"),
             "llama" => self.session().builtin_extension_enabled(crate::llama::LLAMA_PROVIDER_ID),
+            "clear" => !self.has_extension_command("clear"),
             _ => true,
         };
         for (name, description, hint) in BUILTIN_SLASH_COMMANDS.iter().filter(|(name, _, _)| enabled(name)) {

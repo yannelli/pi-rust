@@ -447,10 +447,6 @@
   ],
   "slashCommands": [
     {
-      "item": "clear",
-      "reason": "pi-rust provides /clear to hide the visible chat while preserving the current session and model context."
-    },
-    {
       "item": "mcp",
       "reason": "Upstream registers /mcp from its built-in mcp extension (extensions/mcp). pi-rust implements MCP natively and lists /mcp as a built-in command."
     },
@@ -497,6 +493,10 @@
     {
       "item": "usage",
       "reason": "pi-rust extension: /usage shows the subscription limits of the current provider login. See docs/providers/usage.md."
+    },
+    {
+      "item": "clear",
+      "reason": "pi-rust extension: /clear clears the chat on the screen and keeps the session and the model context. An extension's /clear replaces it."
     }
   ],
   "tools": [],

@@ -25,7 +25,7 @@ pi-rust adds these commands:
 
 | Command | Effect |
 | --- | --- |
-| `/clear` | Clears the visible chat while keeping the current session and model context. Run it when Pi is idle. |
+| `/clear` | Clears the chat on the screen. The session and the model context do not change. |
 | `/diff` | Shows the uncommitted git changes. |
 | `/context` | Shows how much of the context window the conversation uses. |
 | `/usage` | Shows the subscription limits of the providers that you are logged in to. |
@@ -38,6 +38,15 @@ pi-rust adds these commands:
 | `/fast` | Turns fast mode on or off. See [Fast mode](providers.md#fast-mode-pi-rust-extension). |
 
 pi-rust also adds the prompt history and the Markdown output of `/export`. The `/export` command itself is in upstream pi.
+
+## /clear
+
+`/clear` removes the messages from the screen. The session file and the context that the model gets do not change, so the next prompt continues the conversation. To start with an empty context, use `/new`.
+
+- `/clear` runs only when pi is idle. While the agent works, it shows a warning and does not go in the queue.
+- In regular mode, `/clear` also erases the terminal scrollback.
+- `/reload`, a compaction, and a change to the "Cache miss notices" setting show the conversation again, because pi then draws the chat from the session.
+- Upstream pi has no `/clear`, and packages such as `pi-clear` add one. An extension command with the name `clear` replaces this command.
 
 ## /diff
 

@@ -225,13 +225,20 @@ impl InteractiveMode {
         self.request_render();
     }
 
-    /// Commands extensions registered, except those named like a built-in one.
+    /// Whether an extension registered `/<name>`.
+    pub(super) fn has_extension_command(&self, name: &str) -> bool {
+        self.session().extension_runner().is_some_and(|runner| runner.registry().command(name).is_some())
+    }
+
+    /// Commands extensions registered, except those named like a built-in one. An extension's `/clear` replaces
+    /// the built-in one, which upstream pi does not have.
     pub(super) fn extension_slash_commands(&self) -> Vec<CommandEntry> {
         let Some(runner) = self.session().extension_runner() else { return Vec::new() };
         let commands = runner.registry().commands.clone();
         let mcp = self.session().builtin_extension_enabled("mcp");
         let builtin = |name: &str| {
-            BUILTIN_SLASH_COMMANDS.iter().any(|(builtin, _, _)| *builtin == name && (name != "mcp" || mcp))
+            name != "clear"
+                && BUILTIN_SLASH_COMMANDS.iter().any(|(builtin, _, _)| *builtin == name && (name != "mcp" || mcp))
         };
         commands
             .into_iter()
