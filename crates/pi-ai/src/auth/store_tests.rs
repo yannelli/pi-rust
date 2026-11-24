@@ -179,3 +179,39 @@ async fn in_memory_and_runtime_overlay_follow_the_same_contract() {
     assert!(overlay.read("openai").await.unwrap().is_none());
     assert!(overlay.has_runtime_api_key("groq"));
 }
+
+// Upstream #11692: an exit waits for an OAuth refresh in progress so the rotated token is not lost.
+#[tokio::test]
+async fn runtime_overlay_settles_once_pending_updates_are_written_or_failed() {
+    let memory: Arc<dyn CredentialStore> = Arc::new(InMemoryCredentialStore::default());
+    let overlay = Arc::new(RuntimeCredentialStore::new(memory.clone()));
+    let (started, update_started) = tokio::sync::oneshot::channel();
+    let (respond, response) = tokio::sync::oneshot::channel::<()>();
+    let transform: UpdateFn = Box::new(move |_| {
+        async move {
+            let _ = started.send(());
+            let _ = response.await;
+            Ok(Some(api_key("rotated")))
+        }
+        .boxed()
+    });
+    let update = tokio::spawn({
+        let overlay = overlay.clone();
+        async move { overlay.update("anthropic", transform).await }
+    });
+    update_started.await.unwrap();
+    let settled = tokio::spawn({
+        let overlay = overlay.clone();
+        async move { overlay.settled().await }
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(!settled.is_finished());
+    respond.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), settled).await.unwrap().unwrap();
+    assert_eq!(key_of(memory.read("anthropic").await.unwrap()).as_deref(), Some("rotated"));
+    update.await.unwrap().unwrap();
+
+    let failing: UpdateFn = Box::new(|_| async { Err(AuthError::other("invalid_grant")) }.boxed());
+    assert!(overlay.update("anthropic", failing).await.is_err());
+    tokio::time::timeout(Duration::from_secs(5), overlay.settled()).await.unwrap();
+}

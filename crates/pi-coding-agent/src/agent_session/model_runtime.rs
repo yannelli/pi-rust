@@ -188,6 +188,12 @@ impl ModelRuntime {
         self.runtime_store.inner().clone()
     }
 
+    /// Wait for credential writes in progress, such as an OAuth refresh that a background catalog
+    /// refresh started. Call before the process exits so a rotated token is not lost.
+    pub async fn settle_credential_writes(&self) {
+        self.runtime_store.settled().await;
+    }
+
     pub fn get_model(&self, provider: &str, id: &str) -> Option<Model> {
         self.registry().find(provider, id).cloned()
     }

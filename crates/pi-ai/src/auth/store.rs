@@ -266,11 +266,28 @@ impl CredentialStore for InMemoryCredentialStore {
 pub struct RuntimeCredentialStore {
     inner: Arc<dyn CredentialStore>,
     overrides: RwLock<HashMap<String, String>>,
+    /// Updates not yet written or failed, such as an OAuth refresh.
+    pending: tokio::sync::watch::Sender<usize>,
+}
+
+/// Counts an update in [`RuntimeCredentialStore::pending`] until dropped.
+struct PendingUpdate<'a>(&'a tokio::sync::watch::Sender<usize>);
+
+impl Drop for PendingUpdate<'_> {
+    fn drop(&mut self) {
+        self.0.send_modify(|count| *count -= 1);
+    }
 }
 
 impl RuntimeCredentialStore {
     pub fn new(inner: Arc<dyn CredentialStore>) -> Self {
-        Self { inner, overrides: RwLock::default() }
+        Self { inner, overrides: RwLock::default(), pending: tokio::sync::watch::channel(0).0 }
+    }
+
+    /// Resolves when no update is in progress. An OAuth refresh may already have spent the
+    /// single-use refresh token, so exiting before its result is written loses the login.
+    pub async fn settled(&self) {
+        let _ = self.pending.subscribe().wait_for(|count| *count == 0).await;
     }
 
     pub fn set_runtime_api_key(&self, provider_id: &str, api_key: impl Into<String>) {
@@ -318,6 +335,8 @@ impl CredentialStore for RuntimeCredentialStore {
     }
 
     async fn update(&self, provider_id: &str, transform: UpdateFn) -> AuthResult<Option<Credential>> {
+        self.pending.send_modify(|count| *count += 1);
+        let _pending = PendingUpdate(&self.pending);
         self.inner.update(provider_id, transform).await
     }
 

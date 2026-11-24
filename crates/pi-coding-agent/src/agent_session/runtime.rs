@@ -436,8 +436,12 @@ impl AgentSessionRuntime {
         Ok(SwitchResult::default())
     }
 
-    /// `session_shutdown` (`quit`), then abort and dispose of the active session.
+    /// `session_shutdown` (`quit`), then abort and dispose of the active session. Also waits for
+    /// credential writes in progress: an OAuth refresh may already have spent the old single-use
+    /// refresh token, so exiting before the new one is saved loses the login.
     pub async fn dispose(&self) {
+        let model_runtime = self.session().model_runtime().clone();
         self.teardown_current("quit", None).await;
+        model_runtime.settle_credential_writes().await;
     }
 }
