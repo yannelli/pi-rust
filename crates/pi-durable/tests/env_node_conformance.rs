@@ -67,7 +67,8 @@ async fn refuses_a_tree_over_the_directory_budget_and_stops_with_an_error_when_o
     assert_eq!(watcher.mode(), if cfg!(windows) { WatchMode::Polling } else { WatchMode::Native });
     env.create_dir("tree/d", true, &ctx).await.unwrap();
     let errored = || changes.lock().unwrap().iter().any(|change| matches!(change, FileChange::Failed(_)));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+    // Polling scans every 2 s; a loaded Windows runner can take seconds more to finish one.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while !errored() && tokio::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
