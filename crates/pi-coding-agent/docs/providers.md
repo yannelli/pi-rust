@@ -51,9 +51,13 @@ Some models have a fast mode. The provider runs the model faster and charges mor
 
 | Provider | Models | Request |
 | --- | --- | --- |
-| `anthropic` on the Claude API | Claude Opus 5.5, Opus 5, and Opus 4.8 | pi sends `speed: "fast"`. The price is 2 times the standard price. |
+| `anthropic` on the Claude API | Claude Fable 5.2, Mythos 5.2, Opus 5.5, Opus 5, and Opus 4.8 | pi sends `speed: "fast"`, with the `fast-mode-2026-02-01` beta header for Opus 5 and Opus 4.8. The price is 2 times the standard price. Anthropic ends fast mode for Opus 4.8 on November 30, 2026. |
+| `openai` on the OpenAI API | Models with a Fast price on the OpenAI pricing page, such as GPT-6.2 Sol and GPT-5.5 | pi sends `service_tier: "priority"`. |
+| `xai` | All models | pi sends `service_tier: "priority"`. The price is 2 times the standard price, unless the response reports the `default` tier. |
 | `openai-codex` | Codex models that offer the priority tier | pi sends `service_tier: "priority"`. |
-| `cursor` | Models that have fast variants | pi sends the fast variant of the model. |
+| `cursor` | Models that have fast variants | pi sends the fast variant of the model. When Cursor offers the fast variant only in max mode, as for Claude models, pi sends it in max mode. |
+
+The `anthropic`, `openai`, and `xai` rows also apply to other provider IDs that use the same API host, for example a second Claude account named `anthropic-2`. When a request already sets a service tier, pi keeps that tier.
 
 To turn fast mode on or off:
 
@@ -66,7 +70,7 @@ To turn fast mode on or off:
 
 Fast mode stays on when you select a model that has no fast mode. pi sends standard requests for that model.
 
-To mark a model in `models.json`, set `compat.fastMode`. `true` gives the model a fast mode, and `false` removes it. pi sends the fast request only for the `anthropic-messages`, `openai-codex-responses`, and `cursor-agent` APIs.
+To mark a model in `models.json`, set `compat.fastMode`. `true` gives the model a fast mode, and `false` removes it. pi sends the fast request only for the `anthropic-messages`, `openai-responses`, `openai-codex-responses`, and `cursor-agent` APIs.
 
 ```json
 {
@@ -213,11 +217,11 @@ With a Gemini API key, pi reads `GET <base URL>/models` with `x-goog-api-key` an
 
 ### Cursor
 
-With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. pi shows one model for each Cursor model, for example `grok-4.7`. If Cursor also has fast variants, pi adds a second model, for example `grok-4.7-fast`.
+With a Cursor login, pi reads `AvailableModels` from the Cursor agent service. pi shows one model for each Cursor model, for example `grok-4.7`. If Cursor also has fast variants, they become the [fast mode](#fast-mode-pi-rust-extension) of the model.
 
 - The effort variants of a model are its thinking levels. `thinking=false` and the effort `none` are the level `off`.
 - The context size is the `context` value of the default variant. If the variant has no `context` value, pi uses the limit that Cursor gives for the model.
-- pi does not show max mode variants.
+- pi does not show max mode variants. Fast variants that Cursor offers only in max mode are the fast mode of the model.
 
 ### Google Antigravity
 

@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use crate::estimate::estimate_context_tokens;
+use crate::identity::matches_host;
 use crate::registry::{CacheRetention, ThinkingBudgets};
 use crate::types::{JsonObject, Message, Model, ThinkingLevel};
 
@@ -87,19 +88,61 @@ pub fn clamp_thinking_level(model: &Model, level: ThinkingLevel) -> ThinkingLeve
         .unwrap_or(ThinkingLevel::Off)
 }
 
-/// Anthropic models with fast mode (`speed: "fast"`) on the first-party API.
-const ANTHROPIC_FAST_MODELS: [&str; 3] = ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+/// Anthropic models with fast mode (`speed: "fast"`) on the Claude API.
+const ANTHROPIC_FAST_MODELS: [&str; 5] =
+    ["claude-fable-5-2", "claude-mythos-5-2", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
+
+/// OpenAI API models with a Fast price (`service_tier: "priority"`), from the pricing page on
+/// 2026-11-24.
+const OPENAI_FAST_MODELS: [&str; 23] = [
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gpt-6.1-sol",
+    "gpt-6.1-terra",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o3",
+];
+
+/// Whether `model` goes to the vendor's own API: the vendor's provider id, or an account under
+/// another id (such as `anthropic-2`) with the vendor's API host.
+fn first_party(model: &Model, provider: &str, host: &str) -> bool {
+    model.provider == provider || matches_host(&model.base_url, host)
+}
 
 /// Whether `model` has a fast mode (pi-rust extension). A `compat.fastMode` bool decides;
-/// otherwise Anthropic's fast models, Codex models that offer the `priority` service tier, and
-/// Cursor models with fast variants have one.
+/// otherwise Anthropic's and OpenAI's fast models, every xAI model, Codex models that offer the
+/// `priority` service tier, and Cursor models with fast variants have one.
 pub fn supports_fast(model: &Model) -> bool {
     let compat = model.compat.as_ref();
     if let Some(fast) = compat.and_then(|compat| compat.get("fastMode")).and_then(serde_json::Value::as_bool) {
         return fast;
     }
+    let id = model.id.as_str();
     match model.api.as_str() {
-        "anthropic-messages" => model.provider == "anthropic" && ANTHROPIC_FAST_MODELS.contains(&model.id.as_str()),
+        "anthropic-messages" => {
+            first_party(model, "anthropic", "api.anthropic.com") && ANTHROPIC_FAST_MODELS.contains(&id)
+        }
+        "openai-responses" => {
+            first_party(model, "xai", "api.x.ai")
+                || (first_party(model, "openai", "api.openai.com") && OPENAI_FAST_MODELS.contains(&id))
+        }
         "openai-codex-responses" => compat
             .and_then(|compat| compat.get("serviceTiers"))
             .and_then(serde_json::Value::as_array)

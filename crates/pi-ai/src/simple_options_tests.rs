@@ -107,3 +107,25 @@ fn cache_retention_and_prompt_cache_keys() {
     assert_eq!(clamp_openai_prompt_cache_key(&"é".repeat(70)).chars().count(), 64);
     assert_eq!(clamp_openai_prompt_cache_key("session"), "session");
 }
+
+#[test]
+fn fast_mode_follows_each_vendor_api() {
+    let fast = |api: &str, provider: &str, base_url: &str, id: &str| {
+        let model =
+            Model { id: id.into(), api: api.into(), provider: provider.into(), base_url: base_url.into(), ..model() };
+        supports_fast(&model)
+    };
+    let claude = "https://api.anthropic.com";
+    assert!(fast("anthropic-messages", "anthropic", claude, "claude-fable-5-2"));
+    assert!(fast("anthropic-messages", "anthropic-2", claude, "claude-opus-5-5"), "second account");
+    assert!(!fast("anthropic-messages", "anthropic", claude, "claude-haiku-5-5"));
+    assert!(!fast("anthropic-messages", "openrouter", "https://openrouter.ai/api", "claude-opus-5-5"));
+    let openai = "https://api.openai.com/v1";
+    assert!(fast("openai-responses", "openai", openai, "gpt-6.2-sol"));
+    assert!(!fast("openai-responses", "openai", openai, "gpt-5-nano"));
+    assert!(!fast("openai-responses", "github-copilot", "https://api.githubcopilot.com", "gpt-6.2-sol"));
+    assert!(fast("openai-responses", "xai", "https://api.x.ai/v1", "grok-4.7"));
+    let mut off = Model { id: "grok-4.7".into(), provider: "xai".into(), ..model() };
+    off.compat = Some(json!({"fastMode": false}));
+    assert!(!supports_fast(&off));
+}

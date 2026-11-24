@@ -1,6 +1,7 @@
 //! The models of a Cursor login, `aiserver.v1.AiService/AvailableModels` (pi-rust extension): one
 //! model per Cursor model, with a route for each thinking level and the fast routes in
-//! `compat.cursorFast`, as Cursor's own ACP server groups them. Max mode variants are left out.
+//! `compat.cursorFast`, as Cursor's own ACP server groups them. Max mode variants are left out,
+//! except fast variants that only exist in max mode.
 
 use serde_json::{Value as Json, json};
 
@@ -19,6 +20,7 @@ const EFFORT_KEYS: [&str; 3] = ["effort", "reasoning_effort", "reasoning"];
 pub(crate) struct Route {
     pub slug: String,
     pub parameters: Vec<(String, String)>,
+    pub max_mode: bool,
 }
 
 /// The routes of one speed: the default route and the variant of each thinking level.
@@ -92,9 +94,6 @@ fn configs(details: &[(u32, Value)]) -> Result<Vec<Config>, String> {
     for (_, config) in details.iter().filter(|(number, _)| *number == 30) {
         let config = fields(config.as_bytes().unwrap_or_default())?;
         let Some(slug) = text(&config, 11) else { continue };
-        if flag(&config, 3) == Some(true) {
-            continue;
-        }
         let mut parameters = Vec::new();
         for (_, entry) in config.iter().filter(|(number, _)| *number == 1) {
             let entry = fields(entry.as_bytes().unwrap_or_default())?;
@@ -106,7 +105,7 @@ fn configs(details: &[(u32, Value)]) -> Result<Vec<Config>, String> {
             level: level(&parameters),
             fast: parameter(&parameters, "fast") == Some("true"),
             default: flag(&config, 5) == Some(true),
-            route: Route { slug: slug.into(), parameters },
+            route: Route { slug: slug.into(), parameters, max_mode: flag(&config, 3) == Some(true) },
         });
     }
     Ok(out)
@@ -137,6 +136,16 @@ fn route_set(group: &[&Config], default_level: Option<ThinkingLevel>) -> Option<
     })
 }
 
+/// Whether `fast` is the fast variant of `normal`: `normal` has `fast=false` and both have the
+/// same other parameters.
+fn fast_twin(normal: &Config, fast: &Config) -> bool {
+    let rest = |config: &Config| {
+        let parameters = config.route.parameters.iter();
+        parameters.filter(|(id, _)| id != "fast").cloned().collect::<Vec<_>>()
+    };
+    parameter(&normal.route.parameters, "fast") == Some("false") && rest(normal) == rest(fast)
+}
+
 /// The models of an `AvailableModelsResponse`, without hidden models and repeated ids.
 pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
     let mut out: Vec<CursorModel> = Vec::new();
@@ -148,17 +157,24 @@ pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
         }
         let display = text(&details, 17).unwrap_or(model).split_whitespace().collect::<Vec<_>>().join(" ");
         let (standard, images) = (limit(&details, 15), flag(&details, 10));
-        let configs = configs(&details)?;
+        let (configs, max): (Vec<Config>, Vec<Config>) =
+            configs(&details)?.into_iter().partition(|config| !config.route.max_mode);
         let default_level = configs.iter().find(|config| config.default).and_then(|config| config.level);
         let plain = Config {
-            route: Route { slug: model.into(), parameters: Vec::new() },
+            route: Route { slug: model.into(), parameters: Vec::new(), max_mode: false },
             level: None,
             fast: false,
             default: true,
         };
         let configs = if configs.is_empty() { vec![plain] } else { configs };
         let (normal, fast): (Vec<&Config>, Vec<&Config>) = configs.iter().partition(|config| !config.fast);
-        let (normal, fast) = if normal.is_empty() { (fast, Vec::new()) } else { (normal, fast) };
+        let (normal, mut fast) = if normal.is_empty() { (fast, Vec::new()) } else { (normal, fast) };
+        if fast.is_empty() {
+            fast = max
+                .iter()
+                .filter(|config| config.fast && normal.iter().any(|known| fast_twin(known, config)))
+                .collect();
+        }
         let Some(routes) = route_set(&normal, default_level) else { continue };
         if out.iter().any(|known| known.id == model) {
             continue;
@@ -179,7 +195,11 @@ pub(crate) fn models(response: &[u8]) -> Result<Vec<CursorModel>, String> {
 
 fn route_json(route: &Route) -> Json {
     let parameters: Vec<Json> = route.parameters.iter().map(|(id, value)| json!({"id": id, "value": value})).collect();
-    json!({"slug": route.slug, "parameters": parameters})
+    let mut json = json!({"slug": route.slug, "parameters": parameters});
+    if route.max_mode {
+        json["maxMode"] = json!(true);
+    }
+    json
 }
 
 fn levels_json(levels: &[(ThinkingLevel, Route)]) -> Json {
@@ -302,7 +322,8 @@ mod tests {
             .message(30, variant("grok-4.7-low-fast", "low", "true", "256k"))
             .message(30, variant("grok-4.7-high", "high", "false", "256k"))
             .message(30, variant("grok-4.7-high-fast", "high", "true", "256k").bool(5, true))
-            .message(30, variant("grok-4.7-high-max", "high", "false", "500k").bool(3, true));
+            .message(30, variant("grok-4.7-high-max", "high", "false", "500k").bool(3, true))
+            .message(30, variant("grok-4.7-high-fast-max", "high", "true", "256k").bool(3, true));
         let thinking = |slug: &str, thinking: &str, effort: &str| {
             Writer::new()
                 .message(1, parameter("thinking", thinking))
@@ -369,6 +390,7 @@ mod tests {
         assert_eq!(fast["parameters"][2], json!({"id": "fast", "value": "true"}));
         assert_eq!(fast["levels"]["low"]["slug"], "grok-4.7-low-fast");
         assert_eq!(fast["levels"]["high"]["slug"], "grok-4.7-high-fast");
+        assert!(fast["levels"]["high"].get("maxMode").is_none(), "max mode twins only without other fast variants");
         assert!(crate::simple_options::supports_fast(grok));
         assert!(!crate::simple_options::supports_fast(opus));
 
@@ -394,7 +416,10 @@ mod tests {
         let variant = |slug: &str, fast: &str| {
             Writer::new().message(1, Writer::new().string(1, "fast").string(2, fast)).string(11, slug)
         };
-        let only_fast = Writer::new().string(1, "composer-3").message(30, variant("composer-3-fast", "true"));
+        let only_fast = Writer::new()
+            .string(1, "composer-3")
+            .message(30, variant("composer-3-fast", "true"))
+            .message(30, variant("composer-3-fast", "true").bool(3, true));
         let both = Writer::new()
             .string(1, "composer-2.5")
             .message(30, variant("composer-2.5", "false"))
@@ -405,6 +430,33 @@ mod tests {
         assert_eq!(compat["cursorSlug"], "composer-2.5");
         let fast = json!({"slug": "composer-2.5-fast", "parameters": [{"id": "fast", "value": "true"}]});
         assert_eq!(compat["cursorFast"], fast, "one fast level sends no levels");
+    }
+
+    #[test]
+    fn max_mode_fast_twins_are_the_fast_routes() {
+        let parameter = |id: &str, value: &str| Writer::new().string(1, id).string(2, value);
+        let variant = |slug: &str, context: &str, fast: &str| {
+            Writer::new()
+                .message(1, parameter("context", context))
+                .message(1, parameter("effort", "high"))
+                .message(1, parameter("fast", fast))
+                .string(11, slug)
+        };
+        let opus = Writer::new()
+            .string(1, "claude-opus-5-5")
+            .message(30, variant("claude-opus-5-5-high", "300k", "false"))
+            .message(30, variant("claude-opus-5-5-high-fast", "300k", "true").bool(3, true))
+            .message(30, variant("claude-opus-5-5-high", "1m", "false").bool(3, true))
+            .message(30, variant("claude-opus-5-5-high-fast", "1m", "true").bool(3, true));
+        let listed = models(&Writer::new().message(2, opus).finish()).unwrap();
+        let model = model_for(&listed[0], &catalog()).unwrap();
+        let compat = model.compat.as_ref().unwrap();
+        assert_eq!(compat["cursorParameters"][0], json!({"id": "context", "value": "300k"}));
+        assert_eq!(compat["cursorMaxMode"], false);
+        let fast = &compat["cursorFast"];
+        assert_eq!((fast["slug"].as_str(), &fast["maxMode"]), (Some("claude-opus-5-5-high-fast"), &json!(true)));
+        assert_eq!(fast["parameters"][0], json!({"id": "context", "value": "300k"}));
+        assert!(crate::simple_options::supports_fast(&model));
     }
 
     #[tokio::test]

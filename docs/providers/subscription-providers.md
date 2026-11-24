@@ -1,6 +1,6 @@
 # Subscription providers: Cursor and Google Antigravity
 
-Created: 2026-10-29. Last updated: 2026-10-30.
+Created: 2026-10-29. Last updated: 2026-11-24.
 
 These two providers are pi-rust extensions. Upstream pi does not have them. Their models are in `crates/pi-ai/models.extra.json`. `cargo xtask models` regenerates `models.json` from the upstream catalog and does not change this file.
 
@@ -35,12 +35,13 @@ Chat goes over HTTP/1.1. reqwest does not need its `http2` feature.
   - pi makes one model for each model `name`. The ID is the `name`. The model name is the `client_display_name`.
   - The normal routes come from the variants without `fast=true`. If a model has only `fast=true` variants, they are the normal routes.
   - The fast routes come from the variants with `fast=true`. If a model has both route sets, `compat.cursorFast` keeps the fast set as `{slug, parameters, levels}`. pi groups the fast set with the same rules as the normal set. The `levels` key is present only when the fast set has more than one level.
+  - If no fast variant is outside max mode, the fast routes come from the max mode variants with `fast=true` whose other parameters match a normal variant with `fast=false`. Claude models list their fast variants this way. Each of these routes has `maxMode: true`.
   - The thinking level of a variant comes from its `effort`, `reasoning_effort`, or `reasoning` parameter. `none` is `off`, and `extra-high` is `xhigh`. With a `thinking` parameter, `thinking=false` is `off`, and `thinking=true` without an effort is `high`. If two variants have the same level, pi keeps the default variant, else the last one.
   - The default route of a set is its default variant (`is_default`), else the variant with the level of the model's default variant.
   - The context size is the `context` parameter of the default route (`256k`, `1m`). Without one, pi uses `context_token_limit`.
   - `compat.cursorModel`, `compat.cursorSlug`, `compat.cursorParameters`, and `compat.cursorLevels` keep the normal routes. The thinking levels of the model come from the normal set. For each request, pi clamps the thinking level to the levels of the model and sends the route of that level in `RequestedModel`.
-  - In fast mode, pi uses the `compat.cursorFast` route of the clamped level, else the default fast route.
-  - pi does not show max mode variants and hidden models (`is_hidden`).
+  - In fast mode, pi uses the `compat.cursorFast` route of the clamped level, else the default fast route. A route with `maxMode: true` asks for max mode in the run request.
+  - pi does not show max mode variants, apart from the fast routes above, and hidden models (`is_hidden`).
 - Context use: each `conversation_checkpoint_update` carries `token_details.used_tokens`. pi puts the last value in `usage.totalTokens`, which the footer shows as context use.
 - Model IDs without a `compat` route: a GPT ID with an effort suffix asks for its base model with a `reasoning` parameter, for example `gpt-5.5-high` gives `gpt-5.5` with `reasoning=high`. `composer-2.5` sends `fast=false`. pi sends other IDs unchanged.
 

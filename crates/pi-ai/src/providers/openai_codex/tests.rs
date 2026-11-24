@@ -253,7 +253,8 @@ async fn streams_reasoning_tool_calls_and_service_tier_pricing() {
         json!({"type": "response.output_item.added", "output_index": 1, "item": {"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "read", "arguments": ""}}),
         json!({"type": "response.function_call_arguments.delta", "output_index": 1, "delta": "{\"path\":\"a\"}"}),
         json!({"type": "response.output_item.done", "output_index": 1, "item": call}),
-        json!({"type": "response.completed", "response": {"id": "resp_1", "status": "completed", "service_tier": "priority", "usage": {"input_tokens": 1_000_000, "output_tokens": 0, "total_tokens": 1_000_000}}}),
+        // GPT-6 models report Fast mode as `fast` even when `priority` was requested.
+        json!({"type": "response.completed", "response": {"id": "resp_1", "status": "completed", "service_tier": "fast", "usage": {"input_tokens": 1_000_000, "output_tokens": 0, "total_tokens": 1_000_000}}}),
     ];
     let server = RouteServer::start(move |_| sse_reply(&payload)).await;
     let model = codex_model(&server.base_url);
