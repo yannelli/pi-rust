@@ -324,12 +324,6 @@
     }
   },
   {"name":"pie_unsupported","src":"pie title Pets\n  \"Dogs\" : 386\n  \"Cats\" : 85","kind":null,"art":null},
-  {
-    "name": "gantt_unsupported",
-    "src": "gantt\n  title A Gantt Diagram\n  section Section\n  A task :a1, 2014-01-01, 30d",
-    "kind": null,
-    "art": null
-  },
   {"name":"blank","src":"","kind":null,"art":null},
   {"name":"whitespace_only","src":"   \n\t\n  ","kind":null,"art":null},
   {"name":"plain_text","src":"just some words","kind":null,"art":null},

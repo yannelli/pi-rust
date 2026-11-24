@@ -1,17 +1,23 @@
 //! Mermaid diagrams as Unicode box-drawing art for terminals, a port of the npm package
 //! `grok-mermaid` 0.2.3. Draws flowcharts (with subgraphs), state, class, ER and
-//! sequence diagrams; [`source_box`] frames the raw source when art is unwanted.
+//! sequence diagrams, plus Gantt charts and git graphs, which upstream does not;
+//! [`source_box`] frames the raw source when art is unwanted.
 
 mod ansi;
 mod canvas;
+mod dates;
 mod graph;
 mod labels;
 mod layout;
 mod layout_draw;
+mod layout_gantt;
+mod layout_git;
 mod layout_place;
 mod layout_rank;
 mod layout_seq;
 mod parse_flow;
+mod parse_gantt;
+mod parse_git;
 mod parse_seq;
 mod parse_state;
 mod source_box;
@@ -22,6 +28,8 @@ mod width_data;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_gantt_git;
 
 pub use ansi::{AnsiTheme, DEFAULT_THEME, to_ansi};
 pub use parse_flow::{DiagramKind, diagram_kind};
@@ -78,5 +86,7 @@ fn draw(src: &str) -> Option<(Canvas, Vec<String>)> {
             plain(layout::layout_class(&graph, &infos))
         }
         DiagramKind::Sequence => plain(layout_seq::layout_sequence(&parse_seq::parse_sequence(src)?)),
+        DiagramKind::Gantt => plain(layout_gantt::layout_gantt(&parse_gantt::parse_gantt(src)?)),
+        DiagramKind::GitGraph => plain(layout_git::layout_git(&parse_git::parse_git(src)?)),
     }
 }

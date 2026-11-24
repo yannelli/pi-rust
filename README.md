@@ -211,6 +211,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 | A terminal notification when a run takes 10 seconds or more | Has this only as the example extension `notify.ts` | [Notifications](crates/pi-coding-agent/docs/terminal.md#notifications) |
 | The status line and `/statusline`, as the `marketplace:statusline` extension | Changes the footer only through extensions | [Status line](crates/pi-coding-agent/docs/status-line.md) |
 | More harness themes | | [Themes](crates/pi-coding-agent/docs/terminal.md#themes) |
+| Mermaid `gantt` charts and `gitGraph` diagrams render as terminal art. Git graphs are always drawn top to bottom (`BT` flips them). | Shows these diagrams as source | |
 | The iTerm2 integration and `/terminal-setup`, as the `marketplace:iterm2` extension | | [iTerm2 integration](crates/pi-coding-agent/docs/terminal.md#iterm2-integration) |
 | The extension UI call `ctx.ui.writeTerminal(data, { tmuxPassthrough })` writes raw bytes to the terminal | Has no such call | |
 | Footer data of `ctx.ui.setFooter` also has `getSessionStats()` (`input`, `output`, `cacheRead`, `cacheWrite`, `cost`, `contextTokens`, `contextWindow`, `contextPercent`) and `getRunState()` (`idle`, `working`, `blocked`, `done`, or `error`) | Has neither | |
