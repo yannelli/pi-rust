@@ -36,11 +36,23 @@ async fn nonzero_exit_is_error_result_with_output() {
 #[tokio::test]
 async fn timeout_kills_and_reports() {
     let dir = tempfile::tempdir().unwrap();
-    // Git Bash on a loaded Windows runner can take over a second to reach the echo.
-    let started = Instant::now();
-    let err = run("bash", dir.path(), json!({ "command": "echo before; sleep 60", "timeout": 3 })).await.unwrap_err();
-    assert!(started.elapsed() < Duration::from_secs(8));
-    assert_eq!(err.to_string(), "before\n\n\nCommand timed out after 3 seconds");
+    let marker = dir.path().join("started");
+    // Git Bash on a loaded Windows runner can take seconds to start. `started` proves the echo
+    // ran, so its output must be in the error; without it the shell was too slow, so try longer.
+    for timeout in [0.5, 5.0, 30.0] {
+        let _ = std::fs::remove_file(&marker);
+        let args = json!({ "command": "echo before; : > started; sleep 60", "timeout": timeout });
+        let started = Instant::now();
+        let err = run("bash", dir.path(), args).await.unwrap_err().to_string();
+        assert!(started.elapsed() < Duration::from_secs_f64(timeout + 5.0), "{:?}", started.elapsed());
+        let status = format!("Command timed out after {timeout} seconds");
+        if marker.exists() {
+            assert_eq!(err, format!("before\n\n\n{status}"));
+            break;
+        }
+        assert!(err.ends_with(&status), "{err}");
+        assert!(timeout < 30.0, "bash did not run its first command within 30 seconds");
+    }
     let err = run("bash", dir.path(), json!({ "command": "true", "timeout": -1 })).await.unwrap_err();
     assert!(err.to_string().starts_with("Invalid timeout"));
 }
