@@ -41,6 +41,7 @@ pub const BUILTIN_SLASH_COMMANDS: &[(&str, &str, Option<&str>)] = &[
     ("login", "Configure provider authentication", Some("<provider>")),
     ("logout", "Remove provider authentication", None),
     ("new", "Start a new session", None),
+    ("clear", "Clear visible chat and keep the current session context", None),
     ("compact", "Manually compact the session context", None),
     ("init", "Write or improve the project's AGENTS.md", Some("<instructions>")),
     ("resume", "Resume another session", None),

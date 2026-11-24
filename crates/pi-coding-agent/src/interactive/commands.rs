@@ -124,6 +124,13 @@ impl InteractiveMode {
         } else if text == "/new" {
             clear();
             self.handle_new_session();
+        } else if let Some(args) = argument(text, "clear") {
+            clear();
+            if args.is_some() {
+                self.show_status("Usage: /clear");
+            } else {
+                self.handle_clear_command();
+            }
         } else if let Some(instructions) = argument(text, "compact") {
             clear();
             self.handle_compact_command(instructions.map(str::to_string));
@@ -319,6 +326,22 @@ impl InteractiveMode {
                 Err(error) => mode.handle_fatal_runtime_error("Failed to create session", &error),
             }
         });
+    }
+
+    fn handle_clear_command(&self) {
+        let session = self.session();
+        if !session.is_idle() || session.pending_message_count() > 0 || self.state.borrow().bash_component.is_some() {
+            self.show_warning("Wait for the current work to finish before clearing chat.");
+            return;
+        }
+        self.ui.chat.borrow_mut().clear();
+        let mut state = self.state.borrow_mut();
+        state.last_status = None;
+        state.pending_bash_components.clear();
+        drop(state);
+        self.update_pending_messages_display();
+        self.ui.transcript.scroll_to_end();
+        self.request_full_render();
     }
 
     fn handle_compact_command(&self, instructions: Option<String>) {

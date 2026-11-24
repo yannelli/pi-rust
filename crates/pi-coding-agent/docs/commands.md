@@ -25,6 +25,7 @@ pi-rust adds these commands:
 
 | Command | Effect |
 | --- | --- |
+| `/clear` | Clears the visible chat while keeping the current session and model context. Run it when Pi is idle. |
 | `/diff` | Shows the uncommitted git changes. |
 | `/context` | Shows how much of the context window the conversation uses. |
 | `/usage` | Shows the subscription limits of the providers that you are logged in to. |
