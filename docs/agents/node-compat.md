@@ -13,6 +13,7 @@ Extensions run on pi-js, an embedded QuickJS runtime with Node 22 built-in modul
 | APIs that throw `ERR_PI_UNSUPPORTED` | `UNSUPPORTED_APIS` in `crates/pi-js/src/unsupported.rs` |
 | APIs that work but are different from Node | `DIFFERENCES` in the same file |
 | Tests | `crates/pi-js/tests/node_*.rs` |
+| The QuickJS engine, with a one-line fix (see `[patch.crates-io]` in `Cargo.toml`) | `vendor/rquickjs-sys` |
 
 ## Node backend
 

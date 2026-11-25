@@ -204,3 +204,24 @@ async fn registered_source_files_load_with_relative_imports() {
         run_cjs(&runtime, &root, &format!("const m = await import({cjs_dir} + '/index.js'); return m.inc(1);")).await;
     assert_eq!(imported, json!(2));
 }
+
+// `mid.mjs` waits only for its top-level-await dependency. Once it has run, a dynamic import of a
+// module that imports it settles (vendored QuickJS patch, see `[patch.crates-io]`).
+#[tokio::test]
+async fn a_module_that_waited_for_top_level_await_can_be_imported_again() {
+    let (_dir, root) = tempdir();
+    write(&root, "leaf.mjs", "export const leaf = 1;\n");
+    write(&root, "tla.mjs", "const mod = await import('./leaf.mjs');\nexport const value = mod.leaf;\n");
+    write(&root, "mid.mjs", "import { value } from './tla.mjs';\nexport const mid = value;\n");
+    write(&root, "three.mjs", "import { mid } from './mid.mjs';\nexport const three = mid + 2;\n");
+    write(
+        &root,
+        "main.mjs",
+        "const { mid } = await import('./mid.mjs');\nconst { three } = await import('./three.mjs');\nexport const out = [mid, three];\n",
+    );
+    let (runtime, _capture) = runtime(&root);
+    let import = runtime.import("./main.mjs");
+    let namespace =
+        tokio::time::timeout(std::time::Duration::from_secs(20), import).await.expect("import settles").unwrap();
+    assert_eq!(namespace.get("out").await.unwrap().into_json(), json!([1, 3]));
+}
