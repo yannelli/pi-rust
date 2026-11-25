@@ -359,6 +359,10 @@
     {
       "item": "51ba3ab5b",
       "reason": "Removes the AbortSignal listener that retryAssistantCall's backoff sleep left behind. pi-rust has no listener to remove: cancellable_sleep in crates/pi-ai/src/retry.rs waits in tokio::select! on the CancellationToken and drops the wait when the sleep ends."
+    },
+    {
+      "item": "c7a5f2e78",
+      "reason": "Docs only: one sentence of docs/extensions.md on when after_provider_response fires. pi-rust does not ship that file."
     }
   ],
   "cliFlags": [
