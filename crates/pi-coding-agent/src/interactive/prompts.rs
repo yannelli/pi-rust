@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::mode::InteractiveMode;
 use super::selector::{SelectorDone, SelectorSpec};
+use super::status::dialog_blocked_status;
 use crate::interactive_components::{
     ExtensionEditor, ExtensionEditorOptions, ExtensionInput, ExtensionInputOptions, ExtensionSelector,
     ExtensionSelectorOptions,
@@ -179,10 +180,10 @@ impl InteractiveMode {
 
     /// A list of options; `None` when dismissed.
     pub(super) fn ask_choice(&self, title: &str, options: Vec<String>) -> oneshot::Receiver<Option<String>> {
-        self.ask_choice_with(title, options, (BlockedKind::Question, title.to_string()))
+        self.ask_choice_with(title, options, dialog_blocked_status(BlockedKind::Question, title))
     }
 
-    fn ask_choice_with(
+    pub(super) fn ask_choice_with(
         &self,
         title: &str,
         options: Vec<String>,
@@ -242,8 +243,11 @@ impl InteractiveMode {
     /// `Yes`/`No` under `title` and `message`; false when dismissed.
     pub(super) async fn ask_confirm(&self, title: &str, message: &str) -> bool {
         let options = vec!["Yes".to_string(), "No".to_string()];
-        let receiver =
-            self.ask_choice_with(&format!("{title}\n{message}"), options, (BlockedKind::Permission, title.to_string()));
+        let receiver = self.ask_choice_with(
+            &format!("{title}\n{message}"),
+            options,
+            dialog_blocked_status(BlockedKind::Permission, title),
+        );
         receiver.await.ok().flatten().as_deref() == Some("Yes")
     }
 
@@ -273,12 +277,12 @@ impl InteractiveMode {
 
     /// [`InteractiveMode::ask_input_until`] with the `timeout`, `prefill`, and `secret` of `opts`.
     pub(super) fn ask_input_within(&self, title: &str, opts: DialogOptions) -> oneshot::Receiver<Option<String>> {
-        let DialogOptions { timeout, cancel, prefill: initial, secret } = opts;
+        let DialogOptions { timeout, cancel, prefill: initial, secret, blocked_kind } = opts;
         let (slot, receiver) = answer();
         let title = title.to_string();
         let tui = self.tui();
         let weak = self.weak.clone();
-        self.show_dialog((BlockedKind::Question, title.clone()), move |done| {
+        self.show_dialog(dialog_blocked_status(blocked_kind.unwrap_or(BlockedKind::Question), &title), move |done| {
             let watcher = watch_cancel(cancel, &slot, &done, weak);
             let (on_submit, on_cancel) = (slot.clone(), slot);
             let (done_submit, done_cancel) = (done.clone(), done);
@@ -313,7 +317,7 @@ impl InteractiveMode {
         let title = title.to_string();
         let tui = self.tui();
         let command = Some(self.settings().external_editor_command());
-        self.show_dialog((BlockedKind::Question, title.clone()), move |done| {
+        self.show_dialog(dialog_blocked_status(BlockedKind::Question, &title), move |done| {
             let (on_submit, on_cancel) = (slot.clone(), slot);
             let (done_submit, done_cancel) = (done.clone(), done);
             let editor = ExtensionEditor::new(

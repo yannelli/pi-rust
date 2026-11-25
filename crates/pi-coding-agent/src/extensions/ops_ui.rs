@@ -33,12 +33,13 @@ fn factory(runner: &ExtensionRunner, target: u64, id: &Value, kind: ComponentKin
     id.as_u64().map(|id| ComponentFactory::new(&runner.this(), id, target, kind))
 }
 
-/// Dialog options from `{ timeout, signal, prefill, secret }`.
+/// Dialog options from `{ timeout, signal, prefill, secret, blockedKind }`.
 pub(crate) fn dialog_options(runner: &ExtensionRunner, value: &Value) -> DialogOptions {
     let timeout = value["timeout"].as_f64().filter(|ms| *ms > 0.0).map(|ms| Duration::from_millis(ms as u64));
     let cancel = value["signal"].as_u64().map(|id| runner.token(Some(id)));
     let prefill = value["prefill"].as_str().map(str::to_string);
-    DialogOptions { timeout, cancel, prefill, secret: value["secret"].as_bool().unwrap_or(false) }
+    let secret = value["secret"].as_bool().unwrap_or(false);
+    DialogOptions { timeout, cancel, prefill, secret, blocked_kind: blocked_kind(&value["blockedKind"]) }
 }
 
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
@@ -229,14 +230,19 @@ pub(crate) async fn custom(runner: &ExtensionRunner, target: u64, id: u64, optio
 
 /// The `blocked` option of `ctx.ui.custom()`: `{ kind, message }` with a known kind.
 fn blocked_status(value: &Value) -> Option<(pi_tui::program_status::BlockedKind, String)> {
-    use pi_tui::program_status::BlockedKind;
-    let kind = match value["kind"].as_str()? {
-        "permission" => BlockedKind::Permission,
-        "question" => BlockedKind::Question,
-        "auth" => BlockedKind::Auth,
-        _ => return None,
-    };
+    let kind = blocked_kind(&value["kind"])?;
     Some((kind, value["message"].as_str().unwrap_or_default().to_string()))
+}
+
+/// `"permission"`, `"question"`, or `"auth"`.
+fn blocked_kind(value: &Value) -> Option<pi_tui::program_status::BlockedKind> {
+    use pi_tui::program_status::BlockedKind;
+    match value.as_str()? {
+        "permission" => Some(BlockedKind::Permission),
+        "question" => Some(BlockedKind::Question),
+        "auth" => Some(BlockedKind::Auth),
+        _ => None,
+    }
 }
 
 /// Every keybinding id with its effective keys, for the JavaScript `KeybindingsManager`.

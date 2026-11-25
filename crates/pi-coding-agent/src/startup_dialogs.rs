@@ -6,11 +6,14 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use pi_tui::program_status::BlockedKind;
 use pi_tui::{Component, ComponentRef, ProcessTerminal, TerminalRef, Tui, TuiOptions, component, ui_loop};
 
-use crate::interactive::startup_ui::show_startup_selector;
+use crate::interactive::startup_ui::{report_startup_blocked, show_startup_selector};
 use crate::interactive_components::SessionSelector;
-use crate::interactive_components::first_time_setup::{FirstTimeSetupComponent, apply_first_time_setup_result};
+use crate::interactive_components::first_time_setup::{
+    FIRST_TIME_SETUP_QUESTION, FirstTimeSetupComponent, apply_first_time_setup_result,
+};
 use crate::interactive_components::session_selector::{
     SessionSelectorOptions, all_sessions_loader, project_sessions_loader,
 };
@@ -55,6 +58,7 @@ async fn run_until<T>(tui: &Tui, root: ComponentRef, focus: ComponentRef, done: 
 /// First-time setup on `terminal`: theme choice with live preview and analytics opt-in, saved
 /// to `settings` unless cancelled. Returns whether a choice was saved.
 pub async fn show_first_time_setup_on(terminal: TerminalRef, settings: &SettingsManager) -> bool {
+    report_startup_blocked(&terminal, (BlockedKind::Permission, FIRST_TIME_SETUP_QUESTION.to_string()));
     let tui = startup_tui(terminal, settings);
     let _ = set_theme(SYSTEM_THEME_NAME, false);
     let done: Rc<RefCell<Option<Option<_>>>> = Rc::default();
@@ -84,7 +88,8 @@ pub async fn show_first_time_setup(settings: &SettingsManager) -> bool {
 /// (upstream `promptForMissingSessionCwd`). `prompt` is the missing cwd description.
 pub async fn confirm_missing_session_cwd_on(terminal: TerminalRef, settings: &SettingsManager, prompt: &str) -> bool {
     let options = vec!["Continue".to_string(), "Cancel".to_string()];
-    show_startup_selector(terminal, settings, prompt, options).await.as_deref() == Some("Continue")
+    show_startup_selector(terminal, settings, prompt, options, BlockedKind::Question).await.as_deref()
+        == Some("Continue")
 }
 
 /// What the startup session picker ended with.

@@ -57,6 +57,10 @@ pub struct DialogOptions {
     pub prefill: Option<String>,
     /// `input` only (pi-rust): show `*` for each character.
     pub secret: bool,
+    /// What the dialog waits for, reported as blocked program status (OSC 7501) with the first
+    /// line of the title. Defaults to `Permission` for `confirm` and `Question` for `select` and
+    /// `input`.
+    pub blocked_kind: Option<pi_tui::program_status::BlockedKind>,
 }
 
 impl DialogOptions {

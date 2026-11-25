@@ -15,6 +15,7 @@ use tokio::sync::oneshot;
 use super::bridge::EventBridge;
 use super::extension_view::Widget;
 use super::mode::InteractiveMode;
+use super::status::dialog_blocked_status;
 use crate::extension_ui::{
     ChatStyle, DialogOptions, ExtensionUi, NotifyType, ThemeInfo, WidgetPlacement, WorkingIndicatorOptions,
 };
@@ -178,7 +179,7 @@ impl ExtensionUi for TuiExtensionUi {
         let (title, options) = (title.to_string(), options.to_vec());
         let cancelled = is_cancelled(&opts);
         self.ask(None, cancelled, move |mode| {
-            let blocked = (BlockedKind::Question, title.clone());
+            let blocked = dialog_blocked_status(opts.blocked_kind.unwrap_or(BlockedKind::Question), &title);
             mode.ask_choice_within(&title, options, blocked, opts.timeout, opts.cancel)
         })
         .await
@@ -190,7 +191,7 @@ impl ExtensionUi for TuiExtensionUi {
         let choice = self
             .ask(None, cancelled, move |mode| {
                 let options = vec!["Yes".to_string(), "No".to_string()];
-                let blocked = (BlockedKind::Permission, title.clone());
+                let blocked = dialog_blocked_status(opts.blocked_kind.unwrap_or(BlockedKind::Permission), &title);
                 mode.ask_choice_within(&format!("{title}\n{message}"), options, blocked, opts.timeout, opts.cancel)
             })
             .await;

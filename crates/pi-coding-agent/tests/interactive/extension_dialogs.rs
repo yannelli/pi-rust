@@ -111,6 +111,11 @@ export default function (pi) {
 		await shown("UPPER", "top-right");
 		ctx.ui.notify("overlays open");
 	} });
+	pi.registerCommand("deploy", { handler: async (_args, ctx) => {
+		const deploy = await ctx.ui.select("Deploy to production?", ["Deploy", "Cancel"], { blockedKind: "permission" });
+		const trust = await ctx.ui.select("Trust project folder?\n/work/project\n\nDetails", ["Trust"]);
+		ctx.ui.notify(`chose ${deploy} ${trust}`);
+	} });
 	pi.registerCommand("swap-editor", { handler: async (_args, ctx) => {
 		const answer = ctx.ui.confirm("Swap", "swap dialog");
 		await new Promise((resolve) => setTimeout(resolve, 100));
@@ -240,6 +245,23 @@ async fn an_inline_custom_component_can_report_blocked_status() {
         ui.send("d").await;
         ui.wait_for("blocked yes loaded").await;
         ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
+    })
+    .await;
+}
+
+// Upstream #12490 and #12439: `blockedKind` sets the kind, and the message is the title's first line.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_select_reports_its_blocked_kind_and_the_first_line_of_its_title() {
+    local(async {
+        let ui = start_ui().await;
+        ui.submit("/deploy").await;
+        let deploy = Some((BlockedKind::Permission, "Deploy to production?"));
+        ui.wait_until("deploy select", |ui| showing(ui, "Deploy to production?") && reports_blocked(ui, deploy)).await;
+        ui.send("\r").await;
+        let trust = Some((BlockedKind::Question, "Trust project folder?"));
+        ui.wait_until("trust select", |ui| showing(ui, "/work/project") && reports_blocked(ui, trust)).await;
+        ui.send("\r").await;
+        ui.wait_for("chose Deploy Trust").await;
     })
     .await;
 }

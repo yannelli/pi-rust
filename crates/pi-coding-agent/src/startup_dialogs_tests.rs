@@ -43,8 +43,14 @@ async fn first_time_setup_saves_theme_and_analytics() {
         let skipped = settings(&dir.path().join("other"));
         let terminal = VirtualTerminal::shared(90, 30);
         feed(&terminal, &["\x1b"]);
-        assert!(!show_first_time_setup_on(terminal, &skipped).await);
+        assert!(!show_first_time_setup_on(terminal.clone(), &skipped).await);
         assert_eq!(skipped.theme_setting(), None);
+        // Upstream #12490: the analytics opt-in asks for a permission.
+        let reports = terminal.borrow().program_statuses().to_vec();
+        let report = reports.first().expect("a blocked report");
+        assert_eq!(report.state, pi_tui::program_status::ProgramState::Blocked);
+        assert_eq!(report.kind, Some(BlockedKind::Permission));
+        assert_eq!(report.message.as_deref(), Some(FIRST_TIME_SETUP_QUESTION));
     })
     .await;
 }
