@@ -263,7 +263,7 @@ The numbers are upstream issue numbers.
 | [`pi-coding-agent`](crates/pi-coding-agent) | Tools, sessions, compaction, resources, extensions, the interactive TUI, the print, JSON, RPC, and ACP modes, and the `pi` CLI |
 | [`pi-chord`](crates/pi-chord) | Chord: an application composition runtime for services, replicated state, RPC, and plugins |
 | [`pi-telemetry`](crates/pi-telemetry) | Vendor-neutral telemetry contracts and typed schema utilities |
-| [`pi-schema`](crates/pi-schema) | TypeBox-compatible JSON Schema checks, defaults, and value cleanup, for pi-ai and pi-chord |
+| [`pi-schema`](crates/pi-schema) | TypeBox-compatible JSON Schema checks, defaults, and value cleanup, and the tool argument coercion and errors of upstream pi-schema, for pi-ai, pi-agent, and pi-chord |
 | [`pi-embedded`](crates/pi-embedded) | In-process pi sessions for native and Rust applications, with a C ABI (`include/pi_embedded.h`) |
 | [`pi-protocol`](crates/pi-protocol), [`pi-client`](crates/pi-client), [`pi-server`](crates/pi-server) | The CBOR wire protocol, its client, and its server over Unix sockets |
 | [`pi-durable`](crates/pi-durable) | Pi Durable: durable sessions on memory, SQLite, or JSONL storage, the harness, and its coding tools |
