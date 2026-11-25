@@ -1,19 +1,19 @@
 //! Session replacement through the runtime (upstream `agent-session-runtime` and
 //! `agent-session-branching` tests).
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_ai::auth::{
-    AuthError, AuthInteraction, AuthOverrides, AuthResult, Credential, CredentialStore, InMemoryCredentialStore,
+    AuthError, AuthInteraction, AuthOverrides, AuthResult, Credential, CredentialStore, FileCredentialStore,
     LoginOptions, ModelAuth, OAuthAuth, OAuthCredential,
 };
 use pi_ai::providers::faux::FauxResponse;
 use pi_coding_agent::agent_session::{AgentSessionRuntime, ForkPosition};
 use pi_coding_agent::app::AppOptions;
 use pi_coding_agent::session::SessionManager;
+use serde_json::json;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
@@ -159,14 +159,15 @@ impl OAuthAuth for RotatingOAuth {
     }
 }
 
-// Upstream #11692: a client that stops pi right after a probe must not lose a rotated token.
-#[tokio::test]
-async fn dispose_waits_until_an_oauth_refresh_in_flight_is_saved() {
+/// Starts a refresh of an expired login whose caller is gone before the token endpoint answers,
+/// optionally replaces the session, then checks that `dispose` waits until the new token is saved.
+async fn dispose_waits_for_a_refresh_in_flight(replace_session: bool) {
     let h = harness(Options::default()).await;
-    let expired =
-        OAuthCredential { refresh: "old-refresh".into(), access: "old".into(), expires: 0, extra: Default::default() };
-    let store =
-        Arc::new(InMemoryCredentialStore::new(BTreeMap::from([("rotating".into(), Credential::OAuth(expired))])));
+    // A file store, as pi uses: reads do not wait for the lock a refresh holds.
+    let path = h.agent_dir.join("rotating-auth.json");
+    let expired = json!({"rotating": {"type": "oauth", "refresh": "old-refresh", "access": "old", "expires": 0}});
+    std::fs::write(&path, expired.to_string()).unwrap();
+    let store = Arc::new(FileCredentialStore::new(path));
     let (started, refresh_started) = oneshot::channel();
     let (respond, response) = oneshot::channel();
     let oauth: Arc<dyn OAuthAuth> = Arc::new(RotatingOAuth {
@@ -179,12 +180,13 @@ async fn dispose_waits_until_an_oauth_refresh_in_flight_is_saved() {
         ..h.app_options()
     };
     let runtime = crate::offline_guard::app_runtime(options, SessionManager::in_memory(&h.cwd)).await;
-    // Like the startup catalog refresh: resolving the expired login refreshes it, and the caller
-    // is gone before the token endpoint answers.
     let resolver = runtime.session().model_runtime().resolver().clone();
     let caller = tokio::spawn(async move { resolver.resolve("rotating", &AuthOverrides::default()).await });
     refresh_started.await.unwrap();
     caller.abort();
+    if replace_session {
+        runtime.new_session(None, None).await.unwrap();
+    }
 
     let dispose = tokio::spawn(async move { runtime.dispose().await });
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -193,4 +195,16 @@ async fn dispose_waits_until_an_oauth_refresh_in_flight_is_saved() {
     tokio::time::timeout(Duration::from_secs(10), dispose).await.unwrap().unwrap();
     let Some(Credential::OAuth(saved)) = store.read("rotating").await.unwrap() else { panic!("the login is gone") };
     assert_eq!(saved.refresh, "new-refresh");
+}
+
+// Upstream #11692: a client that stops pi right after a probe must not lose a rotated token.
+#[tokio::test]
+async fn dispose_waits_until_an_oauth_refresh_in_flight_is_saved() {
+    dispose_waits_for_a_refresh_in_flight(false).await;
+}
+
+// A replaced session has its own model runtime, whose refresh must be saved as well.
+#[tokio::test]
+async fn dispose_waits_for_a_refresh_that_a_replaced_session_started() {
+    dispose_waits_for_a_refresh_in_flight(true).await;
 }
