@@ -59,6 +59,40 @@ export default function (pi) {
 		}), { blocked: { kind: "permission", message: "Approve?" } });
 		ctx.ui.notify(`blocked ${await first} ${await loader}`);
 	} });
+	pi.registerCommand("blocked-overlays", { handler: async (_args, ctx) => {
+		const dones = [];
+		const handles = [];
+		const open = (text, onKey, blocked) =>
+			ctx.ui.custom((_tui, _theme, _keys, done) => {
+				dones.push(done);
+				return { render: () => [text], invalidate() {}, handleInput: onKey };
+			}, { overlay: true, onHandle: (handle) => handles.push(handle), blocked });
+		let second;
+		let loader;
+		const first = open("FIRST", (key) => {
+			if (key === "n") {
+				second = open("SECOND", (key) => {
+					if (key === "n") loader = open("LOADER", (key) => key === "d" && dones[2]("loaded"));
+					else if (key === "h") handles[0].setHidden(true);
+					else if (key === "d") dones[1]("two");
+				}, { kind: "question", message: "Second?" });
+			}
+		}, { kind: "question", message: "First?" });
+		const off = ctx.ui.onTerminalInput((data) => {
+			if (data !== "z") return undefined;
+			off();
+			dones[0]("one");
+			return { consume: true };
+		});
+		ctx.ui.notify(`overlays ${await first} ${await second} ${await loader}`);
+	} });
+	pi.registerCommand("blocked-overlay-reload", { handler: async (_args, ctx) => {
+		void ctx.ui.custom(() => ({ render: () => ["QUESTION"], invalidate() {} }), {
+			overlay: true,
+			overlayOptions: { nonCapturing: true },
+			blocked: { kind: "question", message: "Question?" },
+		});
+	} });
 	pi.registerCommand("swap-editor", { handler: async (_args, ctx) => {
 		const answer = ctx.ui.confirm("Swap", "swap dialog");
 		await new Promise((resolve) => setTimeout(resolve, 100));
@@ -187,6 +221,50 @@ async fn an_inline_custom_component_can_report_blocked_status() {
         ui.wait_until("blocked again", |ui| showing(ui, "APPROVAL") && reports_blocked(ui, approval)).await;
         ui.send("d").await;
         ui.wait_for("blocked yes loaded").await;
+        ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
+    })
+    .await;
+}
+
+// Upstream #11816: overlays ignored the blocked option.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn custom_overlays_report_blocked_status_until_done_also_while_hidden() {
+    local(async {
+        let ui = start_ui().await;
+        let first = Some((BlockedKind::Question, "First?"));
+        let second = Some((BlockedKind::Question, "Second?"));
+        ui.submit("/blocked-overlays").await;
+        ui.wait_until("first overlay", |ui| showing(ui, "FIRST") && reports_blocked(ui, first)).await;
+        ui.send("n").await;
+        ui.wait_until("second overlay", |ui| showing(ui, "SECOND") && reports_blocked(ui, second)).await;
+        ui.send("n").await;
+        ui.wait_until("loader", |ui| showing(ui, "LOADER")).await;
+        assert!(reports_blocked(&ui, second), "a loader overlay does not report blocked");
+        ui.send("d").await;
+        ui.wait_until("loader closed", |ui| !showing(ui, "LOADER")).await;
+        assert!(reports_blocked(&ui, second));
+        ui.send("h").await;
+        ui.wait_until("first hidden", |ui| !showing(ui, "FIRST")).await;
+        ui.send("d").await;
+        ui.wait_until("second closed", |ui| !showing(ui, "SECOND")).await;
+        ui.settle(200).await;
+        assert!(reports_blocked(&ui, first), "a hidden overlay stays blocked until done");
+        ui.send("z").await;
+        ui.wait_for("overlays one two loaded").await;
+        ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
+    })
+    .await;
+}
+
+// Upstream #11816: /reload drops overlays without calling done().
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_clears_the_blocked_status_of_open_overlays() {
+    local(async {
+        let ui = start_ui().await;
+        ui.submit("/blocked-overlay-reload").await;
+        let question = Some((BlockedKind::Question, "Question?"));
+        ui.wait_until("blocked overlay", |ui| showing(ui, "QUESTION") && reports_blocked(ui, question)).await;
+        ui.submit("/reload").await;
         ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
     })
     .await;

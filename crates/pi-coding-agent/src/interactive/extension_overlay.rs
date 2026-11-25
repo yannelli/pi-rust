@@ -60,11 +60,23 @@ impl InteractiveMode {
             let close: Rc<dyn Fn()> = if overlay {
                 let options = custom_overlay_options(options.as_ref(), &js.borrow());
                 let handle = mode.tui().show_overlay(view, options);
+                // An overlay stays blocked until `done`, also while `setHidden` hides it.
+                let source = blocked.is_some().then(|| format!("extension-overlay:{overlay_id}"));
+                if let Some(source) = &source {
+                    mode.extensions_state().blocking_overlays.insert(source.clone());
+                    mode.set_blocked_status(source, blocked);
+                }
                 if let Some(key) = handle_key {
                     mode.register_extension_overlay(overlay_id, handle.clone());
                     let _ = factory.invoke_callback(key, json!(overlay_id)).await;
                 }
-                Rc::new(move || handle.hide())
+                let weak = Rc::downgrade(&mode);
+                Rc::new(move || {
+                    handle.hide();
+                    let (Some(mode), Some(source)) = (weak.upgrade(), &source) else { return };
+                    mode.extensions_state().blocking_overlays.remove(source);
+                    mode.set_blocked_status(source, None);
+                })
             } else {
                 mode.mount_view_blocked(view, blocked)
             };
@@ -165,6 +177,11 @@ impl InteractiveMode {
         let mirror = self.state.borrow().extensions.mirror.clone();
         for id in ids {
             mirror.set_overlay(id, None);
+        }
+        // Reload and session switches drop overlays without `done`, so clear their blocked status.
+        let sources = std::mem::take(&mut self.extensions_state().blocking_overlays);
+        for source in sources {
+            self.set_blocked_status(&source, None);
         }
         let had_providers = !std::mem::take(&mut self.extensions_state().autocomplete_factories).is_empty();
         if had_providers {
