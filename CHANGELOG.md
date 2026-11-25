@@ -2,6 +2,12 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.39] - 2026-11-24
+
+### Fixed
+
+- **auth:** save a token refresh that a replaced session started before exit ([992f448](https://github.com/yannelli/pi-rust/commit/992f44824f61e9763dab3aa7436d9d8aa24a5c98))
+
 ## [0.12.38] - 2026-11-24
 
 ### Fixed
