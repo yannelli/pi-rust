@@ -133,7 +133,7 @@ fn full_output_keeps_the_head_and_tail_at_character_boundaries() {
     let mut acc = OutputAccumulator::with_limits("pi-test", 10, 16);
     acc.append("é".repeat(40).as_bytes());
     acc.finish();
-    let path = acc.snapshot(true).full_output_path.unwrap();
+    let path = acc.snapshot(true).saved_path().unwrap().to_path_buf();
     acc.close_temp_file();
     let full = acc.read_full_output(11);
     assert!(full.truncated);
@@ -146,4 +146,31 @@ fn full_output_keeps_the_head_and_tail_at_character_boundaries() {
     small.finish();
     let full = small.read_full_output(1000);
     assert_eq!((full.content.as_str(), full.truncated), ("short", false));
+}
+
+// Upstream #10585: output the temp file could not take keeps its tail and says why.
+#[test]
+fn output_that_could_not_be_saved_keeps_its_tail_and_says_why() {
+    let root = tempfile::tempdir().unwrap();
+    let mut acc = OutputAccumulator::new("pi-test").with_temp_dir(&root.path().join("missing"));
+    for line in 1..=3000 {
+        acc.append(format!("{line}\n").as_bytes());
+    }
+    acc.finish();
+    acc.close_temp_file();
+    let snap = acc.snapshot(true);
+    assert!(snap.saved_path().is_none());
+    let (text, details) = crate::tools::shell::format_output(&acc, &snap, "(no output)");
+    assert!(text.contains("\n2999\n3000"), "{text}");
+    let note =
+        "[Showing lines 1001-3000 of 3000. Could not save the full output: ENOENT: no such file or directory, open '";
+    assert!(text.contains(note), "{text}");
+    assert!(details.unwrap().get("fullOutputPath").is_none());
+    // Upstream #12461: output still in memory comes back whole; a cap marks what is missing.
+    let full = acc.read_full_output(1 << 20);
+    assert!(!full.truncated);
+    assert!(full.content.starts_with("1\n2\n") && full.content.ends_with("2999\n3000\n"));
+    let capped = acc.read_full_output(10);
+    assert!(capped.truncated);
+    assert!(capped.content.starts_with("[... ") && capped.content.ends_with(" bytes omitted ...]\n\n2999\n3000\n"));
 }

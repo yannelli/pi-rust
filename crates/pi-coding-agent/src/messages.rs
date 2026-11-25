@@ -61,6 +61,9 @@ pub struct BashExecutionMessage {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_output_path: Option<String>,
+    /// Why the full output could not be saved, when it was truncated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_output_error: Option<String>,
     #[serde(default, deserialize_with = "lenient_millis")]
     pub timestamp: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,12 +142,23 @@ pub fn bash_execution_to_text(message: &BashExecutionMessage) -> String {
     } else if let Some(code) = message.exit_code.filter(|code| *code != 0) {
         text.push_str(&format!("\n\nCommand exited with code {code}"));
     }
-    if message.truncated
-        && let Some(path) = message.full_output_path.as_deref().filter(|path| !path.is_empty())
-    {
-        text.push_str(&format!("\n\n[Output truncated. Full output: {path}]"));
+    if message.truncated {
+        let note = bash_truncation_note(message.full_output_path.as_deref(), message.full_output_error.as_deref());
+        text.push_str(&format!("\n\n[{note}]"));
     }
     text
+}
+
+/// What a truncated bash execution says about its full output: where it is, or why it could not
+/// be saved.
+pub fn bash_truncation_note(full_output_path: Option<&str>, full_output_error: Option<&str>) -> String {
+    if let Some(path) = full_output_path.filter(|path| !path.is_empty()) {
+        return format!("Output truncated. Full output: {path}");
+    }
+    if let Some(error) = full_output_error.filter(|error| !error.is_empty()) {
+        return format!("Output truncated. Could not save the full output: {error}");
+    }
+    "Output truncated".to_string()
 }
 
 fn iso_millis(timestamp: &str) -> i64 {
@@ -256,6 +270,17 @@ mod tests {
             bash_execution_to_text(&cancelled),
             "Ran `ls`\n(no output)\n\n(command cancelled)\n\n[Output truncated. Full output: /tmp/out]"
         );
+        // Upstream #10585: a truncated output says why its full output is missing, or only that it is cut.
+        let failed = BashExecutionMessage {
+            full_output_path: None,
+            full_output_error: Some("ENOSPC: no space left on device, write".into()),
+            ..bash.clone()
+        };
+        assert!(bash_execution_to_text(&failed).ends_with(
+            "\n\n[Output truncated. Could not save the full output: ENOSPC: no space left on device, write]"
+        ));
+        let unsaved = BashExecutionMessage { full_output_path: None, ..bash.clone() };
+        assert!(bash_execution_to_text(&unsaved).ends_with("\n\n[Output truncated]"));
         let excluded = BashExecutionMessage { exclude_from_context: Some(true), ..bash };
         assert!(convert_to_llm(&[excluded.into_message()]).is_empty());
     }

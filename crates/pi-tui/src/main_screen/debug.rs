@@ -66,6 +66,6 @@ impl Renderer<'_> {
             format!("[{} chars written in bounded chunks]", dump.written_len),
         ]
         .join("\n");
-        debug_log::write(&path, &data);
+        let _ = debug_log::write(&path, &data);
     }
 }

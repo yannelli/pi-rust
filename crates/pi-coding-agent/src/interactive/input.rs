@@ -519,13 +519,14 @@ impl InteractiveMode {
                     result.cancelled,
                     result.truncated,
                     result.full_output_path.map(|path| path.display().to_string()),
+                    result.full_output_error,
                 ),
                 Ok(Err(error)) => {
-                    bash.borrow_mut().set_complete(None, false, false, None);
+                    bash.borrow_mut().set_complete(None, false, false, None, None);
                     mode.show_error(&format!("Bash command failed: {error}"));
                 }
                 Err(error) => {
-                    bash.borrow_mut().set_complete(None, false, false, None);
+                    bash.borrow_mut().set_complete(None, false, false, None, None);
                     mode.show_error(&format!("Bash command failed: {error}"));
                 }
             }

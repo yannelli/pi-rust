@@ -182,3 +182,25 @@ fn writes_the_crash_dump_to_the_os_temp_directory_instead_of_a_home_directory_de
     let crash_log = std::fs::read_to_string(&crash_log_path).expect("crash log");
     assert!(crash_log.contains("Terminal width: 40"), "{crash_log}");
 }
+
+// Upstream #10585: a full or unwritable temp dir must not replace the width error.
+#[test]
+fn reports_the_width_error_when_the_crash_dump_cannot_be_written() {
+    let crash_dir = tempfile::Builder::new().prefix("pi-tui-crash-").tempdir().expect("temp dir");
+    // A regular file where the log directory should be makes the dump fail to write.
+    let log_directory = crash_dir.path().join("not-a-directory");
+    std::fs::write(&log_directory, "").expect("file");
+    let terminal = VirtualTerminal::shared(40, 10);
+    let options = TuiOptions { log_directory: Some(log_directory), ..TuiOptions::default() };
+    let tui = Tui::new_main_screen(terminal.clone(), options);
+    let component = Rc::new(RefCell::new(TestComponent::default()));
+    tui.add_child(erased(&component));
+    component.borrow_mut().lines = strings(&["ok"]);
+    tui.start();
+    wait_for_render();
+
+    component.borrow_mut().lines = vec!["ok".to_string(), "x".repeat(60)];
+    let message = tui.render_now(false).expect_err("overflow should fail the render").to_string();
+    assert!(message.contains("exceeds terminal width"), "{message}");
+    assert!(message.contains("Could not write debug log to "), "{message}");
+}

@@ -1,9 +1,11 @@
 //! Streaming output accumulator with bounded memory and a temp file for the full output.
 
 use std::fs::File;
-use std::hash::{BuildHasher, Hasher};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
+
+use crate::agent_session::output_file::OutputFile;
+pub use crate::agent_session::output_file::OutputFileResult;
 
 use super::truncate::{
     DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, TruncationOptions, TruncationResult, truncate_tail,
@@ -54,7 +56,16 @@ impl Utf8Stream {
 pub struct OutputSnapshot {
     pub content: String,
     pub truncation: TruncationResult,
-    pub full_output_path: Option<PathBuf>,
+    /// Set once the full output goes to a file. While output streams in, `Saved` means the file
+    /// is being written.
+    pub full_output_file: Option<OutputFileResult>,
+}
+
+impl OutputSnapshot {
+    /// The full output file, unless it could not be saved.
+    pub fn saved_path(&self) -> Option<&std::path::Path> {
+        self.full_output_file.as_ref().and_then(OutputFileResult::saved_path)
+    }
 }
 
 /// The complete output, or its head and tail when it is too long.
@@ -79,8 +90,8 @@ pub struct OutputAccumulator {
     completed_lines: usize,
     total_lines: usize,
     current_line_bytes: usize,
-    temp_path: Option<PathBuf>,
-    temp_file: Option<File>,
+    temp_dir: PathBuf,
+    temp_file: Option<OutputFile>,
 }
 
 impl OutputAccumulator {
@@ -103,9 +114,16 @@ impl OutputAccumulator {
             completed_lines: 0,
             total_lines: 0,
             current_line_bytes: 0,
-            temp_path: None,
+            temp_dir: std::env::temp_dir(),
             temp_file: None,
         }
+    }
+
+    /// Write the temp file to `dir` instead of the system temp directory.
+    #[cfg(test)]
+    pub(super) fn with_temp_dir(mut self, dir: &std::path::Path) -> Self {
+        self.temp_dir = dir.to_path_buf();
+        self
     }
 
     pub fn append(&mut self, data: &[u8]) {
@@ -113,10 +131,7 @@ impl OutputAccumulator {
         let text = self.decoder.decode(data);
         self.append_decoded(&text);
         if self.temp_file.is_some() || self.should_use_temp_file() {
-            self.ensure_temp_file();
-            if let Some(file) = self.temp_file.as_mut() {
-                let _ = file.write_all(data);
-            }
+            self.ensure_temp_file().write(data);
         } else {
             self.raw_chunks.extend_from_slice(data);
         }
@@ -151,23 +166,29 @@ impl OutputAccumulator {
         if persist_if_truncated && truncated {
             self.ensure_temp_file();
         }
-        OutputSnapshot { content: truncation.content.clone(), truncation, full_output_path: self.temp_path.clone() }
+        let full_output_file = self.temp_file.as_ref().map(|file| file.result().clone());
+        OutputSnapshot { content: truncation.content.clone(), truncation, full_output_file }
     }
 
+    /// Close the temp file. A failed file shows up as `Failed` in later snapshots.
     pub fn close_temp_file(&mut self) {
-        if let Some(mut file) = self.temp_file.take() {
-            let _ = file.flush();
+        if let Some(file) = self.temp_file.as_mut() {
+            file.close();
         }
     }
 
     /// The complete output for callers that take more than the display snapshot. Call after
     /// `finish` and `close_temp_file`. Output over `max_bytes` keeps its first and last
-    /// `max_bytes / 2` bytes around an omission marker.
+    /// `max_bytes / 2` bytes around an omission marker. When the temp file could not be saved,
+    /// only the retained tail is left: up to its last `max_bytes` bytes, behind the same marker
+    /// when output is missing.
     pub fn read_full_output(&self, max_bytes: usize) -> FullOutput {
-        let Some(path) = &self.temp_path else {
-            return FullOutput { content: String::from_utf8_lossy(&self.raw_chunks).into_owned(), truncated: false };
-        };
-        read_file_output(path, max_bytes).unwrap_or_else(|_| FullOutput { content: String::new(), truncated: false })
+        match self.temp_file.as_ref().map(OutputFile::result) {
+            None => FullOutput { content: String::from_utf8_lossy(&self.raw_chunks).into_owned(), truncated: false },
+            Some(OutputFileResult::Failed(_)) => self.read_retained_output(max_bytes),
+            Some(OutputFileResult::Saved(path)) => read_file_output(path, max_bytes)
+                .unwrap_or_else(|_| FullOutput { content: String::new(), truncated: false }),
+        }
     }
 
     pub fn last_line_bytes(&self) -> usize {
@@ -215,23 +236,39 @@ impl OutputAccumulator {
         }
     }
 
+    /// The retained tail within `max_bytes`, marked as truncated only when output is missing. When
+    /// the clipped tail is blank, the end of the over-long line before it stays.
+    fn read_retained_output(&self, max_bytes: usize) -> FullOutput {
+        let clipped = self.snapshot_text();
+        let retained = if clipped.trim().is_empty() { self.tail_text.as_str() } else { clipped };
+        let mut start = retained.len().saturating_sub(max_bytes);
+        while !retained.is_char_boundary(start) {
+            start += 1;
+        }
+        let tail = &retained[start..];
+        let omitted = self.total_decoded_bytes - tail.len();
+        if omitted == 0 {
+            return FullOutput { content: tail.to_string(), truncated: false };
+        }
+        FullOutput { content: format!("[... {omitted} bytes omitted ...]\n\n{tail}"), truncated: true }
+    }
+
     fn should_use_temp_file(&self) -> bool {
         self.total_raw_bytes > self.max_bytes
             || self.total_decoded_bytes > self.max_bytes
             || self.total_lines > self.max_lines
     }
 
-    fn ensure_temp_file(&mut self) {
-        if self.temp_path.is_some() {
-            return;
-        }
-        let Some((path, mut file)) = create_output_file(self.temp_file_prefix, ".log") else {
-            return;
+    fn ensure_temp_file(&mut self) -> &mut OutputFile {
+        let file = match self.temp_file.take() {
+            Some(file) => file,
+            None => {
+                let mut file = OutputFile::create_in(&self.temp_dir, self.temp_file_prefix, ".log");
+                file.write(&std::mem::take(&mut self.raw_chunks));
+                file
+            }
         };
-        let _ = file.write_all(&self.raw_chunks);
-        self.raw_chunks = Vec::new();
-        self.temp_path = Some(path);
-        self.temp_file = Some(file);
+        self.temp_file.insert(file)
     }
 }
 
@@ -277,23 +314,4 @@ fn read_file_output(path: &std::path::Path, max_bytes: usize) -> std::io::Result
     let omitted = size - head_bytes - tail_bytes;
     let content = format!("{head_text}\n\n[... {omitted} bytes omitted ...]\n\n{tail_text}");
     Ok(FullOutput { content, truncated: true })
-}
-
-/// Create `<tmp>/<prefix>-<random hex><ext>` readable only by the user.
-fn create_output_file(prefix: &str, extension: &str) -> Option<(PathBuf, File)> {
-    for _ in 0..8 {
-        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos());
-        hasher.write_u128(nanos.unwrap_or_default());
-        hasher.write_u32(std::process::id());
-        let path = std::env::temp_dir().join(format!("{prefix}-{:016x}{extension}", hasher.finish()));
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        if let Ok(file) = options.open(&path) {
-            return Some((path, file));
-        }
-    }
-    None
 }
