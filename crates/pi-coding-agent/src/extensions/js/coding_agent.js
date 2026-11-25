@@ -101,7 +101,10 @@ const config = call("config.info");
 
 export const CONFIG_DIR_NAME = config.configDirName;
 export const APP_NAME = config.appName;
-export const VERSION = config.version;
+// The upstream pi version this port has parity with, so extension version checks compare against
+// upstream releases. `PI_RUST_VERSION` is the pi-rust release; upstream has no such export.
+export const VERSION = config.upstreamVersion;
+export const PI_RUST_VERSION = config.version;
 export const CURRENT_SESSION_VERSION = 3;
 export const VIRTUAL_MODEL_STATE_ENTRY = "pi.virtual-model-state";
 export const DEFAULT_COMPACTION_SETTINGS = { enabled: true, reserveTokens: 16384, keepRecentTokens: 20000 };
