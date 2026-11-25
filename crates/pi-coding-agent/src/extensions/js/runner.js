@@ -140,7 +140,9 @@ export class Runner {
 			const getProvider = registry.getProvider;
 			registry.getProvider = (name) => provider("getNative", name) ?? getProvider(name);
 			registry.getRegisteredNativeProvider = (name) => provider("getNative", name);
+			// `_sdkRuntimeId` lets `createAgentSession({ modelRuntime: ctx.modelRegistry.runtime })` share this runtime.
 			registry.runtime = {
+				_sdkRuntimeId: 0,
 				setRuntimeApiKey: (name, value) => key("setRuntimeApiKey", name, value),
 				removeRuntimeApiKey: (name) => key("removeRuntimeApiKey", name),
 			};

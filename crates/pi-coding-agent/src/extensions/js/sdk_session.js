@@ -2,6 +2,7 @@ import { resolve, join } from "node:path";
 import { call, callAsync, optional, registerCallback, releaseCallback } from "./bridge.js";
 import { hostRuntime } from "./sdk_resources.js";
 import { SessionManager, SettingsManager } from "./sdk_storage.js";
+import { registerCustomTools } from "./sdk_tools.js";
 
 function unsupported(member) {
 	throw Object.assign(new Error(`${member} is not supported in pi-rust`), { code: "ERR_PI_UNSUPPORTED" });
@@ -27,9 +28,14 @@ function resourceOptions(loader) {
 	return { systemPrompt: loader.getSystemPrompt?.() ?? "", appendSystemPrompt: loader.getAppendSystemPrompt?.() ?? [] };
 }
 
+// Upstream options pi-rust does not support. Upstream ignores keys it does not define, such as the
+// `modelRegistry` that extensions pass for older pi versions.
+const UNSUPPORTED_OPTIONS = ["sessionStartEvent"];
+
 export async function createAgentSession(options = {}) {
-	checkOptions(options, ["cwd", "agentDir", "model", "thinkingLevel", "scopedModels", "tools", "excludeTools",
-		"noTools", "systemPrompt", "resourceLoader", "sessionManager", "settingsManager", "modelRuntime"], "createAgentSession");
+	for (const key of UNSUPPORTED_OPTIONS) {
+		if (options[key] !== undefined) unsupported(`createAgentSession.${key}`);
+	}
 	const modelRuntimeId = options.modelRuntime?._sdkRuntimeId;
 	if (options.modelRuntime && typeof modelRuntimeId !== "number") unsupported("createAgentSession.modelRuntime");
 	if (options.tools?.some((tool) => typeof tool !== "string")) unsupported("createAgentSession.tools.definition");
@@ -49,11 +55,19 @@ export async function createAgentSession(options = {}) {
 		unsupported("createAgentSession.systemPrompt with a DefaultResourceLoader");
 	}
 	if (options.systemPrompt !== undefined) resources.systemPrompt = options.systemPrompt;
-	const result = await callAsync("sdk.create", {
-		cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel, scopedModels: options.scopedModels,
-		tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
-		sessionManagerId: sessionManager._sdkId, settingsManagerId: settingsManager._sdkId, resources, modelRuntimeId,
-	});
+	const customTools = registerCustomTools(options.customTools ?? []);
+	let result;
+	try {
+		result = await callAsync("sdk.create", {
+			cwd, agentDir, model: options.model, thinkingLevel: options.thinkingLevel, scopedModels: options.scopedModels,
+			tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools,
+			customTools: customTools.descriptors, sessionManagerId: sessionManager._sdkId,
+			settingsManagerId: settingsManager._sdkId, resources, modelRuntimeId,
+		});
+	} catch (error) {
+		customTools.release();
+		throw error;
+	}
 	const binding = resources.resourceLoaderId !== undefined ? loader._sdkBind(result.target) : undefined;
 	const listeners = [];
 	let disposed = false;
@@ -177,6 +191,7 @@ export async function createAgentSession(options = {}) {
 			listeners.length = 0;
 			stopEvents();
 			binding?.release();
+			customTools.release();
 		},
 	}, {
 		get(target, property, receiver) {

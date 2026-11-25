@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use pi_agent::SharedTool;
 use pi_js::JsError;
 use serde_json::{Value, json};
 
 use super::ops::error;
 use super::ops_sdk::ChildSession;
 use super::ops_sdk_resources::Hosted;
+use super::registry::ToolDescriptor;
 use super::runner::ExtensionRunner;
+use super::tool::ExtensionTool;
 use crate::agent_session::services::resource_loader_options;
 use crate::agent_session::{
     AgentSessionServices, CreateAgentSessionOptions, ModelRuntime, NoTools, ResourceOptions, create_agent_session, lock,
@@ -65,6 +68,7 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
         None => None,
         Some(other) => return Err(error(format!("Invalid noTools option: {other}"))),
     };
+    let custom_tools = custom_tool_descriptors(&options["customTools"])?;
     let (manager, settings) = {
         let mut storage = lock(&runner.sdk.storage);
         let settings = storage.settings(settings_id).ok_or_else(|| error("Unknown SettingsManager"))?;
@@ -79,13 +83,19 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
         Some(id) => super::ops_sdk_resources::take(runner, id)?,
         None => (fresh_loader(&cwd, &agent_dir, &settings, resources)?, None),
     };
-    if let Some((hosted, _)) = &hosted {
+    let target = hosted.as_ref().map_or_else(|| runner.next_id(), |(_, target)| *target);
+    let hosted = hosted.map(|(hosted, _)| hosted);
+    if let Some(hosted) = &hosted {
         bind_models(runner, hosted, &model_runtime).await?;
     }
     let services =
         AgentSessionServices { cwd, agent_dir, settings, model_runtime, resource_loader, diagnostics: Vec::new() };
     let mut create = CreateAgentSessionOptions::new(services, manager);
-    create.extensions = hosted.as_ref().map(|(hosted, _)| hosted.0.clone());
+    create.extensions = hosted.as_ref().map(|hosted| hosted.0.clone());
+    let custom_tools = custom_tools
+        .into_iter()
+        .map(|(descriptor, key)| -> SharedTool { Arc::new(ExtensionTool::sdk(runner, descriptor, key, target)) });
+    create.custom_tools = custom_tools.collect();
     create.model = model;
     create.thinking_level = thinking_level;
     create.scoped_models = scoped;
@@ -94,14 +104,23 @@ pub(crate) async fn create(runner: &Arc<ExtensionRunner>, options: Value) -> Res
     create.no_tools = no_tools;
     let created = create_agent_session(create).await.map_err(error)?;
     let id = runner.next_id();
-    let (extensions, target) = hosted.map_or((None, 0), |(hosted, target)| (Some(hosted), target));
-    if target != 0 {
-        lock(&runner.targets).insert(target, Arc::downgrade(&created.session));
-    }
+    lock(&runner.targets).insert(target, Arc::downgrade(&created.session));
     lock(&runner.sdk.storage).attach_child(manager_id, &created.session);
-    let child = ChildSession { session: created.session, manager_id, extensions };
+    let child = ChildSession { session: created.session, manager_id, target, extensions: hosted };
     lock(&runner.sdk.children).insert(id, child);
     Ok(json!({"id": id, "target": target, "modelFallbackMessage": created.model_fallback_message}))
+}
+
+/// SDK `customTools` descriptors with the key of each definition in this host.
+fn custom_tool_descriptors(tools: &Value) -> Result<Vec<(ToolDescriptor, u64)>, JsError> {
+    let tools = tools.as_array().map(Vec::as_slice).unwrap_or_default();
+    tools
+        .iter()
+        .map(|tool| {
+            let key = tool["key"].as_u64().ok_or_else(|| error("Missing custom tool key"))?;
+            Ok((serde_json::from_value(tool.clone()).map_err(error)?, key))
+        })
+        .collect()
 }
 
 /// Bind the providers and virtual models of a loader's extensions to the session's `runtime`: file

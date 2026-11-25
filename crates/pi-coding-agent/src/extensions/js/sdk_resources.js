@@ -75,9 +75,6 @@ function stages(loader, kinds, report) {
 
 export class DefaultResourceLoader {
 	constructor(options) {
-		if (options.extensionFactories?.some((input) => typeof input !== "function" && input.builtin === true)) {
-			throw unsupportedError("DefaultResourceLoader.extensionFactories builtin entries");
-		}
 		if (options.settingsManager != null && typeof options.settingsManager._sdkId !== "number") {
 			throw unsupportedError("DefaultResourceLoader.settingsManager");
 		}
@@ -89,7 +86,10 @@ export class DefaultResourceLoader {
 		this.agentDir = created.agentDir;
 		this.settingsManager = options.settingsManager ?? SettingsManager.create(this.cwd, this.agentDir);
 		this.eventBus = options.eventBus ?? createEventBus();
-		this.extensionFactories = options.extensionFactories ?? [];
+		const factories = options.extensionFactories ?? [];
+		const isBuiltin = (input) => typeof input !== "function" && input.builtin === true;
+		this.extensionFactories = factories.filter((input) => !isBuiltin(input));
+		this.builtinExtensions = new Map(factories.filter(isBuiltin).map((input) => [input.name, input]));
 		this.extensionsOverride = options.extensionsOverride;
 		this.additionalExtensionPaths = options.additionalExtensionPaths ?? [];
 		this.additionalSkillPaths = options.additionalSkillPaths ?? [];
@@ -133,6 +133,7 @@ export class DefaultResourceLoader {
 			additionalPromptTemplatePaths: this.additionalPromptTemplatePaths,
 			additionalThemePaths: this.additionalThemePaths,
 			noExtensions: Boolean(this.noExtensions),
+			builtinExtensions: [...this.builtinExtensions.keys()],
 			disabledBuiltinExtensions: [...this.disabledBuiltinExtensions],
 			noSkills: Boolean(this.noSkills),
 			noPromptTemplates: Boolean(this.noPromptTemplates),

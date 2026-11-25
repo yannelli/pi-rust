@@ -4,6 +4,7 @@
 
 mod codemode;
 mod codemode_host;
+mod factories;
 pub mod mcp;
 mod mcp_api;
 mod mcp_elicitation;
@@ -17,6 +18,7 @@ use pi_mcp::runtime::McpSignInPrompt;
 use serde_json::Value;
 
 pub use self::codemode::{CODEMODE_DOCS, SessionCodemodeTool, codemode_docs_path};
+pub(crate) use self::factories::factory_definition;
 pub use self::mcp::{LoadMcpConfigFn, McpSessionOptions};
 pub use self::mcp_api::split_mcp_args;
 pub use self::tool_search::ToolSearchTool;
@@ -48,6 +50,8 @@ pub(crate) struct BuiltinState {
     pub sign_in_prompt: Option<Arc<dyn McpSignInPrompt>>,
     pub notify: Option<NotifyFn>,
     pub notices: Vec<(String, NotifyLevel)>,
+    /// An extension's `createMcpExtension()` started MCP for the session.
+    pub factory_mcp: bool,
 }
 
 /// Whether two handles name the same tool instance.
@@ -58,6 +62,9 @@ pub(crate) fn same_tool(a: &SharedTool, b: &SharedTool) -> bool {
 impl AgentSession {
     /// Whether the built-in extension `name` (such as `mcp`) is enabled for this session.
     pub fn builtin_extension_enabled(&self, name: &str) -> bool {
+        if name == "mcp" && lock(&self.builtins).factory_mcp {
+            return true;
+        }
         let path = format!("{BUILTIN_PATH_PREFIX}{name}");
         let services = self.services();
         let loader = services.resources();

@@ -57,7 +57,6 @@ const LIMITS: &str = r#"
     result.tilde = (({ cwd, agentDir }) => ({ cwd, agentDir }))(make({ cwd: '~/proj', agentDir: '~/agent' }));
     const adding = make({ noExtensions: true, extensionsOverride: (base) => ({ ...base, extensions: [{ path: 'x' }] }) });
     result.blocked = [
-      await fail(() => make({ extensionFactories: [{ name: 'core', factory: () => {}, builtin: true }] })),
       await fail(() => make({ additionalExtensionPaths: ['npm:some-package'] })),
       await fail(() => adding.reload()),
       await fail(() => make({ eventBus: {}, noExtensions: true })),
@@ -82,7 +81,6 @@ async fn packages_tilde_and_option_limits() {
     assert_eq!(data["tilde"], json!({"cwd": home.join("proj"), "agentDir": home.join("agent")}));
     let member = |name: &str| json!(format!("{name} is not supported in pi-rust"));
     let blocked = json!([
-        member("DefaultResourceLoader.extensionFactories builtin entries"),
         member("DefaultResourceLoader.additionalExtensionPaths package sources"),
         member("DefaultResourceLoader.extensionsOverride adding extensions"),
         Value::Null,

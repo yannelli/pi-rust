@@ -43,6 +43,15 @@ fn mode_of(settings: &SettingsManager) -> CodemodeMode {
     }
 }
 
+/// Options of `createCodemodeExtension` that take the place of the `codemode` settings.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CodemodeOverrides {
+    pub mode: Option<CodemodeMode>,
+    pub inline_budget: Option<usize>,
+    /// `false` keeps the `models` API out of scripts.
+    pub models: Option<bool>,
+}
+
 /// The `codemode` tool of a session. Delegates to [`CodemodeTool`], is inactive by default, and
 /// presents the loadout with the current settings.
 pub struct SessionCodemodeTool {
@@ -50,20 +59,35 @@ pub struct SessionCodemodeTool {
     settings: Arc<SettingsManager>,
     models: bool,
     docs_path: String,
+    overrides: CodemodeOverrides,
 }
 
 impl SessionCodemodeTool {
     pub fn new(host: Arc<dyn CodemodeHost>, settings: Arc<SettingsManager>, docs_path: &Path) -> Self {
-        let models = host.models().is_some();
-        let docs_path = docs_path.display().to_string();
-        let options = Self::options_from(&settings, models, &docs_path);
-        Self { inner: CodemodeTool::new(host, options), settings, models, docs_path }
+        Self::with_overrides(host, settings, docs_path, CodemodeOverrides::default())
     }
 
-    fn options_from(settings: &SettingsManager, models: bool, docs_path: &str) -> CodemodeToolOptions {
+    pub fn with_overrides(
+        host: Arc<dyn CodemodeHost>,
+        settings: Arc<SettingsManager>,
+        docs_path: &Path,
+        overrides: CodemodeOverrides,
+    ) -> Self {
+        let models = host.models().is_some() && overrides.models != Some(false);
+        let docs_path = docs_path.display().to_string();
+        let options = Self::options_from(&settings, models, &docs_path, &overrides);
+        Self { inner: CodemodeTool::new(host, options), settings, models, docs_path, overrides }
+    }
+
+    fn options_from(
+        settings: &SettingsManager,
+        models: bool,
+        docs_path: &str,
+        overrides: &CodemodeOverrides,
+    ) -> CodemodeToolOptions {
         CodemodeToolOptions {
-            mode: mode_of(settings),
-            inline_budget: settings.codemode_inline_budget() as usize,
+            mode: overrides.mode.unwrap_or_else(|| mode_of(settings)),
+            inline_budget: overrides.inline_budget.unwrap_or_else(|| settings.codemode_inline_budget() as usize),
             models,
             docs_path: docs_path.to_string(),
         }
@@ -115,7 +139,7 @@ impl AgentTool for SessionCodemodeTool {
     }
 
     fn prepare_loadout(&self, loadout: &ToolLoadout) -> Option<ToolLoadoutChanges> {
-        let options = Self::options_from(&self.settings, self.models, &self.docs_path);
+        let options = Self::options_from(&self.settings, self.models, &self.docs_path, &self.overrides);
         Some(pi_codemode::prepare_codemode_loadout(loadout, &options))
     }
 

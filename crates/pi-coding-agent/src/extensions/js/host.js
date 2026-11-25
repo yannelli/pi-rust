@@ -9,12 +9,13 @@ import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
 import { groupScope, parentOps } from "./sdk_extensions.js";
 import { childOps, plain } from "./sdk_mirror.js";
+import { customToolCall } from "./sdk_tools.js";
 import { routeStderr } from "./stderr_route.js";
 import { sessionStream } from "./stream.js";
 import { currentTheme } from "./theme.js";
 import * as ui from "./ui.js";
 
-function toolDescriptor(definition, sourceInfo, extensionPath) {
+export function toolDescriptor(definition, sourceInfo, extensionPath) {
 	return {
 		name: definition.name,
 		label: definition.label ?? definition.name,
@@ -37,6 +38,7 @@ function toolDescriptor(definition, sourceInfo, extensionPath) {
 		hasRenderResult: typeof definition.renderResult === "function",
 		sourceInfo,
 		extensionPath,
+		native: definition._piNative,
 	};
 }
 
@@ -284,6 +286,7 @@ export function createHost(config) {
 			const ctx = runner.createToolContext(toolCallId, abort);
 			return normalizeToolResult(await tool.execute(toolCallId, params, abort, onUpdate, ctx));
 		},
+		sdkTool: (key, target, method, ...args) => customToolCall(runner, key, target, method, ...args),
 		prepareArguments: (name, args) => findTool(name)?.prepareArguments?.(args) ?? args,
 		reachesTools: (name, input) => findTool(name)?.reachesTools?.(input) ?? [],
 		prepareLoadout(name, loadout) {

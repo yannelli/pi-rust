@@ -144,14 +144,20 @@ export function releaseGroup(group) {
 	group.runner.invalidate(STALE_MESSAGE);
 }
 
-/** Upstream `loadExtensionFactories`. */
-async function loadFactories(loader, groupId) {
+/** Upstream `loadExtensionFactories`, after the enabled `builtin:<name>` entries (`builtins`) as their paths load. */
+async function loadFactories(loader, groupId, builtins) {
 	const group = createGroup(groupId, loader);
 	const errors = [];
-	for (const [index, input] of loader.extensionFactories.entries()) {
+	const enabled = builtins.filter((name) => loader.builtinExtensions.has(name));
+	const inputs = [...enabled.map((name) => loader.builtinExtensions.get(name)), ...loader.extensionFactories];
+	for (const [position, input] of inputs.entries()) {
 		const named = typeof input !== "function";
-		const path = `<inline:${named ? input.name : index + 1}>`;
-		const extension = createExtension(path, path, { path, source: "inline", scope: "temporary", origin: "top-level" });
+		const index = position - enabled.length;
+		const builtin = position < enabled.length;
+		const path = builtin ? `builtin:${input.name}` : `<inline:${named ? input.name : index + 1}>`;
+		const source = builtin ? { path, source: "builtin", scope: "user", origin: "top-level" }
+			: { path, source: "inline", scope: "temporary", origin: "top-level" };
+		const extension = createExtension(path, path, source);
 		const load = createExtensionAPI(extension, group.runtime, loader.cwd, loader.eventBus);
 		for (const name of MCP) {
 			load.api[name] = () => {
@@ -166,7 +172,7 @@ async function loadFactories(loader, groupId) {
 			errors.push({ path, error: error instanceof Error ? error.message : "failed to load extension" });
 			continue;
 		}
-		extension.hidden = named && input.hidden;
+		extension.hidden = builtin || (named && input.hidden);
 		extension.replaceable = named && input.replaceable === true;
 		group.extensions.push(extension);
 	}
@@ -236,7 +242,7 @@ function assemble(state, { files, paths, errors, warnings }) {
 /** One phase of upstream `reload()` for extensions: `pretrust`, `final` after it, or `full`. */
 export async function loadExtensions(loader, phase) {
 	const state = loader._sdkExtensions;
-	const factories = loader.extensionFactories.length > 0;
+	const factories = loader.extensionFactories.length > 0 || loader.builtinExtensions.size > 0;
 	const loaded = await callAsync("resources.reload", loader._sdkId, phase, factories);
 	const reuse = loaded.reused;
 	if (!reuse) {
@@ -249,7 +255,9 @@ export async function loadExtensions(loader, phase) {
 	}
 	if (!reuse && loaded.group) await callAsync("resources.busReady", loaded.group);
 	let factoryErrors = [];
-	if (!reuse && factories) ({ group: state.group, errors: factoryErrors } = await loadFactories(loader, loaded.group));
+	if (!reuse && factories) {
+		({ group: state.group, errors: factoryErrors } = await loadFactories(loader, loaded.group, loaded.builtins));
+	}
 	const finished = await callAsync("resources.finish", loader._sdkId);
 	const errors = reuse ? [...state.preErrors, ...loaded.errors] : [...loaded.errors, ...factoryErrors];
 	errors.push(...finished.errors);

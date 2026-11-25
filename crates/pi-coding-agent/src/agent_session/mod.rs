@@ -49,6 +49,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 pub use self::bash::BashResult;
+pub(crate) use self::builtins::factory_definition;
 pub use self::builtins::{BUILTIN_EXTENSIONS, McpSessionOptions, NotifyFn, NotifyLevel};
 pub use self::cache::CacheWarmingDecider;
 pub use self::events::{AgentSessionEvent, CompactionReason, SummarizationSource, compaction_result_json};

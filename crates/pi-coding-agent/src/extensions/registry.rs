@@ -31,6 +31,8 @@ pub struct ToolDescriptor {
     pub has_render_result: bool,
     pub source_info: Value,
     pub extension_path: String,
+    /// `{ name, options }` of a tool from `createCodemodeExtension` or `createToolSearchExtension`.
+    pub native: Option<Value>,
 }
 
 /// A registered slash command; `invocation_name` is `name` or `name:<n>` for duplicates.

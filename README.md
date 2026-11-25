@@ -133,6 +133,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
 - The extension SDK still has gaps in child sessions, resource loading, and model runtimes.
   - A `DefaultResourceLoader` with extensions serves one child session for each `reload()`. Its factories run in the caller's extension host.
   - `SettingsManager` supports custom storage and queued writes, with limits on JSON values and live object references.
+  - `createMcpExtension` starts the native MCP of pi-rust. It registers no `/mcp` command and does not take the callback options.
 
   See [Extension module exports](docs/parity/GAPS.md#extension-module-exports) for the remaining differences.
 - `pi.registerProvider(provider)` with an upstream `Provider` object registers its models, auth, and stream. pi-rust reads the model list of the object at registration and after each `refreshModels` publish, not on every call, and calls only `streamSimple`. An object without `getModels()` registers as a provider config. See [Extension module exports](docs/parity/GAPS.md#extension-module-exports).
