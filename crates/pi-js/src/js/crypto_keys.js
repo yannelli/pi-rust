@@ -97,6 +97,13 @@ function maybeAsync(work, callback) {
   return undefined;
 }
 
+// A CryptoKey (internal/webcrypto_idl) keeps its KeyObject under this symbol.
+const kKeyObject = Symbol("kKeyObject");
+
+function isCryptoKey(value) {
+  return value !== null && value !== undefined && value[kKeyObject] !== undefined;
+}
+
 function invalidKeyObjectType(type, expected) {
   return codeError(TypeError, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", `Invalid key object type ${type}, expected ${expected}.`);
 }
@@ -109,6 +116,10 @@ class KeyObject {
   }
   get type() {
     return this._type;
+  }
+  static from(key) {
+    if (!isCryptoKey(key)) throw invalidArg("key", "an instance of CryptoKey", key);
+    return key[kKeyObject];
   }
   equals(other) {
     if (!(other instanceof KeyObject)) throw invalidArg("otherKeyObject", "an instance of KeyObject", other);
@@ -129,6 +140,9 @@ class SecretKeyObject extends KeyObject {
     if (format === "jwk") return { kty: "oct", k: Buffer.from(this._bytes, "latin1").toString("base64url") };
     if (format !== undefined && format !== "buffer") throw invalidValue("options.format", format);
     return Buffer.from(this._bytes, "latin1");
+  }
+  toCryptoKey(algorithm, extractable, keyUsages) {
+    return require("internal/webcrypto").toCryptoKey(this, algorithm, extractable, keyUsages);
   }
 }
 
@@ -163,6 +177,9 @@ class AsymmetricKeyObject extends KeyObject {
     const bytes = nativeCrypto.keyExport(isPrivate, this._der, format, type, cipher, passphrase);
     return format === "pem" ? toBuffer(bytes).toString("latin1") : toBuffer(bytes);
   }
+  toCryptoKey(algorithm, extractable, keyUsages) {
+    return require("internal/webcrypto").toCryptoKey(this, algorithm, extractable, keyUsages);
+  }
 }
 
 class PublicKeyObject extends AsymmetricKeyObject {
@@ -195,7 +212,8 @@ function parseKeyData(kind, data, options, name) {
 
 function splitKeyInput(key, name) {
   if (key instanceof KeyObject) return { data: key, options: {} };
-  if (key !== null && typeof key === "object" && !isBytes(key)) return { data: key.key, options: key };
+  if (isCryptoKey(key)) return { data: key[kKeyObject], options: {} };
+  if (key !== null && typeof key === "object" && !isBytes(key)) return { data: isCryptoKey(key.key) ? key.key[kKeyObject] : key.key, options: key };
   if (typeof key !== "string" && !isBytes(key)) throw invalidArg(name, KEY_INPUT, key);
   return { data: key, options: {} };
 }
@@ -237,6 +255,7 @@ function createPublicKey(key) {
 }
 
 function createPrivateKey(key) {
+  if (isCryptoKey(key)) key = key[kKeyObject];
   if (key instanceof KeyObject) throw invalidArg("key", "of type string or an instance of ArrayBuffer, Buffer, TypedArray, or DataView", key);
   const { data, options } = splitKeyInput(key, "key");
   return new PrivateKeyObject(parseKeyData("private", data, options, "key"));
@@ -417,7 +436,7 @@ function diffieHellman(options) {
 }
 
 module.exports = {
-  helpers: { codeError, invalidArg, invalidValue, outOfRange, validateObject, validateString, validateFunction, validateInteger, isBytes, latin1, toBuffer, encodeOut, bigToLatin1, latin1ToBig, maybeAsync },
+  helpers: { kKeyObject, isCryptoKey, codeError, invalidArg, invalidValue, outOfRange, validateObject, validateString, validateFunction, validateInteger, isBytes, latin1, toBuffer, encodeOut, bigToLatin1, latin1ToBig, maybeAsync },
   KeyObject,
   SecretKeyObject,
   createSecretKey,

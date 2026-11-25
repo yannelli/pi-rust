@@ -23,6 +23,7 @@ function invalidState(operation) {
 }
 
 function secretBytes(key, name) {
+  if (helpers.isCryptoKey(key)) key = KeyObject.from(key);
   if (key instanceof KeyObject) {
     if (key.type !== "secret") throw codeError(TypeError, "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE", `Invalid key object type ${key.type}, expected secret.`);
     return key._bytes;

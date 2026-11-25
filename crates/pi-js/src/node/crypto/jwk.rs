@@ -31,9 +31,9 @@ pub(super) fn to_jwk(key: &Key, private: bool) -> Result<Value, JsError> {
         }
         Key::Ec { curve, point, d } => {
             jwk.insert("kty".into(), "EC".into());
-            jwk.insert("crv".into(), curve.jwk.into());
             jwk.insert("x".into(), b64(&point[1..=curve.size]));
             jwk.insert("y".into(), b64(&point[1 + curve.size..]));
+            jwk.insert("crv".into(), curve.jwk.into());
             if let (Some(d), true) = (d, private) {
                 jwk.insert("d".into(), b64(d));
             }

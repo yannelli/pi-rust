@@ -595,6 +595,7 @@
       "ByteLengthQueuingStrategy", "CountQueuingStrategy", "TextEncoderStream", "TextDecoderStream", "CompressionStream",
       "DecompressionStream", "ReadableStreamBYOBReader", "ReadableByteStreamController", "ReadableStreamBYOBRequest"],
     perf_hooks: ["performance", "PerformanceObserver"],
+    "internal/webcrypto": ["Crypto", "CryptoKey", "SubtleCrypto"],
   };
   for (const [module, names] of Object.entries(lazyGlobals)) {
     for (const name of names) defineLazy(name, () => loadBuiltin(module)[name]);

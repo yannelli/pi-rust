@@ -1,4 +1,4 @@
-// node:crypto: hashes, HMAC, random values, PBKDF2, and a webcrypto object with subtle.digest.
+// node:crypto: hashes, HMAC, random values, PBKDF2, and the webcrypto object (internal/webcrypto).
 // Keys, signatures, ciphers, Diffie-Hellman, and the other KDFs live in internal/crypto_*.
 const { Buffer } = require("buffer");
 const { Transform } = require("stream");
@@ -70,6 +70,7 @@ Hash.prototype.copy = function copy() {
 function Hmac(algorithm, key, options) {
   if (!(this instanceof Hmac)) return new Hmac(algorithm, key, options);
   if (typeof algorithm !== "string") throw invalidArg("hmac", "of type string", algorithm);
+  if (keys.helpers.isCryptoKey(key)) key = keys.KeyObject.from(key);
   const keyBytes = key && typeof key === "object" && key.type === "secret" && key._bytes ? key._bytes : toLatin1(key, options && options.encoding, "key");
   Digest.call(this, nativeCrypto.hmac(algorithm, keyBytes), "Hmac");
 }
@@ -182,25 +183,8 @@ function unsupported(name) {
   };
 }
 
-const DIGESTS = { "SHA-1": "sha1", "SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512" };
-
-// SubtleCrypto.digest; other subtle methods throw the unsupported error.
-async function digest(algorithm, data) {
-  const name = typeof algorithm === "string" ? algorithm : algorithm && algorithm.name;
-  const hashName = DIGESTS[String(name).toUpperCase()];
-  if (!hashName) throw new (globalThis.DOMException || Error)(`Unrecognized algorithm name: ${name}`, "NotSupportedError");
-  const bytes = new Hash(hashName).update(data).digest();
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-}
-
-const subtle = new Proxy({ digest }, {
-  get(target, name) {
-    if (typeof name === "symbol") return undefined;
-    if (name in target) return target[name];
-    return unsupported(`subtle.${name}`);
-  },
-});
-const webcrypto = { getRandomValues, randomUUID, subtle, CryptoKey: class CryptoKey {} };
+const webcrypto = require("internal/webcrypto").crypto;
+const subtle = webcrypto.subtle;
 
 module.exports = {
   createHash: (algorithm, options) => new Hash(algorithm, options),
