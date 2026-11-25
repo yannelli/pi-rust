@@ -120,7 +120,7 @@ pi-rust ports the upstream `pi` CLI and its libraries. This section lists the di
   - `node:sqlite` on the bundled SQLite, `node:test` with TAP and spec output, and `repl` over any streams.
   - In-process `inspector` sessions, and `wasi` with a `WebAssembly` global on the wasmi interpreter.
 
-  The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are `crypto.subtle` other than `digest`, and rare `crypto` ciphers such as Camellia. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS.
+  The APIs that do not work throw `ERR_PI_UNSUPPORTED`. Examples are rare `crypto` ciphers such as Camellia, and structured cloning of a `CryptoKey`. `crates/pi-js/src/unsupported.rs` lists all of them. Native npm addons cannot load on QuickJS. Packages that need one, such as pi-deltabox, @ff-labs/pi-fff, and @onkernel/browser-loop (`sharp`), run with `--extension-runtime auto` or `node`.
 
   To run extensions on Node 22 or later, set `extensionRuntime` to `"node"` or `"auto"`, or use `--extension-runtime` or `PI_EXTENSION_RUNTIME`. On Node, native addons, `child_process.fork`, and V8-only modules work. If Node is missing, pi uses QuickJS. See [Node backend](docs/agents/node-compat.md#node-backend).
   The [extension package audit](docs/parity/extension-packages.md) lists 25 tested packages and the engine each one used.

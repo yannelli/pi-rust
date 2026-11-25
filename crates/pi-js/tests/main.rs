@@ -45,5 +45,7 @@ mod node_vm;
 mod node_wasm;
 mod node_web;
 mod node_web_bytes;
+mod node_webcrypto;
+mod node_webcrypto_errors;
 mod node_worker;
 mod node_zlib;

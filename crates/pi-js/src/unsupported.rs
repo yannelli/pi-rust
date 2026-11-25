@@ -23,8 +23,8 @@ pub const UNSUPPORTED_APIS: &[&str] = &[
      imports and rejects only when used (an even or zero modulus, an exponent that is even or outside 3 to \
      2^33-1, a public key modulus over 16384 bits, d >= n, or p = q) fail at import with \
      ERR_OSSL_UNSUPPORTED, DSA sizes other than 1024/160, 2048/224, 2048/256, and 3072/256, private key \
-     encryption with ciphers other than AES-CBC and 3DES-CBC (or PBES1), webcrypto.subtle except digest, \
-     setFips",
+     encryption with ciphers other than AES-CBC and 3DES-CBC (or PBES1), structuredClone and postMessage of \
+     a CryptoKey (DataCloneError) or a KeyObject (a plain object), and setFips",
     "child_process: stdio entries that are Unix socket or pipe streams, descriptors 0 to 2 at an index above \
      2, and on Windows sockets and anything but 'ignore' above index 2; sending handles other than TCP \
      net.Socket and net.Server objects over IPC (ERR_INVALID_HANDLE_TYPE), such as Unix socket or pipe \

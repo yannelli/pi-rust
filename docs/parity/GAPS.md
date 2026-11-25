@@ -69,7 +69,9 @@ The Node backend (`extensionRuntime: "node"`, see [Node backend](../agents/node-
 - `process.dlopen` and native `.node` addons load.
 - V8-only modules and features work: `v8` heap snapshots and `queryObjects`, `inspector.open`, and full `async_hooks` coverage.
 
-Chat and AgentFS in the published package audit require native npm addons. Run them with Node 22 or later and `--extension-runtime auto`. [Package versions and checks](extension-packages.md)
+These packages of the [npm package audits](extension-packages.md) load native npm addons: Chat and AgentFS, pi-deltabox (`process.dlopen`), @ff-labs/pi-fff (`ffi-rs`), and @onkernel/browser-loop (`sharp`). Run them with Node 22 or later and `--extension-runtime auto`.
+
+`structuredClone` and `postMessage` of a `CryptoKey` throw `DataCloneError`, and a `KeyObject` arrives as a plain object. Both need host objects in the structured clone.
 
 ## Extension module exports
 
