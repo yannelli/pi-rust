@@ -3,6 +3,7 @@
 
 pub(crate) mod cjs;
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -210,7 +211,7 @@ fn load_source<'js>(ctx: &Ctx<'js>, key: &str, path: &Path, source: &str) -> Res
             let prefix = esm_prefix(key, &transpiled.free_globals);
             let map = transpiled.map.clone().map(Rc::new);
             register_source_map(key, map, prefix.chars().count() as u32);
-            Module::declare(ctx.clone(), key, format!("{prefix}{}", transpiled.code))
+            Module::declare(ctx.clone(), key, format!("{prefix}{}", embeddable(&transpiled.code)))
                 .map_err(|error| caught(ctx, error))
         }
         ModuleFormat::CommonJs => facade(ctx, key, "cjsFacade", (key.to_string(),)),
@@ -237,6 +238,35 @@ where
     let source: String = generate.call(args).map_err(|error| caught(ctx, error))?;
     register_source_map(key, None, 0);
     Module::declare(ctx.clone(), key, source).map_err(|error| caught(ctx, error))
+}
+
+/// File text that still parses after a prefix and passes as a C string: a leading hashbang
+/// becomes a line comment, and each raw NUL becomes a `\x00` escape. The escape changes only
+/// the raw text of a template literal (`String.raw`).
+pub(crate) fn embeddable(code: &str) -> Cow<'_, str> {
+    if !code.starts_with("#!") && !code.contains('\0') {
+        return Cow::Borrowed(code);
+    }
+    let mut text = String::with_capacity(code.len() + 8);
+    let body = match code.strip_prefix("#!") {
+        Some(rest) => {
+            text.push_str("//");
+            rest
+        }
+        None => code,
+    };
+    let mut backslashes = 0usize;
+    for c in body.chars() {
+        if c == '\0' {
+            // After an odd run of backslashes the NUL is already escaped.
+            text.push_str(if backslashes % 2 == 1 { "x00" } else { "\\x00" });
+            backslashes = 0;
+            continue;
+        }
+        backslashes = if c == '\\' { backslashes + 1 } else { 0 };
+        text.push(c);
+    }
+    Cow::Owned(text)
 }
 
 fn js_string(text: &str) -> String {

@@ -7,7 +7,7 @@ use rquickjs::context::EvalOptions;
 use rquickjs::function::Opt;
 use rquickjs::{Ctx, Function, Object, Value};
 
-use super::{import_sync, resolve_kind};
+use super::{embeddable, import_sync, resolve_kind};
 use crate::error::JsError;
 use crate::resolve::ResolveKind;
 use crate::runtime::JsScope;
@@ -85,7 +85,8 @@ fn compile<'js>(ctx: Ctx<'js>, filename: String, source: Opt<String>) -> rquickj
     let mut options = EvalOptions::default();
     options.strict = false;
     options.filename = Some(filename.clone());
-    let wrapper: Function = ctx.eval_with_options(format!("{WRAPPER}{}\n}})", transpiled.code), options)?;
+    let wrapper: Function =
+        ctx.eval_with_options(format!("{WRAPPER}{}\n}})", embeddable(&transpiled.code)), options)?;
     result.set("format", "cjs")?;
     result.set("fn", wrapper)?;
     Ok(result)
