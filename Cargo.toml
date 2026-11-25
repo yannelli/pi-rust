@@ -21,6 +21,7 @@ members = [
     "crates/pi-tui",
     "xtask",
 ]
+exclude = ["vendor/rquickjs-sys"]
 
 [workspace.package]
 version = "0.12.39"
@@ -54,6 +55,12 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 tokio-rustls = { version = "0.26", default-features = false }
 webpki-roots = "1"
 icu_segmenter = { version = "2.1", default-features = false, features = ["compiled_data"] }
+
+# rquickjs-sys 0.14.0 with one line added to quickjs.c: a module that only waited for an async
+# dependency clears `async_evaluation` when it runs (ECMA-262 AsyncModuleExecutionFulfilled),
+# so a later dynamic import of it settles. Remove when a release of rquickjs-sys has the fix.
+[patch.crates-io]
+rquickjs-sys = { path = "vendor/rquickjs-sys" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
