@@ -85,6 +85,8 @@ pub(crate) struct ToolState {
     excluded: Vec<String>,
     /// Tools of the restored or reloaded loadout that are not registered yet.
     pub pending: Vec<String>,
+    /// The restored or reloaded loadout that `pending` belongs to.
+    pub restored: HashSet<String>,
     /// Whether `tool_search` was registered when the activation filter was built.
     filter_has_tool_search: Option<bool>,
     pub uses_default_tools: bool,
@@ -123,6 +125,7 @@ impl ToolState {
             allowlist_filters_mcp,
             excluded: selection.excluded,
             pending: Vec::new(),
+            restored: HashSet::new(),
             filter_has_tool_search: None,
             uses_default_tools: selection.uses_default_tools,
             default_tool_modifiers: selection.default_tool_modifiers,
@@ -247,7 +250,8 @@ impl ToolState {
         self.after_loadout();
     }
 
-    /// Apply an active set (upstream `_setActiveTools`). Returns whether a tool was deactivated.
+    /// Apply an active set (upstream `_setActiveTools`). Returns whether a tool of the restored
+    /// loadout was deactivated, which replaces that loadout (upstream `setActiveToolsByName`).
     pub fn set_active(&mut self, names: &[String]) -> bool {
         let previous = self.registry.active_names();
         let requested: HashSet<&str> = names.iter().map(String::as_str).collect();
@@ -256,7 +260,7 @@ impl ToolState {
         self.registry.set_active_tools(&ordered);
         self.after_loadout();
         let active: HashSet<String> = self.registry.active_names().into_iter().collect();
-        previous.iter().any(|name| !active.contains(name))
+        previous.iter().any(|name| !active.contains(name) && self.restored.contains(name))
     }
 
     fn after_loadout(&mut self) {
