@@ -113,6 +113,23 @@ fn shell_results_drop_the_truncation_footer_and_warn() {
     let lines = call.result(&result);
     assert!(!lines.iter().any(|line| line.contains("[Showing")), "{lines:?}");
     assert!(lines.contains(&"[Full output: /tmp/out.log. Truncated: showing 2 of 9 lines]".to_string()));
+
+    // Upstream #12461: without a saved file, the footer goes too and the warning says why.
+    let error = "ENOSPC: no space left on device, write";
+    let result = ToolResultView {
+        content: vec![ContentBlock::text(format!(
+            "tail line\n\n[Showing lines 1-2. Could not save the full output: {error}]"
+        ))],
+        details: Some(json!({
+            "truncation": {"truncated": true, "truncatedBy": "lines", "outputLines": 2, "totalLines": 9},
+            "fullOutputError": error
+        })),
+        ..ToolResultView::default()
+    };
+    let lines = call.result(&result);
+    assert!(!lines.iter().any(|line| line.contains("[Showing")), "{lines:?}");
+    let warning = format!("[Could not save the full output: {error}. Truncated: showing 2 of 9 lines]");
+    assert!(lines.join(" ").contains(&warning), "{lines:?}");
 }
 
 #[test]

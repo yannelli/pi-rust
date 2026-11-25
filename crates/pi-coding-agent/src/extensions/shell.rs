@@ -215,10 +215,10 @@ pub(crate) async fn run_user_bash(
     on_chunk(&full);
     let truncation = crate::tools::truncate::truncate_tail(&full, Default::default());
     // A new file with a random name that only the user can read, as for the built-in bash tool.
-    let full_output_path = truncation.truncated.then(|| {
-        let mut file = crate::agent_session::output_file::OutputFile::create("pi-bash", ".log")?;
-        file.write(&full);
-        Some(file.finish())
+    let saved = truncation.truncated.then(|| {
+        let mut file = crate::agent_session::output_file::OutputFile::create("pi-bash", ".log");
+        file.write(full.as_bytes());
+        file.close()
     });
     let (exit_code, cancelled) = match result {
         Ok(code) => (code, false),
@@ -230,6 +230,7 @@ pub(crate) async fn run_user_bash(
         exit_code,
         cancelled,
         truncated: truncation.truncated,
-        full_output_path: full_output_path.flatten(),
+        full_output_path: saved.as_ref().and_then(|saved| saved.saved_path().map(Path::to_path_buf)),
+        full_output_error: saved.as_ref().and_then(|saved| saved.error().map(str::to_string)),
     }
 }

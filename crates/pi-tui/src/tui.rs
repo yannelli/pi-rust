@@ -60,21 +60,33 @@ pub struct TuiOptions {
 /// Errors from rendering.
 #[derive(Debug)]
 pub enum TuiError {
-    /// A rendered line was wider than the terminal. The TUI was stopped and a crash log written.
-    LineTooWide { line: usize, width: usize, terminal_width: usize, crash_log: PathBuf },
+    /// A rendered line was wider than the terminal. The TUI was stopped and a crash log written,
+    /// unless writing it failed with `crash_log_error`.
+    LineTooWide {
+        line: usize,
+        width: usize,
+        terminal_width: usize,
+        crash_log: PathBuf,
+        crash_log_error: Option<String>,
+    },
 }
 
 impl std::fmt::Display for TuiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TuiError::LineTooWide { line, width, terminal_width, crash_log } => write!(
-                f,
-                "Rendered line {line} exceeds terminal width ({width} > {terminal_width}).\n\n\
-                 This is likely caused by a custom TUI component not truncating its output.\n\
-                 Use visibleWidth() to measure and truncateToWidth() to truncate lines.\n\n\
-                 Debug log written to: {}",
-                crash_log.display()
-            ),
+            TuiError::LineTooWide { line, width, terminal_width, crash_log, crash_log_error } => {
+                let crash_log_status = match crash_log_error {
+                    None => format!("Debug log written to: {}", crash_log.display()),
+                    Some(error) => format!("Could not write debug log to {}: {error}", crash_log.display()),
+                };
+                write!(
+                    f,
+                    "Rendered line {line} exceeds terminal width ({width} > {terminal_width}).\n\n\
+                     This is likely caused by a custom TUI component not truncating its output.\n\
+                     Use visibleWidth() to measure and truncateToWidth() to truncate lines.\n\n\
+                     {crash_log_status}"
+                )
+            }
         }
     }
 }

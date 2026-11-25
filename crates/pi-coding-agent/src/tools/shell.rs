@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 
-use super::output::{OutputAccumulator, OutputSnapshot};
+use super::output::{OutputAccumulator, OutputFileResult, OutputSnapshot};
 use super::parse_args;
 use super::shell_process::{ShellExecError, ShellExecOptions, ShellOperations, shell_env};
 use super::truncate::{DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, TruncatedBy, format_size};
@@ -143,9 +143,7 @@ fn update_result(snap: &OutputSnapshot) -> AgentToolResult {
     if snap.truncation.truncated {
         map.insert("truncation".into(), json!(snap.truncation));
     }
-    if let Some(path) = &snap.full_output_path {
-        map.insert("fullOutputPath".into(), json!(path.display().to_string()));
-    }
+    output_file_details(snap, &mut map);
     AgentToolResult::text(snap.content.clone()).with_details(Value::Object(map))
 }
 
@@ -161,29 +159,50 @@ fn take_update(stream: &Mutex<Stream>, force: bool) -> Option<AgentToolResult> {
     Some(update_result(&stream.acc.snapshot(true)))
 }
 
-fn format_output(acc: &OutputAccumulator, snap: &OutputSnapshot, empty_text: &str) -> (String, Option<Value>) {
+pub(super) fn format_output(
+    acc: &OutputAccumulator,
+    snap: &OutputSnapshot,
+    empty_text: &str,
+) -> (String, Option<Value>) {
     let t = &snap.truncation;
     let mut text = if snap.content.is_empty() { empty_text.to_string() } else { snap.content.clone() };
     if !t.truncated {
         return (text, None);
     }
-    let path = snap.full_output_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let full_output = match &snap.full_output_file {
+        Some(OutputFileResult::Failed(error)) => format!("Could not save the full output: {error}"),
+        _ => format!("Full output: {}", snap.saved_path().map(|path| path.display().to_string()).unwrap_or_default()),
+    };
     let start = t.total_lines - t.output_lines + 1;
     let end = t.total_lines;
     if t.last_line_partial {
         let line_size = format_size(acc.last_line_bytes());
         let shown = format_size(t.output_bytes);
-        text.push_str(&format!("\n\n[Showing last {shown} of line {end} (line is {line_size}). Full output: {path}]"));
+        text.push_str(&format!("\n\n[Showing last {shown} of line {end} (line is {line_size}). {full_output}]"));
     } else if t.truncated_by == Some(TruncatedBy::Lines) {
-        text.push_str(&format!("\n\n[Showing lines {start}-{end} of {}. Full output: {path}]", t.total_lines));
+        text.push_str(&format!("\n\n[Showing lines {start}-{end} of {}. {full_output}]", t.total_lines));
     } else {
         let limit = format_size(DEFAULT_MAX_BYTES);
         text.push_str(&format!(
-            "\n\n[Showing lines {start}-{end} of {} ({limit} limit). Full output: {path}]",
+            "\n\n[Showing lines {start}-{end} of {} ({limit} limit). {full_output}]",
             t.total_lines
         ));
     }
-    (text, Some(json!({ "truncation": t, "fullOutputPath": path })))
+    let mut details = Map::new();
+    details.insert("truncation".into(), json!(t));
+    output_file_details(snap, &mut details);
+    (text, Some(Value::Object(details)))
+}
+
+/// Where a snapshot's full output went: its file, or why it could not be saved.
+fn output_file_details(snap: &OutputSnapshot, details: &mut Map<String, Value>) {
+    match &snap.full_output_file {
+        Some(OutputFileResult::Saved(path)) => {
+            details.insert("fullOutputPath".into(), json!(path.display().to_string()))
+        }
+        Some(OutputFileResult::Failed(error)) => details.insert("fullOutputError".into(), json!(error)),
+        None => None,
+    };
 }
 
 fn append_status(text: &str, status: &str) -> String {
@@ -203,6 +222,10 @@ pub fn shell_output_schema() -> Value {
             "output": { "type": "string", "description": "Combined stdout and stderr, possibly truncated" },
             "truncated": { "type": "boolean" },
             "full_output_path": { "type": "string", "description": "Full output, when truncated" },
+            "full_output_error": {
+                "type": "string",
+                "description": "Why the full output could not be saved, when truncated and saving failed"
+            },
             "exit_code": { "type": "number" },
             "wall_time_seconds": { "type": "number" }
         },
@@ -303,8 +326,9 @@ impl AgentTool for ShellTool {
         };
 
         let mut stream = finish(&stream, &on_update);
-        let snap = stream.acc.snapshot(true);
+        // The file result is only final after closing: a write can still fail.
         stream.acc.close_temp_file();
+        let snap = stream.acc.snapshot(true);
         let exit_code = match result {
             Ok(code) => code,
             Err(error) => {
@@ -325,8 +349,12 @@ impl AgentTool for ShellTool {
         let wall_time = (started.elapsed().as_millis() as f64 / 100.0).round() / 10.0;
         let full = stream.acc.read_full_output(STRUCTURED_OUTPUT_MAX_BYTES);
         let mut structured = json!({ "output": full.content, "truncated": full.truncated });
-        if let (true, Some(path)) = (full.truncated, &snap.full_output_path) {
-            structured["full_output_path"] = json!(path.display().to_string());
+        match (full.truncated, &snap.full_output_file) {
+            (true, Some(OutputFileResult::Saved(path))) => {
+                structured["full_output_path"] = json!(path.display().to_string());
+            }
+            (true, Some(OutputFileResult::Failed(error))) => structured["full_output_error"] = json!(error),
+            _ => {}
         }
         structured["exit_code"] = json!(code);
         structured["wall_time_seconds"] = js_number(wall_time);

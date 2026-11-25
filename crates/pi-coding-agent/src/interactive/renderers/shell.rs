@@ -51,12 +51,14 @@ impl ToolRenderer for ShellRenderer {
         let truncation = result.detail("truncation");
         let truncated = truncation.and_then(|t| t.get("truncated")).and_then(Value::as_bool).unwrap_or(false);
         let full_output_path = result.detail("fullOutputPath").and_then(Value::as_str);
+        let full_output_error = result.detail("fullOutputError").and_then(Value::as_str);
+        // The model's footer names the file or why it could not be saved; the warning below says the same.
         if !is_partial
             && truncated
-            && let Some(path) = full_output_path
+            && let Some(marker) = full_output_path.or(full_output_error)
             && output.ends_with(']')
             && let Some(start) = output.rfind("\n\n[")
-            && output[start..].contains(path)
+            && output[start..].contains(marker)
         {
             output = output[..start].trim_end().to_string();
         }
@@ -79,10 +81,12 @@ impl ToolRenderer for ShellRenderer {
                 container.add_child(component(preview));
             }
         }
-        if truncated || full_output_path.is_some() {
+        if truncated || full_output_path.is_some() || full_output_error.is_some() {
             let mut warnings = Vec::new();
             if let Some(path) = full_output_path {
                 warnings.push(format!("Full output: {path}"));
+            } else if let Some(error) = full_output_error {
+                warnings.push(format!("Could not save the full output: {error}"));
             }
             if truncated {
                 let output_lines = u64_detail(truncation, "outputLines").unwrap_or(0);

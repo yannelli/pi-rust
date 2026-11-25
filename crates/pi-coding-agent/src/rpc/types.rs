@@ -313,6 +313,8 @@ pub struct RpcBashResult {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_output_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_output_error: Option<String>,
 }
 
 impl From<&BashResult> for RpcBashResult {
@@ -323,6 +325,7 @@ impl From<&BashResult> for RpcBashResult {
             cancelled: result.cancelled,
             truncated: result.truncated,
             full_output_path: result.full_output_path.as_ref().map(|path| path.display().to_string()),
+            full_output_error: result.full_output_error.clone(),
         }
     }
 }

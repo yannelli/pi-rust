@@ -56,9 +56,9 @@ pub(crate) fn append(path: &Path, text: &str) {
 }
 
 /// Writes a file, creating parent directories. Errors are ignored.
-pub(crate) fn write(path: &Path, text: &str) {
+pub(crate) fn write(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)?;
     }
-    let _ = std::fs::write(path, text);
+    std::fs::write(path, text)
 }

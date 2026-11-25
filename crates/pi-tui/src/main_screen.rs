@@ -143,7 +143,14 @@ fn crash(inner: &TuiInner, lines: &[String], width: usize, overflow: Overflow) -
     ];
     data.extend(lines.iter().enumerate().map(|(i, l)| format!("[{i}] (w={}) {l}", visible_width(l))));
     data.push(String::new());
-    debug_log::write(&crash_log, &data.join("\n"));
+    // A failed write (full or unwritable temp dir) must not hide the width error.
+    let crash_log_error = debug_log::write(&crash_log, &data.join("\n")).err().map(|error| error.to_string());
     inner.stop(TuiStopOptions::default());
-    TuiError::LineTooWide { line: overflow.line, width: overflow.width, terminal_width: width, crash_log }
+    TuiError::LineTooWide {
+        line: overflow.line,
+        width: overflow.width,
+        terminal_width: width,
+        crash_log,
+        crash_log_error,
+    }
 }

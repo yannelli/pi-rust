@@ -568,6 +568,7 @@ impl AgentSession {
             cancelled: false,
             truncated: false,
             full_output_path: None,
+            full_output_error: None,
         };
         let value = match runner.call_json("emitUserBash", vec![event]).await {
             Ok(value) => value,
@@ -580,6 +581,7 @@ impl AgentSession {
                 cancelled: result["cancelled"].as_bool().unwrap_or(false),
                 truncated: result["truncated"].as_bool().unwrap_or(false),
                 full_output_path: result["fullOutputPath"].as_str().map(PathBuf::from),
+                full_output_error: result["fullOutputError"].as_str().map(str::to_string),
             });
         }
         let key = value["operations"].as_u64()?;

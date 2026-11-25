@@ -8,6 +8,7 @@ use pi_tui::{Component, Container, Loader, Spacer, Text, Tui, component};
 use super::visual_truncate::{Keep, truncate_to_visual_lines};
 use crate::agent_session::bash::strip_ansi;
 use crate::interactive_components::{DynamicBorder, key_hint, key_text};
+use crate::messages::bash_truncation_note;
 use crate::theme::{ThemeColor, theme};
 use crate::tools::truncate::{TruncationOptions, truncate_tail};
 
@@ -54,6 +55,7 @@ pub struct BashExecutionComponent {
     loader: Rc<std::cell::RefCell<Loader>>,
     truncated: bool,
     full_output_path: Option<String>,
+    full_output_error: Option<String>,
     expanded: bool,
     output_pad: usize,
     /// `Dim` for `!!` commands, whose output stays out of the model context.
@@ -85,6 +87,7 @@ impl BashExecutionComponent {
             loader,
             truncated: false,
             full_output_path: None,
+            full_output_error: None,
             expanded: false,
             output_pad,
             color,
@@ -124,6 +127,7 @@ impl BashExecutionComponent {
         cancelled: bool,
         truncated: bool,
         full_output_path: Option<String>,
+        full_output_error: Option<String>,
     ) {
         self.exit_code = exit_code;
         self.status = match (cancelled, exit_code) {
@@ -133,6 +137,7 @@ impl BashExecutionComponent {
         };
         self.truncated = truncated;
         self.full_output_path = full_output_path;
+        self.full_output_error = full_output_error;
         self.loader.borrow_mut().stop();
         self.update_display();
     }
@@ -196,10 +201,9 @@ impl BashExecutionComponent {
             }
             _ => {}
         }
-        if (self.truncated || context.truncated)
-            && let Some(path) = &self.full_output_path
-        {
-            parts.push(theme.fg(ThemeColor::Warning, &format!("Output truncated. Full output: {path}")));
+        if self.truncated || context.truncated {
+            let note = bash_truncation_note(self.full_output_path.as_deref(), self.full_output_error.as_deref());
+            parts.push(theme.fg(ThemeColor::Warning, &note));
         }
         if !parts.is_empty() {
             content.add_child(component(Text::new(&format!("\n{}", parts.join("\n")), pad, 0)));
@@ -215,5 +219,31 @@ impl Component for BashExecutionComponent {
     fn invalidate(&mut self) {
         self.root.invalidate();
         self.update_display();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pi_tui::testing::VirtualTerminal;
+    use pi_tui::{Component, Tui, TuiOptions};
+
+    use super::BashExecutionComponent;
+    use crate::agent_session::bash::strip_ansi;
+    use crate::interactive_components::test_support::setup;
+
+    // Upstream #10585: truncated output without a saved file says why.
+    #[test]
+    fn says_why_the_full_output_could_not_be_saved() {
+        let _keys = setup();
+        let tui = Tui::new_main_screen(VirtualTerminal::shared(120, 24), TuiOptions::default());
+        let mut component = BashExecutionComponent::new("seq 3000", &tui, false, 1);
+        component.append_output("2999\n3000\n");
+        let error = "ENOSPC: no space left on device, write".to_string();
+        component.set_complete(Some(0), false, true, None, Some(error));
+        let rendered = strip_ansi(&component.render(120).join(" "));
+        assert!(
+            rendered.contains("Output truncated. Could not save the full output: ENOSPC: no space left on device"),
+            "{rendered}"
+        );
     }
 }

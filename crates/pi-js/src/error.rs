@@ -136,6 +136,8 @@ pub(crate) fn io_code(error: &io::Error) -> (&'static str, &'static str) {
         K::ReadOnlyFilesystem => ("EROFS", "read-only file system"),
         K::CrossesDevices => ("EXDEV", "cross-device link not permitted"),
         K::InvalidFilename => ("ENAMETOOLONG", "name too long"),
+        K::StorageFull => ("ENOSPC", "no space left on device"),
+        K::QuotaExceeded => ("EDQUOT", "disk quota exceeded"),
         K::ConnectionRefused => ("ECONNREFUSED", "connection refused"),
         K::ConnectionReset => ("ECONNRESET", "connection reset by peer"),
         K::ConnectionAborted => ("ECONNABORTED", "software caused connection abort"),

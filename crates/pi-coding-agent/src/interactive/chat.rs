@@ -250,7 +250,8 @@ impl InteractiveMode {
             if !bash.output.is_empty() {
                 component.append_output(&bash.output);
             }
-            component.set_complete(bash.exit_code, bash.cancelled, bash.truncated, bash.full_output_path);
+            let (path, error) = (bash.full_output_path, bash.full_output_error);
+            component.set_complete(bash.exit_code, bash.cancelled, bash.truncated, path, error);
             component.set_expanded(self.state.borrow().tool_output_expanded);
             self.add_to_chat(pi_tui::component(component));
         } else if let Some(custom) = CustomMessage::from_message(message) {

@@ -26,8 +26,10 @@ pub struct BashResult {
     pub exit_code: Option<i32>,
     pub cancelled: bool,
     pub truncated: bool,
-    /// File holding the full output when it was truncated.
+    /// File holding the full output when it was truncated and the file could be saved.
     pub full_output_path: Option<PathBuf>,
+    /// Why the full output could not be saved to a temp file, when it was truncated.
+    pub full_output_error: Option<String>,
 }
 
 const SESSION_VARIABLES: [&str; 5] =
@@ -153,7 +155,7 @@ impl Collector<'_> {
             self.ensure_file();
         }
         if let Some(file) = &mut self.file {
-            file.write(&text);
+            file.write(text.as_bytes());
         }
         self.buffered += text.len();
         self.chunks.push_back(text.clone());
@@ -166,10 +168,9 @@ impl Collector<'_> {
     }
 
     fn ensure_file(&mut self) {
-        if self.file.is_none()
-            && let Some(mut file) = OutputFile::create("pi-bash", ".log")
-        {
-            self.chunks.iter().for_each(|chunk| file.write(chunk));
+        if self.file.is_none() {
+            let mut file = OutputFile::create("pi-bash", ".log");
+            self.chunks.iter().for_each(|chunk| file.write(chunk.as_bytes()));
             self.file = Some(file);
         }
     }
@@ -272,13 +273,17 @@ pub async fn execute_bash_command(
     if truncation.truncated {
         collector.ensure_file();
     }
-    let full_output_path = collector.file.take().map(OutputFile::finish);
+    // A failed file is dropped: the result keeps the in-memory tail without a path. The file opens
+    // on raw bytes, before ANSI codes are stripped, so it can fail for output that turns out not to
+    // be truncated; nothing is missing then.
+    let saved = collector.file.as_mut().map(OutputFile::close);
     Ok(BashResult {
         output: if truncation.truncated { truncation.content } else { full },
         exit_code: if cancelled { None } else { exit_code },
         cancelled,
         truncated: truncation.truncated,
-        full_output_path,
+        full_output_path: saved.as_ref().and_then(|saved| saved.saved_path().map(Path::to_path_buf)),
+        full_output_error: saved.filter(|_| truncation.truncated).and_then(|saved| saved.error().map(str::to_string)),
     })
 }
 
@@ -328,6 +333,7 @@ impl AgentSession {
             cancelled: result.cancelled,
             truncated: result.truncated,
             full_output_path: result.full_output_path.as_ref().map(|path| path.display().to_string()),
+            full_output_error: result.full_output_error.clone(),
             timestamp: pi_ai::now_ms(),
             exclude_from_context: exclude_from_context.then_some(true),
         }

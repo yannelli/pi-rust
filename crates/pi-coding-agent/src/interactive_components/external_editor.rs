@@ -1,6 +1,7 @@
 //! Editing text in an external editor (upstream `modes/interactive/external-editor.ts`).
 
 use std::io::Write;
+use std::path::Path;
 use std::process::Stdio;
 
 /// How an external edit ended.
@@ -37,8 +38,7 @@ fn exit_text(status: std::process::ExitStatus) -> String {
 struct TempDirectory(std::path::PathBuf);
 
 impl TempDirectory {
-    fn create() -> std::io::Result<Self> {
-        let base = std::env::temp_dir();
+    fn create(base: &Path) -> std::io::Result<Self> {
         for attempt in 0u32..100 {
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -65,14 +65,25 @@ impl Drop for TempDirectory {
 /// Writes `content` to a temporary `prompt.md`, runs `command` on it with the terminal attached,
 /// and reads the result back. The command is split on spaces; Windows runs it through the shell.
 pub async fn edit_in_external_editor(command: &str, content: &str) -> ExternalEditorResult {
+    edit_in(&std::env::temp_dir(), command, content).await
+}
+
+/// A failed file call, in Node's words. Callers start the editor from key handlers, so a full or
+/// unwritable temp dir ends here instead of failing the handler.
+fn file_failed(error: &std::io::Error, syscall: &str, path: &Path) -> ExternalEditorResult {
+    let error = pi_js::JsError::from_io(error, syscall, Some(&path.display().to_string()));
+    ExternalEditorResult::Failed(format!("External editor failed: {}; prompt unchanged", error.message))
+}
+
+async fn edit_in(base: &Path, command: &str, content: &str) -> ExternalEditorResult {
     let failed = |message: String| ExternalEditorResult::Failed(message);
-    let directory = match TempDirectory::create() {
+    let directory = match TempDirectory::create(base) {
         Ok(directory) => directory,
-        Err(error) => return failed(error.to_string()),
+        Err(error) => return file_failed(&error, "mkdtemp", &base.join("pi-editor-XXXXXX")),
     };
     let path = directory.0.join("prompt.md");
     if let Err(error) = std::fs::write(&path, content) {
-        return failed(error.to_string());
+        return file_failed(&error, "open", &path);
     }
     let mut stdout = std::io::stdout();
     let _ = write!(stdout, "Launching external editor: {command}\nPi will resume when the editor exits.\n");
@@ -100,6 +111,23 @@ pub async fn edit_in_external_editor(command: &str, content: &str) -> ExternalEd
             let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
             ExternalEditorResult::Complete(text.strip_suffix('\n').unwrap_or(text).to_string())
         }
-        Err(error) => failed(error.to_string()),
+        Err(error) => file_failed(&error, "open", &path),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Upstream #10585: a full or unwritable temp dir must fail the edit, not the key handler.
+    #[tokio::test]
+    async fn reports_a_temp_dir_it_cannot_write_to() {
+        let root = tempfile::tempdir().unwrap();
+        let ExternalEditorResult::Failed(message) = edit_in(&root.path().join("missing"), "true", "original").await
+        else {
+            panic!("the edit should fail");
+        };
+        assert!(message.starts_with("External editor failed: ENOENT"), "{message}");
+        assert!(message.ends_with("; prompt unchanged"), "{message}");
     }
 }
