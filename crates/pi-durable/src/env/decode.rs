@@ -8,6 +8,29 @@ pub fn starts_with_bom(first_bytes: &[u8]) -> bool {
     first_bytes.starts_with(&[0xef, 0xbb, 0xbf])
 }
 
+/// The number of `\n` bytes in `bytes`, counted eight at a time in a `u64` so the speed does not depend on the
+/// optimizer vectorizing a loop.
+pub fn count_newlines(bytes: &[u8]) -> usize {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    let mut total = 0;
+    // Each byte lane counts to at most 255 before the lanes are summed.
+    for run in bytes.chunks(255 * 8) {
+        let mut words = run.chunks_exact(8);
+        let mut lanes = 0u64;
+        for word in &mut words {
+            let other = u64::from_le_bytes(word.try_into().expect("8 bytes")) ^ (ONES * u64::from(b'\n'));
+            // A lane's high bit is set when the lane is nonzero, without carries between lanes.
+            let nonzero = ((other & LOW7) + LOW7) | other;
+            lanes += (!nonzero >> 7) & ONES;
+        }
+        let pairs = (lanes & 0x00ff_00ff_00ff_00ff) + ((lanes >> 8) & 0x00ff_00ff_00ff_00ff);
+        total += (pairs.wrapping_mul(0x0001_0001_0001_0001) >> 48) as usize;
+        total += words.remainder().iter().filter(|byte| **byte == b'\n').count();
+    }
+    total
+}
+
 /// Decodes one stream chunk by chunk exactly like decoding all of it at once.
 #[derive(Clone, Debug)]
 pub struct StreamDecoder {
@@ -49,20 +72,44 @@ impl StreamDecoder {
         if self.pending_len > 0 {
             return self.decode(&bytes);
         }
-        let end = complete_prefix(&bytes);
-        self.hold(&bytes[end..]);
-        bytes.truncate(end);
-        if self.strip_bom && end > 0 {
-            self.strip_bom = false;
-            if starts_with_bom(&bytes) {
-                bytes.drain(..3);
-            }
-        }
+        self.cut_complete(&mut bytes);
         String::from_utf8(bytes).unwrap_or_else(|error| {
             let mut text = String::with_capacity(error.as_bytes().len());
             push_replaced(&mut text, error.as_bytes());
             text
         })
+    }
+
+    /// `decode_vec` as bytes: the same text, in the chunk's buffer when its complete part is valid.
+    pub fn decode_bytes(&mut self, mut bytes: Vec<u8>) -> Vec<u8> {
+        if self.pending_len > 0 {
+            let (first, complete) = self.split(&bytes);
+            let mut text = Vec::with_capacity(first.map_or(0, char::len_utf8) + complete.len());
+            if let Some(first) = first {
+                text.extend_from_slice(first.encode_utf8(&mut [0; 4]).as_bytes());
+            }
+            push_pieces(&mut text, complete);
+            return text;
+        }
+        self.cut_complete(&mut bytes);
+        if super::utf8::is_utf8(&bytes) {
+            return bytes;
+        }
+        let mut text = Vec::with_capacity(bytes.len());
+        push_pieces(&mut text, &bytes);
+        text
+    }
+
+    /// Raw bytes for a reader that decodes each result on its own: the held-back bytes, then the chunk, cut before an
+    /// unfinished character and without the stream's leading mark. Nothing is validated. `String::from_utf8_lossy` of
+    /// the result is the text `decode` returns for the same chunk.
+    pub fn pass_through(&mut self, mut bytes: Vec<u8>) -> Vec<u8> {
+        if self.pending_len > 0 {
+            bytes.splice(..0, self.pending[..self.pending_len].iter().copied());
+            self.pending_len = 0;
+        }
+        self.cut_complete(&mut bytes);
+        bytes
     }
 
     /// Counts the bytes that decode would emit without allocating the decoded text.
@@ -72,7 +119,7 @@ impl StreamDecoder {
             return bytes.len();
         }
         let (first, complete) = self.split(bytes);
-        first.map_or(0, char::len_utf8) + lossy_len(complete)
+        first.map_or(0, char::len_utf8) + super::utf8::lossy_len(complete)
     }
 
     /// Counts what finish would emit without consuming the pending character.
@@ -88,6 +135,16 @@ impl StreamDecoder {
         self.pending_len = 0;
         self.strip_bom = false;
         char::REPLACEMENT_CHARACTER.to_string()
+    }
+
+    /// The end of a `pass_through` stream: the held-back bytes, which decode to the U+FFFD that `finish` returns.
+    pub fn finish_raw(&mut self) -> Vec<u8> {
+        let held = self.pending[..self.pending_len].to_vec();
+        if !held.is_empty() {
+            self.pending_len = 0;
+            self.strip_bom = false;
+        }
+        held
     }
 
     /// The character that ends the held-back bytes, if `bytes` ends it, and the complete bytes after it.
@@ -143,6 +200,20 @@ impl StreamDecoder {
         self.pending[..bytes.len()].copy_from_slice(bytes);
         self.pending_len = bytes.len();
     }
+
+    /// Holds back an unfinished character at the end of `bytes` and drops the stream's leading mark. Nothing may be
+    /// held already.
+    fn cut_complete(&mut self, bytes: &mut Vec<u8>) {
+        let end = complete_prefix(bytes);
+        self.hold(&bytes[end..]);
+        bytes.truncate(end);
+        if self.strip_bom && end > 0 {
+            self.strip_bom = false;
+            if starts_with_bom(bytes) {
+                bytes.drain(..3);
+            }
+        }
+    }
 }
 
 /// An unfinished UTF-8 character can occupy only the last one to three bytes.
@@ -173,15 +244,30 @@ fn push_replaced(text: &mut String, bytes: &[u8]) {
     }
 }
 
-fn lossy_len(bytes: &[u8]) -> usize {
-    if bytes.is_ascii() {
-        return bytes.len();
+/// Invalid text is replaced piece by piece, so one bad byte sends only its piece through `utf8_chunks`.
+const PIECE: usize = 4096;
+
+/// Appends the lossy text of `bytes`. A cut before a byte that is not a continuation byte, or after three continuation
+/// bytes, never falls inside a character or a maximal invalid subpart.
+fn push_pieces(text: &mut Vec<u8>, mut bytes: &[u8]) {
+    while !bytes.is_empty() {
+        let mut end = bytes.len().min(PIECE);
+        if end < bytes.len()
+            && let Some(back) = (0..=3).find(|back| bytes[end - back] & 0xc0 != 0x80)
+        {
+            end -= back;
+        }
+        let (piece, rest) = bytes.split_at(end);
+        if super::utf8::is_utf8(piece) {
+            text.extend_from_slice(piece);
+        } else {
+            for chunk in piece.utf8_chunks() {
+                text.extend_from_slice(chunk.valid().as_bytes());
+                if !chunk.invalid().is_empty() {
+                    text.extend_from_slice("\u{fffd}".as_bytes());
+                }
+            }
+        }
+        bytes = rest;
     }
-    bytes
-        .utf8_chunks()
-        .map(|chunk| {
-            let replacement = if chunk.invalid().is_empty() { 0 } else { char::REPLACEMENT_CHARACTER.len_utf8() };
-            chunk.valid().len() + replacement
-        })
-        .sum()
 }

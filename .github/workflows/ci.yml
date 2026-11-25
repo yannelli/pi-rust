@@ -40,6 +40,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The release targets of release.yml; see "UTF-8 kernel assembly check" in docs/agents/ci-triage.md.
+      - name: UTF-8 kernel assembly check
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf \
+            x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc \
+            aarch64-linux-android x86_64-linux-android
+          cargo xtask utf8-asm
       # Saves a macOS job: GitHub runs at most 5 at once.
       - if: runner.os == 'macOS'
         run: sh scripts/test-install.sh

@@ -1,5 +1,6 @@
 //! `Shell::exec` over the daemon's `exec`: timeout validation, environment merge, output events, result precedence.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, Mutex};
@@ -131,7 +132,11 @@ impl Shell for RemoteExecutionEnv {
                     return;
                 }
             }
-            let text = String::from_utf8_lossy(payload);
+            // Payloads are mostly valid, and `from_utf8` checks valid text faster than `from_utf8_lossy` does.
+            let text = match std::str::from_utf8(payload) {
+                Ok(text) => Cow::Borrowed(text),
+                Err(_) => String::from_utf8_lossy(payload),
+            };
             let Some(on_output) = &on_output else { return };
             if text.is_empty() {
                 return;

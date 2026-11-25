@@ -6,6 +6,7 @@ pub mod decode;
 pub mod line_scan;
 pub mod local;
 mod types;
+mod utf8;
 
 use std::sync::Arc;
 
