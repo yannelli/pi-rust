@@ -79,8 +79,9 @@ pub(super) struct ExtensionUiState {
     pub shutdown_requested: bool,
     /// Overlays of `custom()` calls whose `onHandle` received a handle, by overlay id.
     pub overlays: HashMap<u64, pi_tui::OverlayHandle>,
-    /// Program status sources of blocking overlays that have not called `done` yet.
-    pub blocking_overlays: std::collections::HashSet<String>,
+    /// Open `custom()` overlays and the function that removes each, in opening order. Reset
+    /// removes only these, not pi's own overlays.
+    pub overlay_removers: Vec<(u64, Rc<dyn Fn()>)>,
     /// `addAutocompleteProvider` factories, applied in order over the built-in provider.
     pub autocomplete_factories: Vec<ComponentFactory>,
     pub autocomplete_base: Option<Rc<dyn pi_tui::AutocompleteProvider>>,
@@ -344,7 +345,6 @@ impl InteractiveMode {
     /// `resetExtensionUI`).
     pub(super) fn reset_extension_ui(&self) {
         self.reset_dialogs();
-        self.tui().hide_overlay();
         self.reset_extension_overlays_and_autocomplete();
         self.set_extension_terminal_input(false);
         self.set_extension_footer(None);

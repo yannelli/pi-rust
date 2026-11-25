@@ -2,10 +2,12 @@
 //! closing the visible one shows the one below it again and no dialog is dropped unanswered.
 
 use pi_tui::program_status::{BlockedKind, ProgramState};
+use pi_tui::{OverlayAnchor, OverlayOptions, Text, component};
 
 use crate::interactive::harness::{Options, Ui, local, start};
 
-const EXTENSION: &str = r#"import { Text } from "@earendil-works/pi-tui";
+const EXTENSION: &str = r#"import { appendFileSync } from "node:fs";
+import { Text } from "@earendil-works/pi-tui";
 export default function (pi) {
 	pi.registerCommand("stack", { handler: async (_args, ctx) => {
 		const first = ctx.ui.confirm("First", "first dialog");
@@ -92,6 +94,22 @@ export default function (pi) {
 			overlayOptions: { nonCapturing: true },
 			blocked: { kind: "question", message: "Question?" },
 		});
+	} });
+	pi.registerCommand("overlays-reload", { handler: async (_args, ctx) => {
+		const shown = (text, anchor, hidden) => new Promise((resolve) => {
+			void ctx.ui.custom(() => ({
+				render: () => [text], invalidate() {},
+				dispose: () => appendFileSync(`${ctx.cwd}/disposed.txt`, `${text}\n`),
+			}), {
+				overlay: true,
+				overlayOptions: { anchor, nonCapturing: true },
+				onHandle: (handle) => { if (hidden) handle.setHidden(true); resolve(); },
+			});
+		});
+		await shown("LOWER", "top-left");
+		await shown("HIDDEN", "top-center", true);
+		await shown("UPPER", "top-right");
+		ctx.ui.notify("overlays open");
 	} });
 	pi.registerCommand("swap-editor", { handler: async (_args, ctx) => {
 		const answer = ctx.ui.confirm("Swap", "swap dialog");
@@ -266,6 +284,33 @@ async fn reload_clears_the_blocked_status_of_open_overlays() {
         ui.wait_until("blocked overlay", |ui| showing(ui, "QUESTION") && reports_blocked(ui, question)).await;
         ui.submit("/reload").await;
         ui.wait_until("cleared", |ui| reports_blocked(ui, None)).await;
+    })
+    .await;
+}
+
+// Upstream #11853: a reset removed only the topmost overlay; lower extension overlays kept focus
+// and input although their extension was gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_removes_every_extension_overlay_but_keeps_pis_own() {
+    local(async {
+        let ui = start_ui().await;
+        let options = OverlayOptions {
+            anchor: Some(OverlayAnchor::BottomRight),
+            non_capturing: true,
+            ..OverlayOptions::default()
+        };
+        ui.mode.tui().show_overlay(component(Text::new("INTERNAL", 0, 0)), options);
+        ui.submit("/overlays-reload").await;
+        ui.wait_for("overlays open").await;
+        ui.wait_until("overlays", |ui| showing(ui, "LOWER") && showing(ui, "UPPER") && showing(ui, "INTERNAL")).await;
+        assert!(!showing(&ui, "HIDDEN"), "{}", ui.screen());
+        ui.submit("/reload").await;
+        ui.wait_until("extension overlays removed", |ui| !showing(ui, "LOWER") && !showing(ui, "UPPER")).await;
+        assert!(showing(&ui, "INTERNAL"), "{}", ui.screen());
+        let disposed = std::fs::read_to_string(ui.cwd().join("disposed.txt")).unwrap();
+        assert_eq!(disposed, "UPPER\nHIDDEN\nLOWER\n");
+        ui.mode.tui().hide_overlay();
+        assert!(!ui.mode.tui().has_overlay());
     })
     .await;
 }

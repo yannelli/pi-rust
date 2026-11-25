@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use pi_tui::program_status::BlockedKind;
 use pi_tui::{AutocompleteProvider, ComponentRef, OverlayHandle, OverlayOptions};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
@@ -60,23 +61,12 @@ impl InteractiveMode {
             let close: Rc<dyn Fn()> = if overlay {
                 let options = custom_overlay_options(options.as_ref(), &js.borrow());
                 let handle = mode.tui().show_overlay(view, options);
-                // An overlay stays blocked until `done`, also while `setHidden` hides it.
-                let source = blocked.is_some().then(|| format!("extension-overlay:{overlay_id}"));
-                if let Some(source) = &source {
-                    mode.extensions_state().blocking_overlays.insert(source.clone());
-                    mode.set_blocked_status(source, blocked);
-                }
+                let remove = mode.track_extension_overlay(overlay_id, handle.clone(), js.clone(), blocked);
                 if let Some(key) = handle_key {
-                    mode.register_extension_overlay(overlay_id, handle.clone());
+                    mode.register_extension_overlay(overlay_id, handle);
                     let _ = factory.invoke_callback(key, json!(overlay_id)).await;
                 }
-                let weak = Rc::downgrade(&mode);
-                Rc::new(move || {
-                    handle.hide();
-                    let (Some(mode), Some(source)) = (weak.upgrade(), &source) else { return };
-                    mode.extensions_state().blocking_overlays.remove(source);
-                    mode.set_blocked_status(source, None);
-                })
+                remove
             } else {
                 mode.mount_view_blocked(view, blocked)
             };
@@ -86,11 +76,49 @@ impl InteractiveMode {
             mode.unregister_extension_overlay(overlay_id);
             if !overlay {
                 mode.set_extension_editor_text(&saved_text);
+                dispose(&js);
             }
-            dispose(&js);
             mode.request_render();
             let _ = sender.send(Ok(result));
         });
+    }
+
+    /// Record an open extension overlay with the function that removes it: hide it, clear its
+    /// blocked status, and dispose its component. `done` and reset share it; the first call drops
+    /// the entry, so a later one does nothing.
+    fn track_extension_overlay(
+        &self,
+        id: u64,
+        handle: OverlayHandle,
+        js: Rc<RefCell<JsComponent>>,
+        blocked: Option<(BlockedKind, String)>,
+    ) -> Rc<dyn Fn()> {
+        // An overlay stays blocked until `done`, also while `setHidden` hides it.
+        let source = blocked.is_some().then(|| format!("extension-overlay:{id}"));
+        if let Some(source) = &source {
+            self.set_blocked_status(source, blocked);
+        }
+        let weak = self.weak.clone();
+        let remove: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(mode) = weak.upgrade() else { return };
+            let removed = {
+                let mut state = mode.extensions_state();
+                let count = state.overlay_removers.len();
+                state.overlay_removers.retain(|(entry, _)| *entry != id);
+                state.overlay_removers.len() != count
+            };
+            if !removed {
+                return;
+            }
+            // Remove this overlay, not the topmost one: another overlay may have opened above it.
+            handle.hide();
+            if let Some(source) = &source {
+                mode.set_blocked_status(source, None);
+            }
+            dispose(&js);
+        });
+        self.extensions_state().overlay_removers.push((id, remove.clone()));
+        remove
     }
 
     fn register_extension_overlay(&self, id: u64, handle: OverlayHandle) {
@@ -173,15 +201,17 @@ impl InteractiveMode {
 
     /// Drop overlay handles and stacked providers with the extension runtime.
     pub(super) fn reset_extension_overlays_and_autocomplete(&self) {
+        // Reload and session switches replace every extension without `done`: remove their
+        // overlays, newest first, the way `done` does. pi's own overlays stay.
+        let removers: Vec<Rc<dyn Fn()>> =
+            self.extensions_state().overlay_removers.iter().rev().map(|(_, remove)| remove.clone()).collect();
+        for remove in removers {
+            remove();
+        }
         let ids: Vec<u64> = self.extensions_state().overlays.drain().map(|(id, _)| id).collect();
         let mirror = self.state.borrow().extensions.mirror.clone();
         for id in ids {
             mirror.set_overlay(id, None);
-        }
-        // Reload and session switches drop overlays without `done`, so clear their blocked status.
-        let sources = std::mem::take(&mut self.extensions_state().blocking_overlays);
-        for source in sources {
-            self.set_blocked_status(&source, None);
         }
         let had_providers = !std::mem::take(&mut self.extensions_state().autocomplete_factories).is_empty();
         if had_providers {
