@@ -109,6 +109,44 @@ async fn supports_dynamic_import_and_top_level_await() {
 }
 
 #[tokio::test]
+async fn loads_files_with_a_hashbang_or_raw_nul_characters() {
+    let (_dir, root) = tempdir();
+    write(&root, "cjs.js", "#!/usr/bin/env node\nexports.kind = 'cjs';\n");
+    write(&root, "esm.mjs", "#!/usr/bin/env node\nexport const kind = 'esm';\n");
+    write(&root, "typed.ts", "#!/usr/bin/env node\nexport const kind: string = 'ts';\n");
+    write(&root, "line.mjs", "#!/usr/bin/env node\nexport const stack = new Error('x').stack;\n");
+    write(
+        &root,
+        "nul.mjs",
+        "export const s = \"a\0b\";\nexport const t = `x\0y`;\nexport const e = \"\\\0\";\nexport const r = /\0/.test(String.fromCharCode(0));\n",
+    );
+    write(
+        &root,
+        "main.mjs",
+        r#"
+import { createRequire } from "node:module";
+import { kind } from "./esm.mjs";
+import { kind as ts } from "./typed.ts";
+import * as nul from "./nul.mjs";
+import { stack } from "./line.mjs";
+const require = createRequire(import.meta.url);
+export const result = {
+  cjs: require("./cjs.js").kind, esm: kind, ts, s: [nul.s.length, nul.s.charCodeAt(1)],
+  t: [nul.t.length, nul.t.charCodeAt(1)], e: [nul.e.length, nul.e.charCodeAt(0)], r: nul.r,
+  line: /line\.mjs:2:/.test(stack),
+};
+"#,
+    );
+    let (runtime, _capture) = runtime(&root);
+    let namespace = runtime.import("./main.mjs").await.unwrap();
+    // Node 22.23.5 prints the same object.
+    assert_eq!(
+        namespace.get("result").await.unwrap().into_json(),
+        json!({ "cjs": "cjs", "esm": "esm", "ts": "ts", "s": [3, 0], "t": [3, 0], "e": [1, 0], "r": true, "line": true })
+    );
+}
+
+#[tokio::test]
 async fn loads_virtual_modules_and_aliases() {
     let (_dir, root) = tempdir();
     let (runtime, _capture) = runtime(&root);
