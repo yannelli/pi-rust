@@ -119,6 +119,8 @@ pub struct AgentSessionRuntime {
     rebind: Mutex<Option<RebindFn>>,
     before_invalidate: Mutex<Option<InvalidateFn>>,
     agent_dir: PathBuf,
+    /// Credential writes of the model runtimes of replaced sessions, which `dispose` waits for.
+    replaced_writes: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl AgentSessionRuntime {
@@ -146,6 +148,7 @@ impl AgentSessionRuntime {
             rebind: Mutex::new(None),
             before_invalidate: Mutex::new(None),
             agent_dir: agent_dir.to_path_buf(),
+            replaced_writes: Mutex::default(),
         })
     }
 
@@ -233,7 +236,14 @@ impl AgentSessionRuntime {
         let bindings = self.session().extension_bindings();
         let old_cwd = self.cwd();
         let target_file = session_manager.file().map(Path::to_path_buf);
+        let model_runtime = self.session().model_runtime().clone();
         self.teardown_current(reason_name, target_file.as_deref()).await;
+        let settle = tokio::spawn(async move { model_runtime.settle_credential_writes().await });
+        {
+            let mut replaced = lock(&self.replaced_writes);
+            replaced.retain(|settle| !settle.is_finished());
+            replaced.push(settle);
+        }
         let target = RuntimeTarget {
             cwd: session_manager.cwd().to_path_buf(),
             agent_dir: self.agent_dir.clone(),
@@ -443,5 +453,9 @@ impl AgentSessionRuntime {
         let model_runtime = self.session().model_runtime().clone();
         self.teardown_current("quit", None).await;
         model_runtime.settle_credential_writes().await;
+        let replaced = std::mem::take(&mut *lock(&self.replaced_writes));
+        for settle in replaced {
+            let _ = settle.await;
+        }
     }
 }
