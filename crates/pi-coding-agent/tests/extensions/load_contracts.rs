@@ -82,21 +82,15 @@ async fn pi_1_6_load_contracts_hold() {
     let unsupported = |member: &str| json!({"code": "ERR_PI_UNSUPPORTED", "message": format!("{member} is not supported in pi-rust")});
     assert_eq!(data["compactCall"], unsupported("AgentSession.compact"), "{data}");
     assert_eq!(data["construct"], unsupported("AgentSession"), "{data}");
-    assert_eq!(data["providers"], json!(["config-object"]), "{data}");
-    assert_eq!(
-        h.errors(),
-        [
-            "register_provider: Provider object-provider: registering a Provider object with getModels() is not \
-             supported in pi-rust. Use pi.registerProvider(\"object-provider\", { api, baseUrl, models, streamSimple }).",
-            "register_provider: Provider id must not be empty.",
-        ]
-    );
+    assert_eq!(data["providers"], json!(["object-provider", "config-object"]), "{data}");
+    assert_eq!(h.errors(), ["register_provider: Provider id must not be empty."]);
+    assert!(h.session.model_runtime().is_native_provider("object-provider"));
     assert!(h.session.model_runtime().get_model("config-object", "config-model").is_some());
 }
 
-/// The path of #250: the factory registers before models bind, and `pi` reports to stderr.
+/// The path of #250: the factory registers before models bind; both forms register.
 #[tokio::test(flavor = "multi_thread")]
-async fn provider_objects_from_the_factory_register_or_report_once_at_startup() {
+async fn provider_objects_from_the_factory_register_at_startup() {
     let root = tempfile::tempdir().unwrap();
     crate::cli_support::setup(root.path(), "http://127.0.0.1:9/v1");
     let extension = root.path().join("providers.ts");
@@ -146,14 +140,8 @@ export default function (pi) {{
     let stderr = String::from_utf8_lossy(&output.stderr);
     let model = records.iter().find(|record| record["id"] == "model").cloned().unwrap_or(Value::Null);
     assert_eq!(model["success"], true, "{model} {stderr}");
-    assert_eq!(records.last().map(|record| record["message"].clone()), Some(json!("ids config-object")), "{stderr}");
+    let ids = Some(json!("ids config-object,object-provider"));
+    assert_eq!(records.last().map(|record| record["message"].clone()), ids, "{stderr}");
     let errors: Vec<&str> = stderr.lines().filter(|line| line.starts_with("Extension error (")).collect();
-    assert_eq!(errors.len(), 1, "{stderr}");
-    assert!(
-        errors[0].ends_with(
-            "register_provider): Provider object-provider: registering a Provider object with getModels() is not \
-             supported in pi-rust. Use pi.registerProvider(\"object-provider\", { api, baseUrl, models, streamSimple })."
-        ),
-        "{stderr}"
-    );
+    assert_eq!(errors, Vec::<&str>::new(), "{stderr}");
 }

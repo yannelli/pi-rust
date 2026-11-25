@@ -168,6 +168,9 @@ pub(super) fn group_models(parent: &ExtensionRunner, args: &Args) -> Result<Valu
         "provider.register" => {
             child.register_provider_for(&callbacks, group, &args.str(2)?, args.json(3), &args.str(4)?).map_err(error)?
         }
+        "provider.registerNative" => child
+            .register_native_provider_for(&callbacks, group, &args.str(2)?, &args.json(3), &args.str(4)?)
+            .map_err(error)?,
         "provider.unregister" => child.unregister_provider(&args.str(2)?),
         "virtualModel.register" => child.register_virtual_model_for(&callbacks, group, args.json(2)).map_err(error)?,
         "virtualModel.unregister" => child.unregister_virtual_model(&args.str(2)?, &args.str(3)?),

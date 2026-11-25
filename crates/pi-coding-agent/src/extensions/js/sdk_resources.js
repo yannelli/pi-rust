@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { createEventBus } from "./api.js";
 import { call, callAsync, optional, signalId } from "./bridge.js";
 import { createModelRegistry } from "./context.js";
+import { sdkLoginMethods, sdkProviderMethods } from "./native_provider.js";
 import { bindExtensions, loadExtensions } from "./sdk_extensions.js";
 import { SettingsManager } from "./sdk_storage.js";
 import { sessionStream } from "./stream.js";
@@ -241,9 +242,7 @@ export class DefaultResourceLoader {
 }
 
 const RUNTIME_UNSUPPORTED = [
-	"login", "logout", "registerProvider", "unregisterProvider", "registerNativeProvider", "registerVirtualModel",
-	"unregisterVirtualModel", "getRegisteredProviderConfig", "getRegisteredNativeProvider",
-	"getCompatibilityRequestConfig", "getPhysicalModel",
+	"registerVirtualModel", "unregisterVirtualModel", "getCompatibilityRequestConfig", "getPhysicalModel",
 ];
 
 const unsupportedStream = () => {
@@ -251,7 +250,8 @@ const unsupportedStream = () => {
 };
 
 function registryFor(id) {
-	return createModelRegistry(id, id === 0 ? sessionStream : unsupportedStream, "modelRuntime");
+	const registry = createModelRegistry(id, id === 0 ? sessionStream : unsupportedStream, "modelRuntime");
+	return Object.assign(registry, sdkProviderMethods(id, { ...registry }));
 }
 
 /** Upstream `ModelRuntime` over native runtime `id` (0 is the host's); auth methods take provider ids. */
@@ -280,6 +280,7 @@ function runtimeFor(id) {
 			await run("removeRuntimeApiKey", providerId);
 		},
 		listCredentials: async () => (await run("listCredentials")) ?? [],
+		...sdkLoginMethods(id),
 	};
 	for (const name of RUNTIME_UNSUPPORTED) {
 		runtime[name] = () => {

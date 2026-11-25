@@ -66,9 +66,9 @@ fn oauth_for(runner: &ExtensionRunner, spec: &Value) -> Result<Arc<dyn OAuthAuth
 }
 
 /// Upstream `AuthInteraction` of the caller: prompts and events go to JavaScript callback `key`.
-struct JsInteraction {
-    runner: Arc<ExtensionRunner>,
-    key: u64,
+pub(super) struct JsInteraction {
+    pub runner: Arc<ExtensionRunner>,
+    pub key: u64,
 }
 
 #[async_trait]
@@ -99,7 +99,7 @@ async fn oauth(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsEr
             let credential: OAuthCredential = json_arg(args, 2, "OAuth credential")?;
             json!(oauth.refresh(&credential, runner.token(args.json(3).as_u64())).await.map_err(failed)?)
         }
-        "toAuth" => json!(oauth.to_auth(&json_arg(args, 2, "OAuth credential")?)),
+        "toAuth" => json!(oauth.to_auth_async(&json_arg(args, 2, "OAuth credential")?).await.map_err(failed)?),
         "login" => {
             let interaction = JsInteraction { runner: runner.clone(), key: args.u64(2) };
             let options = args.json(3);

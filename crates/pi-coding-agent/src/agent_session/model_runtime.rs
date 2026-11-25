@@ -40,6 +40,9 @@ impl ModelRuntimeOptions {
     }
 }
 
+/// OAuth flows of extension providers by id; `None` hides the built-in flow of a native provider's id.
+type ExtensionOAuth = Arc<RwLock<HashMap<String, Option<Arc<dyn OAuthAuth>>>>>;
+
 pub struct ModelRuntime {
     registry: RwLock<ModelRegistry>,
     disabled_providers: RwLock<HashSet<String>>,
@@ -54,13 +57,15 @@ pub struct ModelRuntime {
     pub(super) provider_auth: RwLock<HashMap<String, Arc<dyn ProviderAuth>>>,
     /// `pi.registerProvider` configs by provider id, applied over `models.json`.
     pub(super) extension_providers: RwLock<BTreeMap<String, serde_json::Value>>,
-    pub(super) extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>>,
+    pub(super) extension_oauth: ExtensionOAuth,
     /// Extension providers registered with `oauth: { builtin }`, by id: the provider they log in to.
     pub(super) account_bases: RwLock<HashMap<String, String>>,
     /// The core OAuth flows by provider id, without the extension ones.
     pub(super) builtin_oauth: OAuthLookup,
     /// `refreshModels`, `oauth.modifyModels`, `images`, and `classifiers` of extension providers.
     pub(super) extension_hooks: RwLock<HashMap<String, super::runtime_extension_ops::ExtensionHookState>>,
+    /// Upstream `Provider` objects from extensions, by id.
+    pub(super) native_providers: RwLock<BTreeMap<String, super::runtime_native::NativeEntry>>,
     pub(super) offline_refreshes: OfflineRefreshes,
     usage: pi_ai::usage::UsageService,
 }
@@ -82,11 +87,13 @@ impl ModelRuntime {
         registry.retain_models(|model| !disabled.contains(&model.provider));
         let runtime_store = Arc::new(RuntimeCredentialStore::new(options.credentials));
         let builtin = options.oauth.unwrap_or_else(|| Arc::new(|_: &str| None));
-        let extension_oauth: Arc<RwLock<HashMap<String, Arc<dyn OAuthAuth>>>> = Arc::default();
+        let extension_oauth: ExtensionOAuth = Arc::default();
         let registered = extension_oauth.clone();
         let builtin_oauth = builtin.clone();
-        let oauth: OAuthLookup =
-            Arc::new(move |provider: &str| read(&registered).get(provider).cloned().or_else(|| builtin(provider)));
+        let oauth: OAuthLookup = Arc::new(move |provider: &str| match read(&registered).get(provider) {
+            Some(flow) => flow.clone(),
+            None => builtin(provider),
+        });
         let resolver = Arc::new(AuthResolver::new(runtime_store.clone(), oauth).with_env(options.credential_env));
         resolver.set_provider_configs(registry.auth_configs());
         let usage = pi_ai::usage::UsageService::new(resolver.clone());
@@ -106,6 +113,7 @@ impl ModelRuntime {
             account_bases: RwLock::default(),
             builtin_oauth,
             extension_hooks: RwLock::default(),
+            native_providers: RwLock::default(),
             offline_refreshes: OfflineRefreshes::default(),
             usage,
         };
@@ -140,6 +148,7 @@ impl ModelRuntime {
     pub fn all_providers(&self) -> Vec<(String, String)> {
         let mut registry = self.base_registry();
         self.apply_extension_providers(&mut registry);
+        self.apply_native_providers(&mut registry);
         for model in self.virtual_models() {
             registry.upsert(model);
         }
@@ -202,9 +211,10 @@ impl ModelRuntime {
         self.registry().models().into_iter().cloned().collect()
     }
 
-    /// Models whose provider has configured auth.
+    /// Models whose provider has configured auth, after native providers' `filterModels`.
     pub fn available_models(&self) -> Vec<Model> {
-        self.registry().available_models().into_iter().cloned().collect()
+        let available: Vec<Model> = self.registry().available_models().into_iter().cloned().collect();
+        available.into_iter().filter(|model| self.is_model_available(model)).collect()
     }
 
     /// Whether auth for `provider` was found at the last refresh (no token refresh, no commands).
@@ -238,6 +248,7 @@ impl ModelRuntime {
                 configured.insert(provider);
             }
         }
+        self.refresh_native_availability(&configured).await;
         *write(&self.configured) = configured;
         let configured = self.configured_providers();
         self.registry_mut().set_configured_providers(configured);
@@ -268,7 +279,10 @@ impl ModelRuntime {
 
     /// The API key a request to `provider` would use now, refreshing OAuth tokens if needed.
     pub async fn api_key_for(&self, provider: &str) -> Option<String> {
-        let resolved = self.resolver.resolve(provider, &Default::default()).await.ok().flatten();
+        let resolved = match self.resolve_provider_auth(provider).await {
+            Some(resolved) => resolved.ok().flatten(),
+            None => self.resolver.resolve(provider, &Default::default()).await.ok().flatten(),
+        };
         resolved.and_then(|resolved| resolved.auth.api_key)
     }
 }

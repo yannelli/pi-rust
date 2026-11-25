@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
 import { call, callAsync, signalId } from "./bridge.js";
 import { waitForChildProcess } from "./child_wait.js";
+import { nativeProviderId, nativeRuntime } from "./native_provider.js";
 
 export function createEventBus() {
 	const emitter = new EventEmitter();
@@ -128,6 +129,7 @@ export function createRuntime(onChange) {
 		pendingNativeProviders: [],
 		pendingVirtualModels: [],
 		providers: new Map(),
+		nativeProviders: new Map(),
 		virtualModels: new Map(),
 		modelCall: call,
 		action: notBound,
@@ -181,35 +183,31 @@ export function createRuntime(onChange) {
 			}
 			runtime.modelCall("provider.register", name, providerJson(effective), extensionPath);
 			runtime.providers.set(name, { config: effective, extensionPath });
+			runtime.nativeProviders.delete(name);
 		},
 		contextProvider(method, name, config) {
 			runtime.assertActive();
 			if (method === "get") return runtime.providers.get(name)?.config;
+			if (method === "getNative") return runtime.nativeProviders.get(name)?.provider;
+			if (method === "register" && typeof name !== "string") {
+				const id = nativeProviderId(name);
+				const path = (runtime.nativeProviders.get(id) ?? runtime.providers.get(id))?.extensionPath ?? "ctx.modelRegistry";
+				// As `pi.registerProvider`: an object without `getModels()` is a provider config.
+				if (typeof name.getModels !== "function") return runtime.setProvider(id, { ...name, native: true }, path);
+				return runtime.setNativeProvider(name, path);
+			}
 			if (method === "register") {
 				return runtime.setProvider(name, config, runtime.providers.get(name)?.extensionPath ?? "ctx.modelRegistry");
 			}
 			if (method === "unregister") return runtime.unregisterProvider(name);
 			throw new Error(`Unknown provider operation: ${method}`);
 		},
-		/** Upstream `registerNativeProvider`: reported as unsupported where a registration error shows. */
-		registerNativeProvider(provider, extensionPath) {
-			const pending = { id: provider?.id, extensionPath };
-			if (runtime.modelsBound) runtime.rejectNativeProvider(pending);
-			else runtime.pendingNativeProviders.push(pending);
-		},
-		rejectNativeProvider({ id, extensionPath }) {
-			const error =
-				typeof id === "string" && id.trim()
-					? `Provider ${id}: registering a Provider object with getModels() is not supported in pi-rust. ` +
-						`Use pi.registerProvider("${id}", { api, baseUrl, models, streamSimple }).`
-					: "Provider id must not be empty.";
-			call("error", { extensionPath, event: "register_provider", error, stack: null });
-		},
 		unregisterProvider(name) {
 			if (runtime.modelsBound) runtime.modelCall("provider.unregister", name);
 			runtime.providers.delete(name);
+			runtime.nativeProviders.delete(name);
 			runtime.pendingProviders = runtime.pendingProviders.filter((pending) => pending.name !== name);
-			runtime.pendingNativeProviders = runtime.pendingNativeProviders.filter((pending) => pending.id !== name);
+			runtime.pendingNativeProviders = runtime.pendingNativeProviders.filter((pending) => pending.provider?.id !== name);
 		},
 		registerVirtualModel(definition, extensionPath) {
 			const key = `${definition.provider}/${definition.id}`;
@@ -247,7 +245,9 @@ export function createRuntime(onChange) {
 			for (const { name, config, extensionPath } of runtime.pendingProviders.splice(0)) {
 				runtime.applyProvider(name, config, extensionPath);
 			}
-			for (const pending of runtime.pendingNativeProviders.splice(0)) runtime.rejectNativeProvider(pending);
+			for (const { provider, extensionPath } of runtime.pendingNativeProviders.splice(0)) {
+				runtime.applyNativeProvider(provider, extensionPath);
+			}
 			for (const key of runtime.pendingVirtualModels.splice(0)) runtime.applyVirtualModel(key);
 		},
 		/** Rust bound the session: actions go to it. */
@@ -261,7 +261,7 @@ export function createRuntime(onChange) {
 			};
 		},
 	};
-	return runtime;
+	return Object.assign(runtime, nativeRuntime(runtime));
 }
 
 /** Provider config without its functions; Rust calls those back by provider name. */
@@ -480,9 +480,9 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			assertActive();
 			if (typeof providerOrName !== "string") {
 				const provider = providerOrName;
-				// An upstream `Provider` lists its models with `getModels()`; an object with a string `api`
-				// is a provider config, which pi-rust registers under its `id`.
-				if (typeof provider?.getModels === "function" && typeof provider.api !== "string") {
+				// An upstream `Provider` lists its models with `getModels()`; pi-rust registers an object
+				// without it as a provider config under its `id`.
+				if (typeof provider?.getModels === "function") {
 					apply(() => runtime.registerNativeProvider(provider, extension.path));
 					return;
 				}

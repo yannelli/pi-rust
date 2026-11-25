@@ -6,32 +6,33 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use pi_ai::auth::{
-    AuthError, AuthEvent, AuthInteraction, AuthPrompt, AuthResult, LoginOptions, ModelAuth, OAuthAuth, OAuthCredential,
+use pi_ai::auth::{AuthError, AuthInteraction, AuthResult, LoginOptions, ModelAuth, OAuthAuth, OAuthCredential};
+use pi_ai::{
+    ApiProvider, AssistantMessageEventStream, Context, MessageBuilder, Model, StopReason, StreamOptions, error_stream,
 };
-use pi_ai::{ApiProvider, AssistantMessageEventStream, Context, Model, StopReason, StreamOptions, error_stream};
-use pi_js::{HostValue, JsError};
+use pi_js::HostValue;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::convert::stream_options_to_json;
-use super::ops::{Args, error};
+use super::login_bridge::drive_login;
 use super::runner::ExtensionRunner;
 use crate::agent_session::lock;
 use crate::virtual_models::{ModelLookup, ModelRoute, ModelRouteRequest, ModelRouter, VirtualModelDefinition};
 
-/// Which JavaScript function streams: a provider's `streamSimple` or a `registerApiProvider` API.
+/// Which JavaScript function streams: a provider's `streamSimple`, a `registerApiProvider` API, or
+/// a native `Provider` (its object under `target`, see `native_provider.rs`).
 #[derive(Clone)]
-enum StreamTarget {
+pub(super) enum StreamTarget {
     Provider(String),
     Api(String),
+    Native { target: u64, id: String },
 }
 
-struct JsApiProvider {
-    runner: Weak<ExtensionRunner>,
-    group: u64,
-    target: StreamTarget,
+pub(super) struct JsApiProvider {
+    pub runner: Weak<ExtensionRunner>,
+    pub group: u64,
+    pub target: StreamTarget,
 }
 
 impl ApiProvider for JsApiProvider {
@@ -43,23 +44,26 @@ impl ApiProvider for JsApiProvider {
         let key = runner.next_id();
         lock(&runner.sinks).insert(key, sender.clone());
         let signal = runner.signal_for(&options.cancel);
-        let (method, name) = match &self.target {
-            StreamTarget::Provider(name) => ("providerStream", name.clone()),
-            StreamTarget::Api(api) => ("apiStream", api.clone()),
+        let (method, mut args) = match &self.target {
+            StreamTarget::Provider(name) => ("providerStream", vec![json!(name)]),
+            StreamTarget::Api(api) => ("apiStream", vec![json!(api)]),
+            StreamTarget::Native { target, id } => ("nativeStream", vec![json!(target), json!(id)]),
         };
-        let args =
-            vec![json!(name), json!(model), json!(context), stream_options_to_json(&options, signal), json!(key)];
+        args.extend([json!(model), json!(context), stream_options_to_json(&options, signal), json!(key)]);
         let (model, group) = (model.clone(), self.group);
         handle.spawn(async move {
             let result = runner.call_model(group, method, args).await;
             lock(&runner.sinks).remove(&key);
             runner.release_signal(signal);
-            if let Err(failure) = result {
-                let mut message = pi_ai::AssistantMessage::empty(&model);
-                let aborted = options.cancel.is_cancelled();
-                message.stop_reason = if aborted { StopReason::Aborted } else { StopReason::Error };
-                message.error_message = Some(failure.message);
-                sender.push(pi_ai::AssistantMessageEvent::Error { reason: message.stop_reason, error: message });
+            // A native stream reports `false` when it ended without `done` or `error`.
+            let failure = match result {
+                Err(failure) => Some(failure.message),
+                Ok(Value::Bool(false)) => Some("The provider stream ended without a done or error event".into()),
+                Ok(_) => None,
+            };
+            if let Some(message) = failure {
+                let reason = if options.cancel.is_cancelled() { StopReason::Aborted } else { StopReason::Error };
+                MessageBuilder::new(&model, sender).fail(reason, message);
             }
         });
         stream
@@ -113,13 +117,6 @@ impl OAuthAuth for BuiltinOAuth {
     }
 }
 
-/// A login callback from JavaScript, answered by the login's interaction.
-pub(crate) struct LoginRequest {
-    name: String,
-    args: Vec<Value>,
-    reply: oneshot::Sender<Result<Value, String>>,
-}
-
 impl JsOAuth {
     fn runner(&self) -> AuthResult<Arc<ExtensionRunner>> {
         self.runner.upgrade().ok_or_else(|| AuthError::Other("The extension host has shut down".into()))
@@ -136,47 +133,6 @@ fn credential(value: Value) -> AuthResult<OAuthCredential> {
     serde_json::from_value(value).map_err(|failure| AuthError::Other(format!("Invalid OAuth credential: {failure}")))
 }
 
-async fn answer(
-    interaction: &dyn AuthInteraction,
-    request: &LoginRequest,
-    cancel: &CancellationToken,
-) -> Result<Value, String> {
-    let arg = request.args.first().cloned().unwrap_or(Value::Null);
-    let text = |key: &str| arg[key].as_str().map(str::to_string);
-    let prompt = match request.name.as_str() {
-        "onAuth" => {
-            let url = text("url").unwrap_or_default();
-            interaction.notify(AuthEvent::AuthUrl { url, instructions: text("instructions") });
-            return Ok(Value::Null);
-        }
-        "onDeviceCode" => {
-            interaction.notify(AuthEvent::DeviceCode {
-                user_code: text("userCode").unwrap_or_default(),
-                verification_uri: text("verificationUri").unwrap_or_default(),
-                open_browser_on_confirm: arg["openBrowserOnConfirm"].as_bool(),
-                copy_code_on_confirm: arg["copyCodeOnConfirm"].as_bool(),
-                interval_seconds: arg["intervalSeconds"].as_u64(),
-                expires_in_seconds: arg["expiresInSeconds"].as_u64(),
-            });
-            return Ok(Value::Null);
-        }
-        "onProgress" => {
-            let message = arg.as_str().map(str::to_string).unwrap_or_default();
-            interaction.notify(AuthEvent::Progress { message });
-            return Ok(Value::Null);
-        }
-        "onPrompt" => {
-            AuthPrompt::Text { message: text("message").unwrap_or_default(), placeholder: text("placeholder") }
-        }
-        "onSelect" => AuthPrompt::Select {
-            message: text("message").unwrap_or_default(),
-            options: serde_json::from_value(arg["options"].clone()).unwrap_or_default(),
-        },
-        _ => AuthPrompt::ManualCode { message: "Paste the authorization code".into(), placeholder: None },
-    };
-    interaction.prompt(prompt, cancel.child_token()).await.map(Value::from).map_err(|failure| failure.to_string())
-}
-
 #[async_trait]
 impl OAuthAuth for JsOAuth {
     fn name(&self) -> &str {
@@ -190,27 +146,10 @@ impl OAuthAuth for JsOAuth {
         cancel: CancellationToken,
     ) -> AuthResult<OAuthCredential> {
         let runner = self.runner()?;
-        let (sender, mut requests) = mpsc::unbounded_channel::<LoginRequest>();
-        let key = runner.next_id();
-        lock(&runner.logins).insert(key, sender);
-        let signal = runner.signal_for(&cancel);
-        let login = self.call("login", vec![json!({"key": key, "signal": signal})]);
-        tokio::pin!(login);
-        let result = loop {
-            tokio::select! {
-                result = &mut login => break result,
-                Some(request) = requests.recv() => {
-                    let reply = answer(interaction, &request, &cancel).await;
-                    let _ = request.reply.send(reply);
-                }
-            }
-        };
-        lock(&runner.logins).remove(&key);
-        runner.release_signal(signal);
-        if cancel.is_cancelled() {
-            return Err(AuthError::Cancelled);
-        }
-        credential(result?)
+        let login = drive_login(&runner, interaction, &cancel, |key, signal| {
+            self.call("login", vec![json!({"key": key, "signal": signal})])
+        });
+        credential(login.await?)
     }
 
     async fn refresh(
@@ -240,31 +179,6 @@ impl OAuthAuth for JsOAuth {
         };
         ModelAuth { api_key, ..ModelAuth::default() }
     }
-}
-
-/// Queues a login callback in call order; the receiver gets its answer.
-fn queue_login_callback(
-    runner: &ExtensionRunner,
-    args: &Args,
-) -> Result<oneshot::Receiver<Result<Value, String>>, JsError> {
-    let key = args.json(0)["key"].as_u64().unwrap_or(0);
-    let name = args.str(1)?;
-    let rest = args.0.iter().skip(2).cloned().map(HostValue::into_json).collect();
-    let sender = lock(&runner.logins).get(&key).cloned().ok_or_else(|| error("The login has finished"))?;
-    let (reply, answer) = oneshot::channel();
-    sender.send(LoginRequest { name, args: rest, reply }).map_err(|_| error("The login has finished"))?;
-    Ok(answer)
-}
-
-/// `oauth.notify`: a login callback with no answer, such as `onAuth` or `onProgress`.
-pub(crate) fn oauth_notify(runner: &ExtensionRunner, args: &Args) -> Result<Value, JsError> {
-    queue_login_callback(runner, args).map(|_| Value::Null)
-}
-
-/// `oauth.callback`: a login callback forwarded to the waiting login.
-pub(crate) async fn oauth_callback(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsError> {
-    let answer = queue_login_callback(runner, args)?;
-    answer.await.map_err(|_| error("The login has finished"))?.map_err(error)
 }
 
 /// A JavaScript `route(request, ctx)` of a virtual model.
@@ -344,6 +258,7 @@ impl ExtensionRunner {
             }
         }
         runtime.register_extension_provider(name, stored)?;
+        runtime.unregister_native_provider(name);
         if let Some(api) = stream_api {
             let target = StreamTarget::Provider(name.to_string());
             let provider = JsApiProvider { runner: callbacks.weak(), group, target };
@@ -379,6 +294,7 @@ impl ExtensionRunner {
 
     pub(crate) fn unregister_provider(&self, name: &str) {
         lock(&self.providers).retain(|(existing, _)| existing != name);
+        self.model_runtime().unregister_native_provider(name);
         self.restore_owned_apis(0, name);
         let parent = self.parent.get().and_then(|link| Some((link.parent.upgrade()?, link.group)));
         if let Some((parent, group)) = parent {

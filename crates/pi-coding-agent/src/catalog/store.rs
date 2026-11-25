@@ -72,6 +72,16 @@ pub trait ModelsStore: Send + Sync {
         cancel: &CancellationToken,
     ) -> anyhow::Result<()>;
     async fn delete(&self, provider_id: &str, cancel: &CancellationToken) -> anyhow::Result<()>;
+
+    /// The stored entry as written, for native extension providers that persist their own shape.
+    async fn read_value(&self, provider_id: &str, cancel: &CancellationToken) -> anyhow::Result<Option<Value>> {
+        Ok(self.read(provider_id, cancel).await?.map(|entry| serde_json::to_value(entry).unwrap_or_default()))
+    }
+
+    async fn write_value(&self, provider_id: &str, entry: &Value, cancel: &CancellationToken) -> anyhow::Result<()> {
+        let entry: ModelsStoreEntry = serde_json::from_value(entry.clone())?;
+        self.write(provider_id, &entry, cancel).await
+    }
 }
 
 fn check_cancel(cancel: &CancellationToken) -> anyhow::Result<()> {
@@ -212,6 +222,18 @@ impl ModelsStore for FileModelsStore {
     async fn delete(&self, provider_id: &str, cancel: &CancellationToken) -> anyhow::Result<()> {
         self.update(cancel, |document| {
             document.remove(provider_id);
+        })
+        .await
+    }
+
+    async fn read_value(&self, provider_id: &str, cancel: &CancellationToken) -> anyhow::Result<Option<Value>> {
+        check_cancel(cancel)?;
+        Ok(self.read_document()?.remove(provider_id))
+    }
+
+    async fn write_value(&self, provider_id: &str, entry: &Value, cancel: &CancellationToken) -> anyhow::Result<()> {
+        self.update(cancel, |document| {
+            document.insert(provider_id.into(), entry.clone());
         })
         .await
     }

@@ -32,6 +32,7 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("models.js", include_str!("js/models.js")),
     ("native.js", include_str!("js/native.js")),
     ("native_host.js", include_str!("js/native_host.js")),
+    ("native_provider.js", include_str!("js/native_provider.js")),
     ("native_register.js", include_str!("js/native_register.js")),
     ("native_render.js", include_str!("js/native_render.js")),
     ("native_rpc.js", include_str!("js/native_rpc.js")),

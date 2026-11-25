@@ -110,7 +110,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             lock(&runner.signals).insert(id, token);
             json!(id)
         }
-        "oauth.notify" => super::provider::oauth_notify(runner, args)?,
+        "oauth.notify" => super::login_bridge::oauth_notify(runner, args)?,
         "signal.abort" => {
             if let Some(token) = lock(&runner.signals).remove(&args.u64(0)) {
                 token.cancel();
@@ -203,6 +203,9 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
         "provider.register" => {
             runner.register_provider(&args.str(0)?, args.json(1), &args.str(2)?).map_err(error)?;
             Value::Null
+        }
+        "provider.registerNative" | "provider.nativeModels" | "provider.deviceId" => {
+            super::native_provider::sync(runner, &op["provider.".len()..], args)?
         }
         "provider.unregister" => {
             runner.unregister_provider(&args.str(0)?);

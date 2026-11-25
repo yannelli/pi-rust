@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use pi_ai::auth::{ApiKeyCredential, Credential, ResolvedAuth};
+use pi_ai::auth::{
+    ApiKeyCredential, AuthCheck, AuthError, AuthInteraction, AuthResult, AuthType, Credential, ResolvedAuth,
+};
 use pi_ai::models::{ModelRegistry, builtin_models};
 use tokio_util::sync::CancellationToken;
 
@@ -31,6 +33,30 @@ pub trait ProviderAuth: Send + Sync {
     /// Whether the provider is configured, without side effects.
     async fn check(&self, stored: Option<&Credential>) -> bool;
     async fn resolve(&self, stored: Option<&Credential>) -> Result<Option<ResolvedAuth>, String>;
+
+    /// [`Self::check`] with the method and source label status displays show.
+    async fn check_source(&self, stored: Option<&Credential>) -> Option<AuthCheck> {
+        let found = self.check(stored).await;
+        found.then(|| AuthCheck { auth_type: AuthType::ApiKey, source: "environment".into() })
+    }
+
+    /// Whether the provider has API key auth (upstream `auth.apiKey`); OAuth-only ones do not.
+    fn has_api_key(&self) -> bool {
+        true
+    }
+
+    /// Whether an interactive API key setup exists (upstream `ApiKeyAuth.login`).
+    fn has_login(&self) -> bool {
+        false
+    }
+
+    async fn login(
+        &self,
+        _interaction: &dyn AuthInteraction,
+        _cancel: CancellationToken,
+    ) -> AuthResult<ApiKeyCredential> {
+        Err(AuthError::other("This provider has no API key login"))
+    }
 }
 
 fn api_key(stored: Option<&Credential>) -> Option<&ApiKeyCredential> {
@@ -90,6 +116,10 @@ pub(crate) struct CatalogState {
 }
 
 impl CatalogState {
+    pub(super) fn models_store(&self) -> Option<Arc<dyn ModelsStore>> {
+        self.setup.as_ref().map(|setup| setup.store.clone())
+    }
+
     fn all(&self) -> Vec<Arc<dyn DynamicCatalog>> {
         let mut catalogs = self.catalogs.clone();
         if let Some(llama) = &self.llama {
@@ -178,6 +208,12 @@ impl ModelRuntime {
     pub async fn resolve_provider_auth(&self, provider: &str) -> Option<Result<Option<ResolvedAuth>, String>> {
         let auth = self.provider_auth(provider)?;
         let stored = self.resolver().store().read(provider).await.ok().flatten();
+        if matches!(stored, Some(Credential::OAuth(_))) && self.is_native_provider(provider) {
+            // The resolver refreshes a native provider's OAuth token under the store lock.
+            return Some(
+                self.resolver().resolve(provider, &Default::default()).await.map_err(|error| error.to_string()),
+            );
+        }
         Some(auth.resolve(stored.as_ref()).await)
     }
 
@@ -197,6 +233,7 @@ impl ModelRuntime {
     pub(super) fn rebuild_registry(&self) {
         let mut registry = self.base_registry();
         self.apply_extension_providers(&mut registry);
+        self.apply_native_providers(&mut registry);
         self.resolver().set_provider_configs(registry.auth_configs());
         self.add_virtual_models(&mut registry);
         *self.registry_mut() = registry;
@@ -225,6 +262,7 @@ impl ModelRuntime {
         };
         if !result.aborted {
             self.refresh_extension_providers(&options, &mut result).await;
+            self.refresh_native_providers(&options, &mut result).await;
         }
         self.rebuild_registry();
         self.refresh_configured_providers().await;
@@ -296,7 +334,7 @@ impl ModelRuntime {
             let state = read(&self.catalogs);
             (state.refresher.clone(), state.all())
         };
-        if refresher.is_none() && !self.has_extension_refresh() {
+        if refresher.is_none() && !self.has_extension_refresh() && !self.has_native_refresh() {
             return None;
         }
         let runtime = self.clone();
@@ -308,8 +346,12 @@ impl ModelRuntime {
             };
             if !result.aborted {
                 let options = RefreshOptions { allow_network: true, providers: None, force: false, cancel };
-                let refresh = runtime.refresh_extension_providers(&options, &mut result);
+                let refresh = async {
+                    runtime.refresh_extension_providers(&options, &mut result).await;
+                    runtime.refresh_native_providers(&options, &mut result).await;
+                };
                 if tokio::time::timeout(timeout, refresh).await.is_err() {
+                    options.cancel.cancel();
                     result.aborted = true;
                 }
             }

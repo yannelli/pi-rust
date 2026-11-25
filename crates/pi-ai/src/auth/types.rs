@@ -266,6 +266,11 @@ pub trait OAuthAuth: Send + Sync {
 
     /// Request auth for a valid credential (may set a per-credential base URL).
     fn to_auth(&self, credential: &OAuthCredential) -> ModelAuth;
+
+    /// [`Self::to_auth`] for flows that derive auth asynchronously (upstream `toAuth` is async).
+    async fn to_auth_async(&self, credential: &OAuthCredential) -> AuthResult<ModelAuth> {
+        Ok(self.to_auth(credential))
+    }
 }
 
 #[cfg(test)]

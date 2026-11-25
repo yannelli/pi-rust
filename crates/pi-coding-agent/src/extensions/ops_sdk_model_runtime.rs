@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_ai::Model;
-use pi_ai::auth::FileCredentialStore;
+use pi_ai::auth::{AuthType, FileCredentialStore, LoginOptions};
 use pi_js::{HostValue, JsError};
 use serde_json::{Value, json};
 
@@ -42,15 +42,27 @@ fn of_type(model: &Model, kind: &str) -> bool {
 
 /// `modelRuntime.read(id, method, ...)`; method arguments start at 2 as in `models.read`.
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
-    if name != "read" {
-        return Err(error(format!("Unknown model runtime operation: {name}")));
-    }
     let id = args.u64(0);
     let runtime = runner.sdk_model_runtime(id)?;
+    // Provider objects of a created runtime; the host's runtime registers them as `pi` does.
+    match name {
+        "read" => {}
+        "registerNative" => {
+            super::native_provider::install(&runtime, &runner.this(), 0, id, &args.str(1)?, &args.json(2));
+            runtime.refresh_offline_in_background();
+            return Ok(HostValue::Json(Value::Null));
+        }
+        "unregisterNative" => {
+            runtime.unregister_native_provider(&args.str(1)?);
+            runtime.refresh_offline_in_background();
+            return Ok(HostValue::Json(Value::Null));
+        }
+        _ => return Err(error(format!("Unknown model runtime operation: {name}"))),
+    }
     let method = args.str(1)?;
     let all = || runtime.registry().all_models().to_vec();
     let available = |models: Vec<Model>| -> Vec<Model> {
-        models.into_iter().filter(|model| runtime.has_configured_auth(&model.provider)).collect()
+        models.into_iter().filter(|model| runtime.is_model_available(model)).collect()
     };
     let value = match method.as_str() {
         "getModels" => json!(of_provider(runtime.all_models(), args.opt_str(2).as_deref())),
@@ -91,6 +103,24 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, name: &str, args: Args) ->
     let runtime = runner.sdk_model_runtime(args.u64(0))?;
     let value = match name {
         "listCredentials" => json!(runtime.list_credentials().await.map_err(error)?),
+        "login" => {
+            let auth_type = match args.str(2)?.as_str() {
+                "oauth" => AuthType::OAuth,
+                "api_key" => AuthType::ApiKey,
+                other => return Err(error(format!("Unknown auth type: {other}"))),
+            };
+            let interaction = super::ops_ai::JsInteraction { runner: runner.clone(), key: args.u64(3) };
+            let options = args.json(4);
+            let login =
+                LoginOptions { agent_name: options["agentName"].as_str().map(str::to_string), ..Default::default() };
+            let cancel = runner.token(options["signal"].as_u64());
+            let credential = runtime.login(&args.str(1)?, auth_type, &interaction, &login, cancel).await;
+            json!(credential.map_err(error)?)
+        }
+        "logout" => {
+            runtime.logout(&args.str(1)?).await.map_err(error)?;
+            Value::Null
+        }
         "getAvailable" => {
             runtime.refresh_configured_providers().await;
             json!(of_provider(runtime.available_models(), args.opt_str(1).as_deref()))

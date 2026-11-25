@@ -18,6 +18,7 @@ mod mcp_call;
 mod mcp_elicitation;
 mod native;
 mod native_contracts;
+mod native_provider;
 mod native_usage;
 mod provider;
 mod provider_compose;

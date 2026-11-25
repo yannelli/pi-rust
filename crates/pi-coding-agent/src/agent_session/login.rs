@@ -73,9 +73,17 @@ impl ModelRuntime {
     }
 
     fn supports_api_key_login(&self, id: &str) -> bool {
+        if self.is_native_provider(id) {
+            return self.provider_auth(id).is_some_and(|auth| auth.has_login());
+        }
         !api_key_env_vars(id).is_empty()
             || super::login_flows::has_custom_api_key_login(id)
             || self.registry().auth_configs().contains_key(id)
+    }
+
+    /// For a native provider, whether it has API key auth; `None` for other providers.
+    fn native_api_key_auth(&self, id: &str) -> Option<bool> {
+        self.is_native_provider(id).then(|| self.provider_auth(id).is_some_and(|auth| auth.has_api_key()))
     }
 
     /// Login options sorted by name; `auth_type` limits them to one method.
@@ -84,11 +92,20 @@ impl ModelRuntime {
         for id in self.login_provider_ids() {
             let oauth = self.resolver().oauth(&id);
             let api_key = self.supports_api_key_login(&id);
-            let ambient = !api_key && id != crate::llama::LLAMA_PROVIDER_ID && self.provider_auth(&id).is_some();
+            let native = self.native_api_key_auth(&id);
+            let ambient = !api_key
+                && id != crate::llama::LLAMA_PROVIDER_ID
+                && native.unwrap_or_else(|| self.provider_auth(&id).is_some());
             if oauth.is_none() && !api_key && !ambient {
                 continue;
             }
-            let status = self.resolver().check(&id).await.ok().flatten();
+            let status = match (native, self.provider_auth(&id)) {
+                (Some(_), Some(auth)) => {
+                    let stored = self.resolver().store().read(&id).await.ok().flatten();
+                    auth.check_source(stored.as_ref()).await
+                }
+                _ => self.resolver().check(&id).await.ok().flatten(),
+            };
             let name = self.provider_display_name(&id);
             let subscription = oauth.as_ref().is_some_and(|oauth| oauth.is_subscription());
             if let Some(oauth) = oauth.filter(|_| auth_type != Some(AuthType::ApiKey)) {
@@ -177,6 +194,10 @@ impl ModelRuntime {
             AuthType::ApiKey => {
                 if !self.supports_api_key_login(provider) {
                     return Err(AuthError::other(format!("{name} does not support api_key login")));
+                }
+                if let Some(auth) = self.provider_auth(provider).filter(|_| self.is_native_provider(provider)) {
+                    let credential = auth.login(interaction, cancel.clone()).await?;
+                    return self.store_login(provider, Credential::ApiKey(credential), &cancel).await;
                 }
                 if let Some(credential) =
                     super::login_flows::custom_api_key_login(provider, interaction, &cancel).await?

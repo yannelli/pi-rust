@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::backend::ExtensionRuntime;
 use super::inline::InlineExtension;
-use super::provider::LoginRequest;
+use super::login_bridge::LoginRequest;
 use super::registry::Registry;
 use super::{modules, ops};
 use crate::agent_session::{AgentSession, AgentSessionRuntime, ModelRuntime, lock};
@@ -113,6 +113,7 @@ pub struct ExtensionRunner {
     /// APIs this runner replaced: the replaced implementation and the owning provider.
     pub(crate) apis: Mutex<HashMap<String, ReplacedApi>>,
     pub(crate) logins: Mutex<HashMap<u64, mpsc::UnboundedSender<LoginRequest>>>,
+    pub(crate) native: super::native_provider::NativeState,
     pub(crate) virtual_models: Mutex<Vec<(String, String)>>,
     pub(crate) inline: Mutex<Vec<Arc<dyn InlineExtension>>>,
     /// Extension paths that registered tools with the session.
@@ -222,6 +223,7 @@ impl ExtensionRunner {
                 providers: Mutex::default(),
                 apis: Mutex::default(),
                 logins: Mutex::default(),
+                native: Default::default(),
                 virtual_models: Mutex::default(),
                 inline: Mutex::default(),
                 tool_paths: Mutex::default(),
