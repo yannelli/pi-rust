@@ -9,6 +9,7 @@ impl AgentSession {
     /// and tool patch of the run's options (MCP ready, no `before_agent_start` handlers).
     pub(crate) async fn antigravity_context(&self) -> Context {
         let options = self.turn_prompt_options().await;
+        self.refresh_loadout_hooks(&options.selected_tools).await;
         let mut messages = self.projected_context().messages;
         if let Some(update) = self.prepare_prompt_and_tool_loadout(&options, &messages) {
             messages.push(Message::System(update));

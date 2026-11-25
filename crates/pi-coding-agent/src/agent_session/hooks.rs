@@ -29,6 +29,7 @@ impl AgentSession {
         self.compact_before_next_response().await;
         self.mcp_turn_start().await;
         let options = self.effective_prompt_options();
+        self.refresh_loadout_hooks(&options.selected_tools).await;
         let context = self.projected_context();
         let update = self.prepare_prompt_and_tool_loadout(&options, &context.messages);
         let (model, thinking_level) = self.with_state(|state| (state.model.clone(), state.thinking_level));

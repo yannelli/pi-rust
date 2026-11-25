@@ -184,6 +184,10 @@ pub trait AgentTool: AsAnyTool + Send + Sync {
         None
     }
 
+    /// Compute, before a request applies `loadout`, what `prepare_loadout` returns, for a tool
+    /// whose hook cannot run synchronously (such as an extension's JavaScript).
+    async fn refresh_loadout(&self, _loadout: &ToolLoadout) {}
+
     async fn execute(
         &self,
         tool_call_id: &str,

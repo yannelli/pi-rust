@@ -202,6 +202,16 @@ impl AgentSession {
         render_system_prompt(&self.effective_prompt_options()).unwrap_or_default()
     }
 
+    /// Run the asynchronous `prepare_loadout` hooks of the tools `selected` declares, before
+    /// [`Self::prepare_prompt_and_tool_loadout`] applies it. They run outside the tool lock, so a
+    /// hook can read the session's tools, as upstream's synchronous hooks can.
+    pub(crate) async fn refresh_loadout_hooks(&self, selected: &[String]) {
+        let loadout = lock(&self.tools).loadout_for(selected);
+        for tool in &loadout.declared {
+            tool.refresh_loadout(&loadout).await;
+        }
+    }
+
     /// Apply the loadout of `options` and return a system message patching the prompt sections and
     /// tool declarations the model has (replayed from `messages`), or `None` when nothing changed.
     pub(crate) fn prepare_prompt_and_tool_loadout(
