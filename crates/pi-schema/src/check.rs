@@ -1,7 +1,5 @@
 //! JSON Schema checks with TypeBox's keyword order and error messages (`en_US` locale).
 
-use std::collections::HashSet;
-
 use regex::Regex;
 use serde_json::{Map, Value};
 
@@ -21,13 +19,17 @@ pub struct SchemaError {
 }
 
 /// A numeric bound keyword, its comparison as TypeBox prints it, and the passing test.
-type BoundCheck = (&'static str, &'static str, fn(f64, f64) -> bool);
+pub(crate) type BoundCheck = (&'static str, &'static str, fn(f64, f64) -> bool);
 
 pub struct Checker<'a> {
     root: &'a Value,
     pub errors: Vec<SchemaError>,
     /// The `$ref` targets being checked, each with the value it is checked on, as addresses.
     following: Vec<(usize, usize)>,
+    /// A `$ref` that names nothing fails instead of passing (pi-schema's `unresolvedRefs: "reject"`).
+    reject_unresolved: bool,
+    /// Stop at the first error: only whether the value passes counts.
+    first_error_only: bool,
 }
 
 /// Numbers as JavaScript prints them: integers without a fraction.
@@ -68,23 +70,60 @@ pub fn json_equal(left: &Value, right: &Value) -> bool {
     }
 }
 
+/// The subschema of `schema` whose `$id` is `id`.
+fn find_id<'a>(schema: &'a Value, id: &str) -> Option<&'a Value> {
+    match schema {
+        Value::Object(object) if object.get("$id").and_then(Value::as_str) == Some(id) => Some(schema),
+        Value::Object(object) => object.values().find_map(|child| find_id(child, id)),
+        Value::Array(items) => items.iter().find_map(|child| find_id(child, id)),
+        _ => None,
+    }
+}
+
+/// A URI fragment with `%XX` escapes decoded.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let escaped = (bytes[index] == b'%').then(|| text.get(index + 1..index + 3)).flatten();
+        match escaped.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+            Some(byte) => {
+                out.push(byte);
+                index += 3;
+            }
+            None => {
+                out.push(bytes[index]);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn regex(pattern: &str) -> Option<Regex> {
     Regex::new(pattern).ok()
 }
 
 impl<'a> Checker<'a> {
     pub fn new(root: &'a Value) -> Self {
-        Self { root, errors: Vec::new(), following: Vec::new() }
+        Self { root, errors: Vec::new(), following: Vec::new(), reject_unresolved: false, first_error_only: false }
+    }
+
+    /// A checker on which a `$ref` that names nothing rejects the values at its place.
+    pub fn rejecting_unresolved_refs(mut self) -> Self {
+        self.reject_unresolved = true;
+        self
     }
 
     /// A checker without errors that knows the `$ref` targets this one is in.
     fn nested(&self) -> Self {
-        Self { root: self.root, errors: Vec::new(), following: self.following.clone() }
+        Self { errors: Vec::new(), following: self.following.clone(), ..*self }
     }
 
     /// Whether `value` matches `schema`, without keeping errors.
     pub fn is_valid(&self, value: &Value, schema: &Value) -> bool {
-        self.nested().check(value, schema, "")
+        Self { first_error_only: true, ..self.nested() }.check(value, schema, "")
     }
 
     fn add(&mut self, keyword: &'static str, path: &str, message: String) -> bool {
@@ -94,15 +133,16 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// Resolve a local `$ref` (`#`, `#/$defs/x`, `#/definitions/x`) against the root schema.
-    fn resolve(&self, reference: &str) -> Option<&'a Value> {
-        let pointer = reference.strip_prefix('#')?;
+    /// Resolve a local `$ref` (`#`, `#/$defs/x`, `#/definitions/x`) against the root schema, or a
+    /// subschema whose `$id` is the reference.
+    pub(crate) fn resolve(&self, reference: &str) -> Option<&'a Value> {
+        let Some(pointer) = reference.strip_prefix('#') else { return find_id(self.root, reference) };
         if pointer.is_empty() {
             return Some(self.root);
         }
         let mut current = self.root;
         for token in pointer.trim_start_matches('/').split('/') {
-            let token = token.replace("~1", "/").replace("~0", "~");
+            let token = percent_decode(token).replace("~1", "/").replace("~0", "~");
             current = match current {
                 Value::Object(object) => object.get(&token)?,
                 Value::Array(items) => items.get(token.parse::<usize>().ok()?)?,
@@ -114,7 +154,7 @@ impl<'a> Checker<'a> {
 
     /// Check `value` against `schema`, collecting errors; every keyword runs, like TypeBox.
     pub fn check(&mut self, value: &Value, schema: &Value, path: &str) -> bool {
-        if self.errors.len() >= MAX_ERRORS {
+        if self.errors.len() >= MAX_ERRORS || (self.first_error_only && !self.errors.is_empty()) {
             return false;
         }
         let schema = match schema {
@@ -134,22 +174,28 @@ impl<'a> Checker<'a> {
             ok &= self.add("type", path, message);
         }
         match value {
-            Value::Object(object) => ok &= self.check_object(object, schema, path),
+            Value::Object(object) => ok &= self.check_object(value, object, schema, path),
             Value::Array(items) => ok &= self.check_array(items, schema, path),
             Value::String(text) => ok &= self.check_string(text, schema, path),
             Value::Number(number) => ok &= self.check_number(number.as_f64().unwrap_or_default(), schema, path),
             _ => {}
         }
-        if let Some(target) = schema.get("$ref").and_then(Value::as_str)
-            && let Some(resolved) = self.resolve(target)
-        {
-            // The same schema on the same value again is a `$ref` cycle. It adds no constraint, and
-            // following it would not end: schemas come from tools and servers.
-            let step = (std::ptr::from_ref(resolved).addr(), std::ptr::from_ref(value).addr());
-            if !self.following.contains(&step) {
-                self.following.push(step);
-                ok &= self.check(value, resolved, path);
-                self.following.pop();
+        if let Some(target) = schema.get("$ref").and_then(Value::as_str) {
+            match self.resolve(target) {
+                Some(resolved) => {
+                    // The same schema on the same value again is a `$ref` cycle. It adds no constraint, and
+                    // following it would not end: schemas come from tools and servers.
+                    let step = (std::ptr::from_ref(resolved).addr(), std::ptr::from_ref(value).addr());
+                    if !self.following.contains(&step) {
+                        self.following.push(step);
+                        ok &= self.check(value, resolved, path);
+                        self.following.pop();
+                    }
+                }
+                None if self.reject_unresolved => {
+                    ok &= self.add("$ref", path, format!("unresolved reference {target}"));
+                }
+                None => {}
             }
         }
         if let Some(expected) = schema.get("const")
@@ -243,7 +289,13 @@ impl<'a> Checker<'a> {
         patterns.iter().filter_map(|(pattern, schema)| Some((regex(pattern)?, schema))).collect()
     }
 
-    fn check_object(&mut self, object: &Map<String, Value>, schema: &Map<String, Value>, path: &str) -> bool {
+    fn check_object(
+        &mut self,
+        value: &Value,
+        object: &Map<String, Value>,
+        schema: &Map<String, Value>,
+        path: &str,
+    ) -> bool {
         let mut ok = true;
         if let Some(Value::Array(required)) = schema.get("required") {
             let missing: Vec<String> = required
@@ -275,10 +327,15 @@ impl<'a> Checker<'a> {
                 ok &= self.add("additionalProperties", path, "must not have additional properties".into());
             }
         }
-        if let Some(Value::Object(dependent)) = schema.get("dependentRequired") {
+        // Draft 7's `dependencies` holds both forms: property lists and schemas.
+        for keyword in ["dependentRequired", "dependencies", "dependentSchemas"] {
+            let Some(Value::Object(dependent)) = schema.get(keyword) else { continue };
             for (property, dependencies) in dependent.iter().filter(|(property, _)| object.contains_key(*property)) {
-                let names: Vec<&str> =
-                    dependencies.as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                let Value::Array(names) = dependencies else {
+                    ok &= self.check(value, dependencies, path);
+                    continue;
+                };
+                let names: Vec<&str> = names.iter().filter_map(Value::as_str).collect();
                 if names.iter().any(|name| !object.contains_key(*name)) {
                     let message =
                         format!("must have properties {} when property {property} is present", names.join(", "));
@@ -364,11 +421,10 @@ impl<'a> Checker<'a> {
         for (index, (item, item_schema)) in items.iter().zip(prefix).enumerate() {
             ok &= self.check(item, item_schema, &format!("{path}/{index}"));
         }
-        if schema.get("uniqueItems") == Some(&Value::Bool(true)) {
-            let distinct: HashSet<String> = items.iter().map(Value::to_string).collect();
-            if distinct.len() != items.len() {
-                ok &= self.add("uniqueItems", path, "must not have duplicate items".into());
-            }
+        if schema.get("uniqueItems") == Some(&Value::Bool(true))
+            && (1..items.len()).any(|index| items[..index].iter().any(|earlier| json_equal(earlier, &items[index])))
+        {
+            ok &= self.add("uniqueItems", path, "must not have duplicate items".into());
         }
         ok
     }

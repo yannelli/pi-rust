@@ -1,9 +1,13 @@
 //! TypeBox-compatible JSON Schema handling for pi-ai and pi-chord: checks with TypeBox's keyword
-//! order and `en_US` error messages, and TypeBox's `Value.Default` and `Value.Clean`.
+//! order and `en_US` error messages, and TypeBox's `Value.Default` and `Value.Clean`. Tool
+//! arguments use [`parse`]: upstream pi-schema's coercion and error messages.
 
 mod check;
 mod clean;
+mod coerce;
+mod convert;
 mod default;
+mod explain;
 mod formats;
 mod kind;
 
@@ -12,6 +16,24 @@ use serde_json::Value;
 pub use check::{Checker, SchemaError, js_number, json_equal, matches_type};
 pub use clean::clean;
 pub use default::default_value;
+pub use explain::ValidationError;
+
+/// Upstream pi-schema's `compile(schema, { coerce: true, unresolvedRefs: "reject" }).coerce(value)`:
+/// `value` coerced towards the schema. A `$ref` that names nothing rejects only the values at its
+/// place.
+pub fn coerce(schema: &Value, value: &Value) -> Value {
+    coerce::Coercer::new(schema).coerce(value)
+}
+
+/// Upstream pi-schema's `parse()` with the options of [`coerce`]: the coerced value when it is
+/// valid, else the errors of the coerced value.
+pub fn parse(schema: &Value, value: &Value) -> Result<Value, Vec<ValidationError>> {
+    let value = coerce(schema, value);
+    if Checker::new(schema).rejecting_unresolved_refs().is_valid(&value, schema) {
+        return Ok(value);
+    }
+    Err(explain::Explainer::new(schema).errors(schema, &value))
+}
 
 /// TypeBox `Value.Check(schema, value)`.
 pub fn check(schema: &Value, value: &Value) -> bool {
