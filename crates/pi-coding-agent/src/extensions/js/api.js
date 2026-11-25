@@ -542,7 +542,23 @@ export function createExtensionAPI(extension, runtime, cwd, eventBus) {
 			},
 			on(channel, handler) {
 				assertActive();
-				const unsubscribe = runtime.track(eventBus.on(channel, handler));
+				// Report a throwing handler like other extension errors: the event bus would print it with
+				// console.error over the TUI (upstream #11264). A replaced session reports nothing.
+				const reporting = async (data) => {
+					try {
+						await handler(data);
+					} catch (error) {
+						if (runtime.staleMessage) return;
+						const isError = error instanceof Error;
+						call("error", {
+							extensionPath: extension.path,
+							event: `events:${channel}`,
+							error: isError ? error.message : String(error),
+							stack: (isError && error.stack) || null,
+						});
+					}
+				};
+				const unsubscribe = runtime.track(eventBus.on(channel, reporting));
 				if (state === "loading") loadingUnsubscribers.push(unsubscribe);
 				return unsubscribe;
 			},

@@ -632,3 +632,22 @@ async fn an_abort_requested_while_before_agent_start_runs_aborts_the_run() {
     assert!(matches!(&last, Message::Assistant(message) if message.stop_reason == StopReason::Aborted), "{last:?}");
     assert!(h.session.is_idle());
 }
+
+// Upstream #11264: a throwing `pi.events` handler is an extension error, not console output.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_throwing_pi_events_handler_is_reported_as_an_extension_error() {
+    let source = r#"export default function (pi) {
+	pi.events.on("test:boom", () => {
+		throw new Error("handler failed");
+	});
+	pi.registerCommand("boom", { handler: async () => pi.events.emit("test:boom", undefined) });
+}
+"#;
+    let h = harness(Setup { files: vec![("boom.ts", source.into())], load: vec!["boom.ts"], ..Setup::default() }).await;
+    h.session.prompt("/boom", Vec::new()).await.unwrap();
+    eventually(|| !h.errors().is_empty()).await;
+    assert_eq!(h.errors(), vec!["events:test:boom: handler failed"]);
+    let errors = h.errors.lock().unwrap();
+    assert!(errors[0].extension_path.ends_with("boom.ts"), "{:?}", errors[0]);
+    assert!(errors[0].stack.as_deref().is_some_and(|stack| stack.contains("boom.ts")), "{:?}", errors[0]);
+}
