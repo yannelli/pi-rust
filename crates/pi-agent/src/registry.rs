@@ -231,9 +231,9 @@ impl ToolRegistry {
         }
     }
 
-    /// Activate `names` (unknown, hidden, and filtered names are ignored) and return the declared
-    /// tools. Active tools' `prepare_loadout` hooks may change descriptions and hide declarations.
-    pub fn set_active_tools<S: AsRef<str>>(&mut self, names: &[S]) -> Vec<SharedTool> {
+    /// The loadout that activating `names` declares (unknown, hidden, filtered, and repeated names
+    /// are ignored).
+    pub fn loadout_for<S: AsRef<str>>(&self, names: &[S]) -> ToolLoadout {
         let mut seen = HashSet::new();
         let tools: Vec<SharedTool> = names
             .iter()
@@ -241,7 +241,14 @@ impl ToolRegistry {
             .filter(|name| seen.insert(name.to_string()) && self.is_activatable(name))
             .filter_map(|name| self.get(name).cloned())
             .collect();
-        let loadout = self.loadout(tools.clone());
+        self.loadout(tools)
+    }
+
+    /// Activate `names` (unknown, hidden, and filtered names are ignored) and return the declared
+    /// tools. Active tools' `prepare_loadout` hooks may change descriptions and hide declarations.
+    pub fn set_active_tools<S: AsRef<str>>(&mut self, names: &[S]) -> Vec<SharedTool> {
+        let loadout = self.loadout_for(names);
+        let tools = loadout.declared.clone();
         let mut descriptions = BTreeMap::new();
         let mut hidden: Vec<String> = Vec::new();
         for changes in tools.iter().filter_map(|tool| tool.prepare_loadout(&loadout)) {

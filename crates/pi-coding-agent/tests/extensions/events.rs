@@ -651,3 +651,83 @@ async fn a_throwing_pi_events_handler_is_reported_as_an_extension_error() {
     assert!(errors[0].extension_path.ends_with("boom.ts"), "{:?}", errors[0]);
     assert!(errors[0].stack.as_deref().is_some_and(|stack| stack.contains("boom.ts")), "{:?}", errors[0]);
 }
+
+// A `prepareLoadout` hook can read the session's tools, also after an action changed the loadout
+// from the extension (pi-deferred-context-engine calls `pi.getAllTools()` in its hook).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_prepare_loadout_hook_reads_the_session_tools_and_hides_declarations() {
+    let body = r#"
+	pi.registerTool({
+		name: "lister", label: "Lister", description: "Lists", parameters: Type.Object({}),
+		prepareLoadout() {
+			const all = pi.getAllTools().map((tool) => tool.name);
+			const active = pi.getActiveTools();
+			return { descriptions: { lister: `sees probe: ${all.includes("probe")}, active: ${active.includes("lister")}` }, hiddenDeclarations: ["probe"] };
+		},
+		async execute() { return { content: [{ type: "text", text: "listed" }] }; },
+	});
+	pi.on("session_start", () => pi.setActiveTools(pi.getActiveTools()));
+"#;
+    let h = harness(Setup {
+        files: vec![("lister.ts", with_probe(body))],
+        load: vec!["lister.ts"],
+        responses: vec![FauxResponse::text("ok")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("question", Vec::new()).await.unwrap();
+    assert_eq!(h.errors(), Vec::<String>::new());
+    let request = h.provider.requests().pop().expect("request");
+    let declared: Vec<(String, String)> = request.tools.into_iter().map(|tool| (tool.name, tool.description)).collect();
+    assert!(declared.contains(&("lister".into(), "sees probe: true, active: true".into())), "{declared:?}");
+    assert!(!declared.iter().any(|(name, _)| name == "probe"), "{declared:?}");
+}
+
+// A run that continues after `agent_before_settle` runs the hooks of the loadout a handler set.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_continued_run_sends_the_prepare_loadout_result_of_the_new_loadout() {
+    let body = r#"
+	pi.registerTool({
+		name: "lister", label: "Lister", description: "Lists", parameters: Type.Object({}),
+		prepareLoadout: () => ({ descriptions: { lister: `probe active: ${pi.getActiveTools().includes("probe")}` } }),
+		async execute() { return { content: [{ type: "text", text: "listed" }] }; },
+	});
+	let settled = 0;
+	pi.on("agent_before_settle", (event) => {
+		settled += 1;
+		if (settled !== 1) return undefined;
+		pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "probe"));
+		const nudge = { type: "custom_message", customType: "nudge", content: "again", display: true };
+		return { entries: [...event.entries, nudge], continue: true };
+	});
+"#;
+    let h = harness(Setup {
+        files: vec![("lister.ts", with_probe(body))],
+        load: vec!["lister.ts"],
+        responses: vec![FauxResponse::text("first"), FauxResponse::text("second")],
+        ..Setup::default()
+    })
+    .await;
+    h.session.prompt("question", Vec::new()).await.unwrap();
+    assert_eq!(h.errors(), Vec::<String>::new());
+    let descriptions: Vec<Vec<(String, String)>> = h
+        .provider
+        .requests()
+        .into_iter()
+        .map(|request| {
+            request
+                .tools
+                .into_iter()
+                .filter(|tool| tool.name == "lister")
+                .map(|tool| (tool.name, tool.description))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        descriptions,
+        vec![
+            vec![("lister".into(), "probe active: true".into())],
+            vec![("lister".into(), "probe active: false".into())]
+        ]
+    );
+}

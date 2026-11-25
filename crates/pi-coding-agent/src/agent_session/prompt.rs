@@ -278,6 +278,7 @@ impl AgentSession {
             }
             RunTrigger::Custom(message) => vec![message.clone().into_message()],
         };
+        self.refresh_loadout_hooks(&prompt_options.selected_tools).await;
         messages.append(&mut lock(&self.state).pending_next_turn);
         messages.extend(extra);
         let update = self.prepare_prompt_and_tool_loadout(&prompt_options, &self.messages());

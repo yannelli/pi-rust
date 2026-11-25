@@ -75,8 +75,18 @@ impl AgentSession {
     }
 
     async fn drive_queued(&self) -> anyhow::Result<()> {
-        self.agent.continue_run().await?;
+        self.continue_agent_run().await?;
         self.drive_continuations().await
+    }
+
+    /// Continue the agent with the hooks of the current loadout run first, as a new run does: its
+    /// first request does not go through `prepare_next_turn`.
+    async fn continue_agent_run(&self) -> anyhow::Result<()> {
+        let active = lock(&self.tools).registry.active_names();
+        self.refresh_loadout_hooks(&active).await;
+        lock(&self.tools).set_active(&active);
+        self.sync_agent_tools();
+        self.agent.continue_run().await
     }
 
     async fn drive_continuations(&self) -> anyhow::Result<()> {
@@ -85,13 +95,13 @@ impl AgentSession {
                 if self.abort_requested() {
                     break;
                 }
-                self.agent.continue_run().await?;
+                self.continue_agent_run().await?;
                 continue;
             }
             if self.abort_requested() || !self.before_settle_boundary().await || self.abort_requested() {
                 break;
             }
-            self.agent.continue_run().await?;
+            self.continue_agent_run().await?;
         }
         Ok(())
     }

@@ -7,7 +7,8 @@ use std::path::Path;
 use std::sync::{Arc, Weak};
 
 use pi_agent::{
-    ActivationFilter, RefreshOptions, SharedTool, ToolAnnotations, ToolExposure, ToolNamespace, ToolRegistry,
+    ActivationFilter, RefreshOptions, SharedTool, ToolAnnotations, ToolExposure, ToolLoadout, ToolNamespace,
+    ToolRegistry,
 };
 use pi_mcp::naming::is_mcp_tool_name;
 use serde_json::Value;
@@ -254,13 +255,23 @@ impl ToolState {
     /// loadout was deactivated, which replaces that loadout (upstream `setActiveToolsByName`).
     pub fn set_active(&mut self, names: &[String]) -> bool {
         let previous = self.registry.active_names();
-        let requested: HashSet<&str> = names.iter().map(String::as_str).collect();
-        let kept = previous.iter().filter(|name| requested.contains(name.as_str()));
-        let ordered: Vec<&str> = kept.chain(names).map(String::as_str).collect();
-        self.registry.set_active_tools(&ordered);
+        self.registry.set_active_tools(&self.ordered(names));
         self.after_loadout();
         let active: HashSet<String> = self.registry.active_names().into_iter().collect();
         previous.iter().any(|name| !active.contains(name) && self.restored.contains(name))
+    }
+
+    /// The loadout [`Self::set_active`] applies for `names`.
+    pub fn loadout_for(&self, names: &[String]) -> ToolLoadout {
+        self.registry.loadout_for(&self.ordered(names))
+    }
+
+    /// Tools that stay active keep their order; newly active ones follow (upstream #11495).
+    fn ordered(&self, names: &[String]) -> Vec<String> {
+        let requested: HashSet<&str> = names.iter().map(String::as_str).collect();
+        let previous = self.registry.active_names();
+        let kept = previous.into_iter().filter(|name| requested.contains(name.as_str()));
+        kept.chain(names.iter().cloned()).collect()
     }
 
     fn after_loadout(&mut self) {

@@ -1,7 +1,7 @@
 //! Tools registered by extensions (upstream `wrapRegisteredTool`): the agent sees an `AgentTool`
 //! whose execution, argument preparation, and loadout hook run the extension's JavaScript.
 
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -16,7 +16,7 @@ use super::registry::ToolDescriptor;
 use super::runner::ExtensionRunner;
 use crate::agent_session::lock;
 
-/// How long synchronous hooks (`prepareArguments`, `prepareLoadout`) may take.
+/// How long the hooks `prepareArguments`, `reachesTools`, and `prepareLoadout` may take.
 const HOOK_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct ExtensionTool {
@@ -26,6 +26,8 @@ pub struct ExtensionTool {
     namespace: Option<ToolNamespace>,
     annotations: Option<ToolAnnotations>,
     guidelines: Vec<String>,
+    /// What `prepareLoadout` returned before the last request.
+    loadout_changes: Mutex<Option<ToolLoadoutChanges>>,
     /// An SDK `customTools` entry: its key in the host and the session target its calls see.
     sdk: Option<(u64, u64)>,
     /// The native tool of a factory tool (`descriptor.native`), whose hooks run in Rust.
@@ -48,6 +50,7 @@ impl ExtensionTool {
             namespace: parse(&descriptor.namespace),
             annotations: parse(&descriptor.annotations),
             guidelines: descriptor.prompt_guidelines.clone().unwrap_or_default(),
+            loadout_changes: Mutex::new(None),
             descriptor,
             sdk: None,
         }
@@ -93,6 +96,20 @@ impl ExtensionTool {
             }
         }
     }
+}
+
+/// A `prepareLoadout` result; `null` changes nothing.
+fn loadout_changes(changes: Value) -> Option<ToolLoadoutChanges> {
+    if changes.is_null() {
+        return None;
+    }
+    let descriptions = changes["descriptions"]
+        .as_object()
+        .map(|map| map.iter().filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string()))).collect())
+        .unwrap_or_default();
+    let hidden = changes["hiddenDeclarations"].as_array().cloned().unwrap_or_default();
+    let hidden_declarations = hidden.iter().filter_map(|name| name.as_str().map(str::to_string)).collect();
+    Some(ToolLoadoutChanges { descriptions, hidden_declarations })
 }
 
 /// A `reachesTools` result: `"all"`, or the words of the input that may name tools.
@@ -219,17 +236,34 @@ impl AgentTool for ExtensionTool {
         if !self.descriptor.has_prepare_loadout {
             return self.native.as_ref().and_then(|native| native.prepare_loadout(loadout));
         }
-        let changes = self.blocking_hook("prepareLoadout", vec![loadout_json(loadout)])?;
-        if changes.is_null() {
-            return None;
+        lock(&self.loadout_changes).clone()
+    }
+
+    /// Run the JavaScript hook before a request, outside the session's locks: a hook may call
+    /// `pi.getAllTools()` and other actions, which a blocking call from the session would deadlock.
+    async fn refresh_loadout(&self, loadout: &ToolLoadout) {
+        if !self.descriptor.has_prepare_loadout {
+            return;
         }
-        let descriptions = changes["descriptions"]
-            .as_object()
-            .map(|map| map.iter().filter_map(|(key, value)| Some((key.clone(), value.as_str()?.to_string()))).collect())
-            .unwrap_or_default();
-        let hidden = changes["hiddenDeclarations"].as_array().cloned().unwrap_or_default();
-        let hidden_declarations = hidden.iter().filter_map(|name| name.as_str().map(str::to_string)).collect();
-        Some(ToolLoadoutChanges { descriptions, hidden_declarations })
+        let Some(runner) = self.runner.upgrade() else { return };
+        let (method, args) = self.host_call("prepareLoadout", vec![loadout_json(loadout)]);
+        let call = runner.call_json(method, args);
+        let result = tokio::time::timeout(HOOK_TIMEOUT, call).await.unwrap_or_else(|_| {
+            Err(pi_js::JsError::new(format!("prepareLoadout took longer than {} ms", HOOK_TIMEOUT.as_millis())))
+        });
+        let changes = match result {
+            Ok(changes) => loadout_changes(changes),
+            Err(error) => {
+                runner.emit_error(super::runner::ExtensionError {
+                    extension_path: self.descriptor.extension_path.clone(),
+                    event: "prepare_loadout".into(),
+                    error: error.message,
+                    stack: error.stack,
+                });
+                None
+            }
+        };
+        *lock(&self.loadout_changes) = changes;
     }
 
     async fn execute(
