@@ -47,8 +47,10 @@ impl AgentSession {
     pub fn set_active_tools_by_name(&self, names: &[String]) {
         {
             let mut tools = lock(&self.tools);
-            // A loadout that deactivates a tool replaces the restored one, whose pending tools are
-            // dropped. One that only adds tools, like a `tool_search` load, keeps them.
+            // A loadout that deactivates a tool of the restored one replaces it, and its pending tools
+            // are dropped. One that only adds tools, like a `tool_search` load, keeps them, and so does
+            // one that only deactivates tools outside the restored loadout, such as an extension's own
+            // tool that the restore or reload activated as newly registered (upstream #11996).
             if tools.set_active(names) {
                 tools.pending.clear();
             }
@@ -143,7 +145,9 @@ impl AgentSession {
                 .collect()
         };
         if systems.is_empty() {
-            lock(&self.tools).pending.clear();
+            let mut tools = lock(&self.tools);
+            tools.pending.clear();
+            tools.restored.clear();
             return;
         }
         let mentioned: HashSet<String> = systems
@@ -158,6 +162,7 @@ impl AgentSession {
             })
             .collect();
         let mut declared: Vec<String> = current_tools(&systems).into_iter().map(|tool| tool.name).collect();
+        let restored = apply_tool_modifiers(&declared, modifiers);
         {
             // Built-in tools follow `defaultTools` instead.
             let tools = lock(&self.tools);
@@ -174,6 +179,7 @@ impl AgentSession {
             // connecting, become active when they register. Excluded tools never register.
             let mut tools = lock(&self.tools);
             tools.pending = names.iter().filter(|name| tools.is_allowed(name)).cloned().collect();
+            tools.restored = restored.into_iter().collect();
             tools.set_active(&names);
         }
         self.sync_agent_tools();

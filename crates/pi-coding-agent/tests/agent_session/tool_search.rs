@@ -6,12 +6,13 @@ use std::time::Duration;
 
 use pi_ai::Message;
 use pi_ai::providers::faux::FauxResponse;
-use pi_coding_agent::agent_session::NavigateTreeOptions;
+use pi_coding_agent::agent_session::{AgentSession, NavigateTreeOptions, ToolSource};
 use pi_coding_agent::session::SessionManager;
 use serde_json::json;
 
 use crate::agent_session::harness::{Options, harness, open_session_with, wait_until};
 use crate::agent_session::mcp_fake::{Fake, FakeOptions};
+use crate::agent_session::tool_registry::tool;
 use crate::agent_session::tool_support::{SetupOptions, declared_description, result_text, setup, tool_result};
 
 fn load_responses(provider: &pi_ai::providers::faux::FauxProvider) {
@@ -156,6 +157,39 @@ async fn declares_tools_tool_search_loaded_again_after_reload() {
     s.h.session.reload();
     wait_until(|| s.fake.connected.lock().unwrap().len() == 2).await;
     wait_until(|| s.h.session.active_tool_names().contains(&"mcp__docs__search".to_string())).await;
+}
+
+/// Register `loader` as an extension tool and turn it off again, as extensions that hide their own
+/// loader tool at `session_start` do (upstream #11996).
+fn drop_loader(session: &AgentSession) {
+    session.register_tool(tool("loader", true), ToolSource::extension("<inline:loader>", "inline"));
+    let active: Vec<String> = session.active_tool_names().into_iter().filter(|name| name != "loader").collect();
+    session.set_active_tools_by_name(&active);
+}
+
+#[tokio::test]
+async fn keeps_restored_tools_when_an_extension_deactivates_only_its_own_tool_before_they_register() {
+    let first = setup(json!({ "exposure": "deferred" }), SetupOptions::default()).await;
+    load_responses(&first.h.provider);
+    first.h.session.prompt("load", Vec::new()).await.unwrap();
+
+    let (second, _fake) = resume(&first, Duration::from_millis(200)).await;
+    drop_loader(&second);
+    wait_until(|| second.active_tool_names().contains(&"mcp__docs__search".to_string())).await;
+    assert!(!second.active_tool_names().contains(&"loader".to_string()));
+}
+
+#[tokio::test]
+async fn keeps_tools_tool_search_loaded_after_reload_when_an_extension_deactivates_only_its_own_tool() {
+    let s = setup(json!({ "exposure": "deferred" }), SetupOptions::default()).await;
+    load_responses(&s.h.provider);
+    s.h.session.prompt("load", Vec::new()).await.unwrap();
+
+    s.h.session.reload();
+    drop_loader(&s.h.session);
+    wait_until(|| s.fake.connected.lock().unwrap().len() == 2).await;
+    wait_until(|| s.h.session.active_tool_names().contains(&"mcp__docs__search".to_string())).await;
+    assert!(!s.h.session.active_tool_names().contains(&"loader".to_string()));
 }
 
 #[tokio::test]

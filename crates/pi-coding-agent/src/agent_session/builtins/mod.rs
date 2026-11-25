@@ -211,7 +211,9 @@ impl AgentSession {
     fn stop_mcp_keeping_loadout(&self) -> Option<McpManager> {
         {
             let mut tools = lock(&self.tools);
-            for name in tools.registry.active_names() {
+            let active = tools.registry.active_names();
+            tools.restored = active.iter().cloned().collect();
+            for name in active {
                 if !tools.pending.contains(&name) {
                     tools.pending.push(name);
                 }
