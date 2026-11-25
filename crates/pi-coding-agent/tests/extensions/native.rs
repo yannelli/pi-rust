@@ -533,8 +533,12 @@ async fn exec_caps_output_at_max_buffer_and_validates_it() {
     let (h, _ui) = native(Vec::new()).await;
     h.session.prompt("/native-exec-cap", Vec::new()).await.unwrap();
     let start = &env!("CARGO_PKG_VERSION")[..3];
-    let capped = json!({"stdout": start, "stderr": "", "code": 1, "killed": true, "truncated": true});
-    assert_eq!(entry_data(&h, "native-exec-cap"), Some(json!({"capped": capped, "invalid": -32602})));
+    let mut data = entry_data(&h, "native-exec-cap").expect("entry");
+    // 1 when the command exits after its pipes close, 143 when the SIGTERM ends it first.
+    let code = data["capped"]["code"].take();
+    assert!(code == json!(1) || code == json!(143), "{code}");
+    let capped = json!({"stdout": start, "stderr": "", "code": null, "killed": true, "truncated": true});
+    assert_eq!(data, json!({"capped": capped, "invalid": -32602}));
 }
 
 #[tokio::test(flavor = "multi_thread")]

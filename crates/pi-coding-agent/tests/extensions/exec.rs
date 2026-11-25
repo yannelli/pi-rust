@@ -111,6 +111,31 @@ async fn a_command_that_ignores_sigterm_is_killed() {
     assert_ne!(result["code"], 0);
 }
 
+// Upstream issue 12088: a signal-terminated command reports 128 + the signal number.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_signal_terminated_command_reports_128_plus_the_signal() {
+    let result = value_of(
+        r#"const idle = ["-c", "sleep 30"];
+		const pick = ({ code, killed, truncated }) => ({ code, killed, truncated });
+		const timeout = await pi.exec("sh", idle, { timeout: 100 });
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 100);
+		const abort = await pi.exec("sh", idle, { signal: controller.signal });
+		const killed = await pi.exec("sh", ["-c", "kill -KILL $$"]);
+		return { timeout: pick(timeout), abort: pick(abort), killed: pick(killed) };"#,
+    )
+    .await;
+    assert_eq!(
+        result,
+        json!({
+            "timeout": {"code": 143, "killed": true, "truncated": false},
+            "abort": {"code": 143, "killed": true, "truncated": false},
+            "killed": {"code": 137, "killed": false, "truncated": false},
+        })
+    );
+}
+
 // Upstream issue 5303 (`waitForChildProcess`): a detached descendant that keeps the pipes open.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
