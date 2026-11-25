@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pi_agent::{
-    AgentTool, AgentToolResult, ToolAnnotations, ToolContext, ToolExecutionMode, ToolExposure, ToolLoadout,
+    AgentTool, AgentToolResult, SharedTool, ToolAnnotations, ToolContext, ToolExecutionMode, ToolExposure, ToolLoadout,
     ToolLoadoutChanges, ToolNamespace, ToolReach, ToolUpdateCallback,
 };
 use serde_json::{Map, Value, json};
@@ -26,6 +26,10 @@ pub struct ExtensionTool {
     namespace: Option<ToolNamespace>,
     annotations: Option<ToolAnnotations>,
     guidelines: Vec<String>,
+    /// An SDK `customTools` entry: its key in the host and the session target its calls see.
+    sdk: Option<(u64, u64)>,
+    /// The native tool of a factory tool (`descriptor.native`), whose hooks run in Rust.
+    native: Option<SharedTool>,
 }
 
 impl ExtensionTool {
@@ -33,25 +37,51 @@ impl ExtensionTool {
         fn parse<T: serde::de::DeserializeOwned>(value: &Option<Value>) -> Option<T> {
             value.clone().and_then(|value| serde_json::from_value(value).ok())
         }
+        let native = descriptor
+            .native
+            .as_ref()
+            .and_then(|native| runner.session()?.factory_tool(native["name"].as_str()?, &native["options"], false));
         Self {
+            native,
             runner: Arc::downgrade(runner),
             exposure: parse(&descriptor.exposure.clone().map(Value::from)).unwrap_or_default(),
             namespace: parse(&descriptor.namespace),
             annotations: parse(&descriptor.annotations),
             guidelines: descriptor.prompt_guidelines.clone().unwrap_or_default(),
             descriptor,
+            sdk: None,
         }
+    }
+
+    /// An SDK custom tool whose definition is entry `key` of `runner`'s host, for session `target`.
+    pub(crate) fn sdk(runner: &Arc<ExtensionRunner>, descriptor: ToolDescriptor, key: u64, target: u64) -> Self {
+        Self { sdk: Some((key, target)), native: None, ..Self::new(runner, descriptor) }
     }
 
     pub fn descriptor(&self) -> &ToolDescriptor {
         &self.descriptor
     }
 
+    /// The host method and arguments of a tool call: by tool name, or by SDK key and target.
+    fn host_call<'a>(&self, method: &'a str, args: Vec<Value>) -> (&'a str, Vec<Value>) {
+        match self.sdk {
+            Some((key, target)) => {
+                ("sdkTool", [json!(key), json!(target), json!(method)].into_iter().chain(args).collect())
+            }
+            None => (method, std::iter::once(json!(self.descriptor.name)).chain(args).collect()),
+        }
+    }
+
+    fn blocking_call(&self, runner: &ExtensionRunner, method: &str, args: Vec<Value>) -> Result<Value, pi_js::JsError> {
+        let (method, args) = self.host_call(method, args);
+        let args = args.into_iter().map(Into::into).collect();
+        runner.host().blocking_call_method_within(method, args, HOOK_TIMEOUT).map(pi_js::HostValue::into_json)
+    }
+
     fn blocking_hook(&self, method: &str, args: Vec<Value>) -> Option<Value> {
         let runner = self.runner.upgrade()?;
-        let args = args.into_iter().map(Into::into).collect();
-        match runner.host().blocking_call_method_within(method, args, HOOK_TIMEOUT) {
-            Ok(value) => Some(value.into_json()),
+        match self.blocking_call(&runner, method, args) {
+            Ok(value) => Some(value),
             Err(error) => {
                 runner.emit_error(super::runner::ExtensionError {
                     extension_path: self.descriptor.extension_path.clone(),
@@ -166,15 +196,15 @@ impl AgentTool for ExtensionTool {
 
     fn reaches_tools(&self, input: &Value) -> Option<ToolReach> {
         if !self.descriptor.has_reaches_tools {
-            return None;
+            return self.native.as_ref().and_then(|native| native.reaches_tools(input));
         }
         // A handler that throws reaches nothing; the error goes to the extension error listeners.
-        let reach = self.blocking_hook("reachesTools", vec![json!(self.descriptor.name), input.clone()]);
+        let reach = self.blocking_hook("reachesTools", vec![input.clone()]);
         Some(reach.as_ref().map_or_else(|| ToolReach::Words(Vec::new()), reach_from_json))
     }
 
     fn declares_reaches_tools(&self) -> bool {
-        self.descriptor.has_reaches_tools
+        self.descriptor.has_reaches_tools || self.native.as_ref().is_some_and(|native| native.declares_reaches_tools())
     }
 
     fn prepare_arguments(&self, args: Value) -> anyhow::Result<Value> {
@@ -182,16 +212,14 @@ impl AgentTool for ExtensionTool {
             return Ok(args);
         }
         let runner = self.runner.upgrade().ok_or_else(|| anyhow::anyhow!("The extension host has shut down"))?;
-        let call_args = vec![json!(self.descriptor.name).into(), args.into()];
-        let prepared = runner.host().blocking_call_method_within("prepareArguments", call_args, HOOK_TIMEOUT);
-        prepared.map(pi_js::HostValue::into_json).map_err(|error| anyhow::anyhow!(error.message))
+        self.blocking_call(&runner, "prepareArguments", vec![args]).map_err(|error| anyhow::anyhow!(error.message))
     }
 
     fn prepare_loadout(&self, loadout: &ToolLoadout) -> Option<ToolLoadoutChanges> {
         if !self.descriptor.has_prepare_loadout {
-            return None;
+            return self.native.as_ref().and_then(|native| native.prepare_loadout(loadout));
         }
-        let changes = self.blocking_hook("prepareLoadout", vec![json!(self.descriptor.name), loadout_json(loadout)])?;
+        let changes = self.blocking_hook("prepareLoadout", vec![loadout_json(loadout)])?;
         if changes.is_null() {
             return None;
         }
@@ -227,8 +255,9 @@ impl AgentTool for ExtensionTool {
         let update_key = runner.next_id();
         lock(&runner.updates).insert(update_key, on_update);
         let signal = runner.signal_for(&cancel);
-        let call = vec![json!(self.descriptor.name), json!(call_id), args, json!(signal), json!(update_key)];
-        let result = runner.call_json("executeTool", call).await;
+        let (method, call) =
+            self.host_call("executeTool", vec![json!(call_id), args, json!(signal), json!(update_key)]);
+        let result = runner.call_json(method, call).await;
         lock(&runner.nested).remove(&call_id);
         lock(&runner.updates).remove(&update_key);
         runner.release_signal(signal);

@@ -14,6 +14,8 @@ mod child;
 pub(crate) struct ChildSession {
     pub session: Arc<AgentSession>,
     pub manager_id: u64,
+    /// The id this host's contexts and SDK custom tools use for the session.
+    pub target: u64,
     /// The child host of the `DefaultResourceLoader` extensions the session bound.
     pub extensions: Option<super::ops_sdk_resources::Hosted>,
 }
@@ -56,6 +58,20 @@ fn context_lines(args: &Args, index: usize) -> usize {
     args.json(index)
         .as_u64()
         .map_or(crate::tools::edit_diff::DEFAULT_CONTEXT_LINES, |n| usize::try_from(n).unwrap_or(usize::MAX))
+}
+
+/// Upstream `resolveCliModel` over the SDK `ModelRuntime` `modelRuntimeId`.
+fn resolve_cli_model(runner: &ExtensionRunner, options: &Value) -> Result<Value, JsError> {
+    let runtime = runner.sdk_model_runtime(options["modelRuntimeId"].as_u64().unwrap_or(0))?;
+    let thinking = match &options["cliThinking"] {
+        Value::Null => None,
+        level => Some(serde_json::from_value(level.clone()).map_err(error)?),
+    };
+    let (provider, model) = (options["cliProvider"].as_str(), options["cliModel"].as_str());
+    let inline_api_key = options["inlineApiKey"].as_bool().unwrap_or(false);
+    let result = crate::model_resolver::resolve_cli_model(provider, model, thinking, inline_api_key, runtime.as_ref());
+    let (thinking_level, warning) = (result.thinking_level, result.warning);
+    Ok(json!({"model": result.model, "thinkingLevel": thinking_level, "warning": warning, "error": result.error}))
 }
 
 pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<HostValue, JsError> {
@@ -102,12 +118,14 @@ pub(crate) fn sync(runner: &ExtensionRunner, name: &str, args: &Args) -> Result<
         "dispose" => {
             let removed = lock(&runner.sdk.children).remove(&args.u64(0));
             if let Some(child) = removed {
+                lock(&runner.targets).remove(&child.target);
                 child::unsubscribe(&runner.sdk, args.u64(0), Some(&child.session));
                 child.session.dispose();
                 lock(&runner.sdk.storage).detach_child(child.manager_id, &child.session);
             }
             Value::Null
         }
+        "resolveCliModel" => resolve_cli_model(runner, &args.json(0))?,
         "read" => child::read(runner.sdk.session(args.u64(0))?.as_ref(), &args.str(1)?)?,
         "control" => child::control(runner, &runner.sdk.session(args.u64(0))?, args)?,
         _ => return Err(JsError::unsupported(&format!("AgentSession.{name}"))),

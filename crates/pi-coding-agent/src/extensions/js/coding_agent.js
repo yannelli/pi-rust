@@ -43,11 +43,14 @@ export {
 export { truncateToVisualLines } from "../pi-coding-agent/src/modes/interactive/components/visual-truncate.ts";
 export { withFileMutationQueue } from "../pi-coding-agent/src/core/tools/file-mutation-queue.ts";
 export * from "./coding_unsupported.js";
+export { createCodemodeExtension, createMcpExtension, createToolSearchExtension } from "./builtin_extensions.js";
 export { parseArgs } from "./cli_args.js";
 export * from "./coding_utils.js";
 export * from "./compaction_utils.js";
 export { createAgentSession } from "./sdk_session.js";
+export { DefaultPackageManager } from "./sdk_packages.js";
 export { DefaultResourceLoader, ModelRegistry, ModelRuntime } from "./sdk_resources.js";
+export { createExtensionRuntime, readStoredCredential, resolveCliModel } from "./sdk_runtime.js";
 export { InMemorySettingsStorage, SessionManager, SettingsManager } from "./sdk_storage.js";
 export {
 	buildContextEntries,

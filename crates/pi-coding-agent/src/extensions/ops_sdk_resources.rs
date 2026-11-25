@@ -63,6 +63,7 @@ struct LoaderData {
     additional_prompt_template_paths: Vec<String>,
     additional_theme_paths: Vec<String>,
     no_extensions: bool,
+    builtin_extensions: Vec<String>,
     disabled_builtin_extensions: Vec<String>,
     no_skills: bool,
     no_prompt_templates: bool,
@@ -124,7 +125,7 @@ fn loader_options(
         ..ResourceOptions::default()
     };
     let mut options = resource_loader_options(&current.cwd, &current.agent_dir, settings, &resources);
-    options.builtin_extensions.clear();
+    options.builtin_extensions = data.builtin_extensions.clone();
     options
 }
 
@@ -252,7 +253,7 @@ async fn reload(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsE
         (resolved, warnings.collect::<Vec<_>>())
     };
     let has_packages = packages != ResolvedPaths::default();
-    let (entries, missing) = {
+    let (entries, missing, builtins) = {
         let mut loader = lock(&*loader);
         loader.options.package_resources = packages;
         loader.resolve_paths();
@@ -261,12 +262,16 @@ async fn reload(runner: &Arc<ExtensionRunner>, args: &Args) -> Result<Value, JsE
             .extension_diagnostics
             .iter()
             .map(|diagnostic| json!({"path": diagnostic.path, "error": diagnostic.message}));
-        (super::loader::load_entries(&resources.extensions), missing.collect::<Vec<_>>())
+        let builtins = resources.extensions.iter().filter_map(|entry| {
+            entry.path.to_str()?.strip_prefix(crate::resources::source_info::BUILTIN_PATH_PREFIX).map(str::to_string)
+        });
+        (super::loader::load_entries(&resources.extensions), missing.collect::<Vec<_>>(), builtins.collect::<Vec<_>>())
     };
     let phase = args.str(1)?;
     let reload = extensions::Reload { id, loader, settings, cwd, agent_dir, entries, warnings };
     let mut loaded = extensions::load(runner, reload, &phase, args.bool(2)).await?;
     loaded["packages"] = json!(has_packages);
+    loaded["builtins"] = json!(builtins);
     loaded["missing"] = json!(if phase == "pretrust" { Vec::new() } else { missing });
     Ok(loaded)
 }

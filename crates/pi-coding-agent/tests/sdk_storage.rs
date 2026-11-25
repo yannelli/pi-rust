@@ -270,7 +270,7 @@ async fn resource_loader_and_model_runtime_serve_child_sessions() {
     assert!(options["settingsManagerId"].as_u64().is_some(), "{options}");
     assert!(options["resourceLoaderId"].as_u64().is_some(), "{options}");
     assert_eq!(data["prompts"], json!({"prompts": [], "diagnostics": []}));
-    assert_eq!(data["factories"], "ERR_PI_UNSUPPORTED");
+    assert_eq!(data["factories"], Value::Null, "builtin entries are accepted");
     assert_eq!(data["ownRuntime"], true);
     assert_eq!(data["model"], "tiny");
     assert_eq!(data["models"], json!(["tiny", "other"]));

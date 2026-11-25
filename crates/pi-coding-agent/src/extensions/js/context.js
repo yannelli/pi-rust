@@ -145,6 +145,11 @@ export function createModelRegistry(target, makeStream, group = "models", assert
 	};
 }
 
+const TARGET = Symbol("pi-rust context target");
+
+/** The session target of a context from this module; 0, this runtime's own session, for other values. */
+export const contextTarget = (ctx) => ctx?.[TARGET] ?? 0;
+
 /** The plain extension context; `runner` supplies the UI and the staleness check. */
 export function createContext(runner, target = 0) {
 	const active = () => {
@@ -156,6 +161,7 @@ export function createContext(runner, target = 0) {
 	};
 	const ui = createUiContext(target, (kind, title, run) => runner.withUIPrompt(kind, title, run));
 	return {
+		[TARGET]: target,
 		get ui() {
 			active();
 			return ui;
