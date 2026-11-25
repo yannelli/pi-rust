@@ -79,6 +79,8 @@ pub(super) struct ExtensionUiState {
     pub shutdown_requested: bool,
     /// Overlays of `custom()` calls whose `onHandle` received a handle, by overlay id.
     pub overlays: HashMap<u64, pi_tui::OverlayHandle>,
+    /// Program status sources of blocking overlays that have not called `done` yet.
+    pub blocking_overlays: std::collections::HashSet<String>,
     /// `addAutocompleteProvider` factories, applied in order over the built-in provider.
     pub autocomplete_factories: Vec<ComponentFactory>,
     pub autocomplete_base: Option<Rc<dyn pi_tui::AutocompleteProvider>>,
