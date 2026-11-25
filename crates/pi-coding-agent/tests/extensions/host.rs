@@ -187,3 +187,19 @@ export default function (pi) {
     assert_eq!(codemode.len(), 1);
     assert_eq!(codemode[0].description, "Replacement");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn version_names_the_upstream_release_and_pi_rust_version_the_port() {
+    let source = r#"import { PI_RUST_VERSION, VERSION } from "@earendil-works/pi-coding-agent";
+import { PI_AI_VERSION } from "@earendil-works/pi-ai";
+export default function (pi) {
+	pi.registerCommand("versions", { handler: async (_args, ctx) => ctx.ui.notify(`${VERSION} ${PI_AI_VERSION} ${PI_RUST_VERSION}`, "info") });
+}
+"#;
+    let h =
+        harness(Setup { files: vec![("versions.ts", source.into())], load: vec!["versions.ts"], ..Setup::default() })
+            .await;
+    h.session.prompt("/versions", Vec::new()).await.unwrap();
+    let upstream = pi_ai::UPSTREAM_PI_VERSION;
+    assert_eq!(h.ui.calls(), vec![format!("notify(info): {upstream} {upstream} {}", env!("CARGO_PKG_VERSION"))]);
+}

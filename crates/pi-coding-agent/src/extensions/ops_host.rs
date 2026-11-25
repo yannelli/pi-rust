@@ -156,6 +156,7 @@ pub(crate) fn sync(runner: &ExtensionRunner, op: &str, args: &Args) -> Result<Ho
             "appName": APP_NAME,
             "configDirName": CONFIG_DIR_NAME,
             "version": env!("CARGO_PKG_VERSION"),
+            "upstreamVersion": pi_ai::UPSTREAM_PI_VERSION,
             "agentDir": runner.agent_dir().display().to_string(),
             "packageDir": std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.display().to_string())),
             "loadMode": runner.load_mode().map(|mode| json!({"mode": mode.as_str(), "hasUI": mode.has_ui()})),
