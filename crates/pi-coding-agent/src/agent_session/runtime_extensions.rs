@@ -153,7 +153,7 @@ impl ModelRuntime {
     pub fn register_extension_oauth(&self, provider: &str, oauth: Option<Arc<dyn OAuthAuth>>) {
         let mut registered = write(&self.extension_oauth);
         match oauth {
-            Some(oauth) => drop(registered.insert(provider.to_string(), oauth)),
+            Some(oauth) => drop(registered.insert(provider.to_string(), Some(oauth))),
             None => drop(registered.remove(provider)),
         }
     }
@@ -180,7 +180,7 @@ impl ModelRuntime {
     /// OAuth flows of extension providers, for `/login`.
     pub fn extension_oauth_providers(&self) -> Vec<(String, Arc<dyn OAuthAuth>)> {
         let mut providers: Vec<_> =
-            read(&self.extension_oauth).iter().map(|(id, oauth)| (id.clone(), oauth.clone())).collect();
+            read(&self.extension_oauth).iter().filter_map(|(id, oauth)| Some((id.clone(), oauth.clone()?))).collect();
         providers.sort_by(|left, right| left.0.cmp(&right.0));
         providers
     }

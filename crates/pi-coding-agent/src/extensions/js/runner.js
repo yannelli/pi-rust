@@ -3,7 +3,9 @@
 import { getCurrentSystemMessage } from "../pi-ai/src/utils/transcript.ts";
 import { call, callAsync, errorMessage, errorStack, optional } from "./bridge.js";
 import { boundaryContext, createCommandContext, createContext, createModelRegistry, createSessionManagerView, createToolContext, linkEndedMessage } from "./context.js";
+import { rememberHeaders } from "./native_provider.js";
 import { plain } from "./sdk_mirror.js";
+import { unsupportedError } from "./unsupported.js";
 
 export const STALE_MESSAGE =
 	"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().";
@@ -130,8 +132,14 @@ export class Runner {
 			const provider = (method, name, config) => {
 				this.assertTargetActive(target);
 				if (target === this.runtime.target) return this.runtime.contextProvider(method, name, config);
+				// Provider objects stay in the host of the session that registered them.
+				if (method === "getNative") return undefined;
+				if (typeof name !== "string") throw unsupportedError("ModelRegistry.registerProvider(provider) of a replaced session");
 				return optional(call("models.contextProvider", target, method, name, plain(config, method)));
 			};
+			const getProvider = registry.getProvider;
+			registry.getProvider = (name) => provider("getNative", name) ?? getProvider(name);
+			registry.getRegisteredNativeProvider = (name) => provider("getNative", name);
 			registry.runtime = {
 				setRuntimeApiKey: (name, value) => key("setRuntimeApiKey", name, value),
 				removeRuntimeApiKey: (name) => key("removeRuntimeApiKey", name),
@@ -487,6 +495,7 @@ export class Runner {
 				}
 			}
 		}
+		rememberHeaders(headers);
 		return headers;
 	}
 

@@ -62,8 +62,10 @@ pub async fn request_auth_as(
             .await
             .map_err(|error| error.to_string())?,
     };
+    // A native provider streams with whatever its auth resolved, a keyless one included.
+    let native = runtime.is_native_provider(&model.provider);
     match resolved {
-        Some(resolved) if resolved.auth.api_key.is_some() || !resolved.auth.headers.is_empty() => {
+        Some(resolved) if native || resolved.auth.api_key.is_some() || !resolved.auth.headers.is_empty() => {
             let mut model = model.clone();
             let stock_kimi = matches!(
                 model.base_url.trim_end_matches('/'),
@@ -205,9 +207,11 @@ pub fn auth_stream_fn(
                     apply_request_settings(&mut options, &request, &settings);
                     super::extension_hooks::apply_header_hooks(&hooks, &mut options).await;
                     observers = super::extension_hooks::install_request_observers(&hooks, &mut options);
-                    match &inner {
-                        Some(stream_fn) => stream_fn(&request.model, &context, options),
-                        None => pi_ai::stream(&request.model, &context, options),
+                    // A native provider streams each of its models itself (upstream `Provider.streamSimple`).
+                    match (runtime.native_provider(&request.model.provider), &inner) {
+                        (Some(native), _) => native.stream(&request.model, &context, options),
+                        (None, Some(stream_fn)) => stream_fn(&request.model, &context, options),
+                        (None, None) => pi_ai::stream(&request.model, &context, options),
                     }
                 }
                 Err(message) => error_stream(&model, StopReason::Error, message),

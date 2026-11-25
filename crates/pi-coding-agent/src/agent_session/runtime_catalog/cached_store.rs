@@ -77,6 +77,17 @@ impl ModelsStore for CachedFileModelsStore {
         self.invalidate();
         result
     }
+
+    async fn read_value(&self, provider_id: &str, cancel: &CancellationToken) -> anyhow::Result<Option<Value>> {
+        self.inner.read_value(provider_id, cancel).await
+    }
+
+    async fn write_value(&self, provider_id: &str, entry: &Value, cancel: &CancellationToken) -> anyhow::Result<()> {
+        self.invalidate();
+        let result = self.inner.write_value(provider_id, entry, cancel).await;
+        self.invalidate();
+        result
+    }
 }
 
 #[cfg(test)]

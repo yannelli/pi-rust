@@ -98,6 +98,9 @@ impl ModelRuntime {
         context: &ImagesContext,
         options: ImagesOptions,
     ) -> AssistantImages {
+        if let Some(native) = self.native_provider(&model.provider) {
+            return native.generate_images(model, context, options).await;
+        }
         let hooks = self.hooks_of(&model.provider).filter(|hooks| !hooks.image_apis().is_empty());
         let Some(hooks) = hooks else { return pi_ai::images::generate_images(model, context, options).await };
         if hooks.image_apis().contains(&model.api) {
@@ -118,6 +121,9 @@ impl ModelRuntime {
         context: &ClassifierContext,
         options: ClassifierOptions,
     ) -> ClassifierResult {
+        if let Some(native) = self.native_provider(&model.provider) {
+            return native.classify(model, context, options).await;
+        }
         let hooks = self.hooks_of(&model.provider).filter(|hooks| !hooks.classifier_apis().is_empty());
         let Some(hooks) = hooks else { return pi_ai::classify::classify(model, context, options).await };
         if hooks.classifier_apis().contains(&model.api) {

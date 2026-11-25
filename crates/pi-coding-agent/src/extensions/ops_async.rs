@@ -293,7 +293,8 @@ pub(crate) async fn run(runner: Arc<ExtensionRunner>, op: &str, args: Vec<HostVa
             pump(&runner, stream, args.u64(4)).await
         }
         "ai" => super::ops_ai::run(&runner, name, args).await?,
-        "oauth" => super::provider::oauth_callback(&runner, &args).await?,
+        "oauth" => super::login_bridge::oauth_callback(&runner, &args).await?,
+        "provider" if name == "publish" => super::native_provider::publish(&runner, &args).await?,
         "inline" if name == "forward" => super::ops_sdk_resources::forward(&runner, &args).await?,
         "inline" => super::inline::event(&runner, &args).await?,
         _ => return Err(error(format!("Unknown host operation: {op}"))),

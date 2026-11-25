@@ -313,7 +313,7 @@ impl AuthResolver {
                 )));
             }
         }
-        let mut auth = oauth.to_auth(&credential);
+        let mut auth = oauth.to_auth_async(&credential).await?;
         let env: Option<ProviderEnv> =
             credential.extra.get("env").and_then(|env| serde_json::from_value(env.clone()).ok());
         self.apply_config_headers(provider_id, config, &mut auth, env.as_ref())?;

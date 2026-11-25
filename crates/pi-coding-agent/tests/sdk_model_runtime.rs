@@ -1,5 +1,6 @@
 //! SDK `ModelRuntime.create` for extensions: separate native runtimes with their own `models.json`
-//! and `auth.json`, runtime API keys, typed reads, offline refresh, and child sessions.
+//! and `auth.json`, runtime API keys, typed reads, offline refresh, child sessions, provider
+//! objects, and login.
 
 use crate::extensions::harness;
 
@@ -51,7 +52,7 @@ export default async function (pi) {
         await code(() => ModelRuntime.create({ credentials: {} })),
         await code(() => ModelRuntime.create({ modelsStore: {} })),
         await code(() => ModelRuntime.create({ modelsPath: null })),
-        await code(() => a.login('alpha')),
+        await code(() => a.registerVirtualModel({ provider: 'alpha', id: 'v' })),
         await code(() => a.registerProvider('x', {})),
         await code(() => a.stream(a.getModel('alpha', 'chat-a'), { messages: [] })),
       ],
@@ -113,4 +114,83 @@ async fn created_runtimes_are_isolated_native_runtimes() {
     assert_eq!(data["child"], json!({"model": "chat-a", "sameRuntime": true}), "the child picks from runtime b");
     assert_eq!((&data["hostAlpha"], &data["hostAlphaAuth"]), (&Value::Null, &json!(false)));
     assert_eq!(data["unsupported"], json!(vec!["ERR_PI_UNSUPPORTED"; 6]));
+}
+
+const NATIVE_PROBE: &str = r#"
+import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
+import { readFileSync } from 'node:fs';
+
+export default function (pi) {
+  pi.registerCommand('probe', { handler: async (_args, ctx) => {
+    const runtime = await ModelRuntime.create({ modelsPath: __MODELS__, authPath: __AUTH__ });
+    const provider = {
+      id: 'sdk-native', name: 'SDK Native',
+      auth: { apiKey: {
+        name: 'SDK key',
+        async login(interaction) {
+          const key = await interaction.prompt({ type: 'secret', message: 'Key?' });
+          return { type: 'api_key', key };
+        },
+        resolve: async ({ credential }) => (credential?.key ? { auth: { apiKey: credential.key } } : undefined),
+      } },
+      getModels: () => [{ id: 'm', name: 'M', api: 'sdk-api', provider: 'sdk-native', baseUrl: 'http://127.0.0.1:9',
+        reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 1000, maxTokens: 100 }],
+      stream() { throw new Error('unused'); },
+      streamSimple() { throw new Error('unused'); },
+    };
+    runtime.registerNativeProvider(provider);
+    const registry = new ModelRegistry(runtime);
+    const before = {
+      models: runtime.getModels('sdk-native').map((model) => model.id),
+      same: runtime.getRegisteredNativeProvider('sdk-native') === provider,
+      registry: registry.getRegisteredNativeProvider('sdk-native') === provider,
+      effective: runtime.getProvider('sdk-native') === provider,
+      ids: runtime.getRegisteredProviderIds(),
+      config: runtime.getRegisteredProviderConfig('sdk-native') ?? null,
+    };
+    const prompts = [];
+    const interaction = { prompt: async (prompt) => { prompts.push(prompt); return 'sdk-key'; }, notify: () => {} };
+    const credential = await runtime.login('sdk-native', 'api_key', interaction);
+    const key = (await runtime.getApiKeyForProvider('sdk-native')) ?? null;
+    const authFile = JSON.parse(readFileSync(__AUTH__, 'utf8'));
+    const oauth = await runtime.login('sdk-native', 'oauth', interaction).catch((error) => error.message);
+    await runtime.logout('sdk-native');
+    const afterLogout = (await runtime.getApiKeyForProvider('sdk-native')) ?? null;
+    runtime.unregisterProvider('sdk-native');
+    pi.appendEntry('native', { before, prompts, credential, key, authFile, oauth, afterLogout,
+      after: { models: runtime.getModels('sdk-native').length, native: runtime.getRegisteredNativeProvider('sdk-native') ?? null },
+      host: ctx.modelRegistry.find('sdk-native', 'm') ?? null });
+  } });
+}
+"#;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn created_runtimes_register_provider_objects_and_log_in() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("runtime");
+    write_runtime_dir(&dir, None);
+    let literal = |file: &str| serde_json::to_string(&dir.join(file).display().to_string()).unwrap();
+    let source = NATIVE_PROBE.replace("__MODELS__", &literal("models.json")).replace("__AUTH__", &literal("auth.json"));
+    let h = harness(Setup { files: vec![("probe.ts", source)], load: vec!["probe.ts"], ..Setup::default() }).await;
+    tokio::time::timeout(std::time::Duration::from_secs(20), h.session.prompt("/probe", Vec::new()))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(h.errors().is_empty(), "{:?}", h.errors());
+    let entries = h.entries();
+    let data = &entries.iter().find(|entry| entry["customType"] == "native").expect("native entry")["data"];
+    let before = json!({"models": ["m"], "same": true, "registry": true, "effective": true, "ids": ["sdk-native"],
+        "config": null});
+    assert_eq!(data["before"], before);
+    assert_eq!(data["prompts"], json!([{"type": "secret", "message": "Key?"}]));
+    assert_eq!(data["credential"], json!({"type": "api_key", "key": "sdk-key"}));
+    assert_eq!(data["key"], "sdk-key");
+    assert_eq!(data["oauth"], "SDK Native does not support oauth login");
+    assert_eq!(data["afterLogout"], Value::Null);
+    assert_eq!(data["after"], json!({"models": 0, "native": null}));
+    assert_eq!(data["host"], Value::Null, "the host runtime does not see the created runtime's providers");
+    assert_eq!(data["authFile"], json!({"sdk-native": {"type": "api_key", "key": "sdk-key"}}));
+    let auth: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("auth.json")).unwrap()).unwrap();
+    assert!(auth.get("sdk-native").is_none(), "logout removed the stored key: {auth}");
 }

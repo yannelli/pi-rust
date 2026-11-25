@@ -4,6 +4,7 @@ import { createEventBus, createExtension, createExtensionAPI, createRuntime } fr
 import * as bridge from "./bridge.js";
 import { call, callAsync, errorMessage, optional, registerCallback, releaseCallback, signalFor } from "./bridge.js";
 import { nativeFactory } from "./native.js";
+import { nativeCallbacks, setHostRuntime } from "./native_provider.js";
 import { Runner } from "./runner.js";
 import { apiProviders } from "./ai.js";
 import { groupScope, parentOps } from "./sdk_extensions.js";
@@ -47,6 +48,7 @@ function normalizeToolResult(result) {
 /** Provider and virtual model callbacks of `runtime`: a host's own, or an SDK factory group's. */
 function modelCallbacks(runtime, createContext) {
 	return {
+		...nativeCallbacks(runtime),
 		async providerStream(name, model, context, options, sink) {
 			const provider = runtime.providers.get(name)?.config;
 			if (!provider?.streamSimple) throw new Error(`Provider ${name} has no streamSimple`);
@@ -108,6 +110,7 @@ export function createHost(config) {
 			});
 		}
 	});
+	setHostRuntime(runtime);
 	const runner = new Runner(runtime, sessionStream);
 	const eventBus = createEventBus();
 	let loading;

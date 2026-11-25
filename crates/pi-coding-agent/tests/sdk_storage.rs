@@ -242,7 +242,7 @@ export default function (pi) {
       ownRuntime: runtime._sdkRuntimeId > 0, model: runtime.getModel('local', 'tiny')?.id,
       models: runtime.getModels('local').map((model) => model.id), auth: runtime.hasConfiguredAuth('local'),
       registry: new ModelRegistry(runtime).find('local', 'other')?.id,
-      login: await code(() => runtime.login('local')),
+      login: await code(() => runtime.login('local', 'oauth', { prompt: async () => '', notify: () => {} })),
       modelsPath: await code(() => ModelRuntime.create({ modelsPath: null })),
     });
   }});
@@ -276,6 +276,6 @@ async fn resource_loader_and_model_runtime_serve_child_sessions() {
     assert_eq!(data["models"], json!(["tiny", "other"]));
     assert_eq!(data["auth"], true);
     assert_eq!(data["registry"], "other");
-    assert_eq!(data["login"], "ERR_PI_UNSUPPORTED");
+    assert_eq!(data["login"], "local does not support oauth login");
     assert_eq!(data["modelsPath"], "ERR_PI_UNSUPPORTED");
 }

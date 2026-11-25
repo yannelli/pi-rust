@@ -119,7 +119,7 @@ pub(super) fn read_models(
                 .filter(|model| {
                     of_type(model, &kind)
                         && provider.as_ref().is_none_or(|wanted| &model.provider == wanted)
-                        && (!available || runtime.has_configured_auth(&model.provider))
+                        && (!available || runtime.is_model_available(model))
                 })
                 .cloned()
                 .collect();
