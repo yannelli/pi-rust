@@ -35,10 +35,10 @@ fn fixtures() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/highlight")
 }
 
-/// A highlight theme that names the theme token each class maps to.
+/// A highlight theme that names the theme token each class maps to. Unscoped text stays plain.
 fn token_theme() -> HighlightTheme {
     let mut theme = HighlightTheme::new();
-    for &(class, style) in CLI_HIGHLIGHT_CLASSES {
+    for &(class, style) in CLI_HIGHLIGHT_CLASSES.iter().filter(|(class, _)| *class != "default") {
         let label = match style {
             HighlightStyle::Fg(color) => color.name(),
             HighlightStyle::Bold => "bold",
@@ -102,11 +102,22 @@ fn colors_each_line_of_python_docstrings_independently() {
         String::new(),
         format!("{ansi}line two\x1b[39m"),
         format!("{ansi}\"\"\"\x1b[39m"),
-        "after".to_string(),
+        format!("{}after\x1b[39m", theme().get_fg_ansi(ThemeColor::Text)),
     ];
     assert_eq!(highlight_code(code, Some("python")), expected);
     let markdown = crate::theme::get_markdown_theme();
     assert_eq!((markdown.highlight_code.expect("highlighter"))(code, Some("python")), expected);
+}
+
+// Upstream #11092: unscoped text gets the theme foreground, not the terminal's.
+#[test]
+fn colors_unscoped_highlighted_code_with_the_theme_foreground() {
+    let _state = crate::theme::tests::global_state();
+    init_theme(Some("light"), false);
+    let lines = highlight_code("plainIdentifier\nconst answer = 42;", Some("typescript"));
+    let text = theme().get_fg_ansi(ThemeColor::Text);
+    assert_eq!(lines[0], format!("{text}plainIdentifier\x1b[39m"));
+    assert!(lines[1].contains(&format!("{text} answer = \x1b[39m")), "{:?}", lines[1]);
 }
 
 #[test]

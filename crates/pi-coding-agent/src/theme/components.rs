@@ -24,6 +24,7 @@ pub const CLI_HIGHLIGHT_CLASSES: &[(&str, HighlightStyle)] = {
     use HighlightStyle::*;
     use ThemeColor::*;
     &[
+        ("default", Fg(Text)),
         ("keyword", Fg(SyntaxKeyword)),
         ("built_in", Fg(SyntaxType)),
         ("literal", Fg(SyntaxNumber)),
