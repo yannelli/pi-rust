@@ -22,6 +22,9 @@ pub struct FirstTimeSetupResult {
 const THEME_OPTIONS: [(&str, &str); 3] =
     [(SYSTEM_THEME_NAME, "System (matches your terminal colors)"), ("dark", "Dark"), ("light", "Light")];
 
+/// The question the analytics step asks.
+pub const FIRST_TIME_SETUP_QUESTION: &str = "Opt-in to anonymous usage data sharing?";
+
 const ANALYTICS_OPTIONS: [(bool, &str); 2] = [(true, "Share anonymous usage data"), (false, "Don't share")];
 
 const ANALYTICS_DESCRIPTION: &str = "Opting in stores a tracking identifier in settings.json and enables anonymous\nusage analytics. This helps us to better debug, reproduce, and resolve issues\nand bugs within Pi. You can observe what is shared using /privacy and make\nchanges anytime in settings.json.";
@@ -82,8 +85,7 @@ impl FirstTimeSetupComponent {
             let labels: Vec<&str> = THEME_OPTIONS.iter().map(|(_, label)| *label).collect();
             add_option_list(container, &labels, self.theme_index);
         } else {
-            let question = "Opt-in to anonymous usage data sharing?";
-            container.add_child(text(&theme.fg(ThemeColor::Text, question), 1, 0));
+            container.add_child(text(&theme.fg(ThemeColor::Text, FIRST_TIME_SETUP_QUESTION), 1, 0));
             container.add_child(text(&theme.fg(ThemeColor::Muted, ANALYTICS_DESCRIPTION), 1, 0));
             container.add_child(spacer(1));
             let labels: Vec<&str> = ANALYTICS_OPTIONS.iter().map(|(_, label)| *label).collect();

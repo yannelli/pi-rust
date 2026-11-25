@@ -6,11 +6,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use pi_tui::component;
+use pi_tui::program_status::BlockedKind;
 use tokio::sync::{mpsc, oneshot};
 
 use super::components::{StatusIndicator, StatusKind};
 use super::mode::InteractiveMode;
 use super::selector::SelectorSpec;
+use super::status::dialog_blocked_status;
 use crate::agent_session::{NavigateTreeOptions, TrustPromptFn};
 use crate::interactive_components::session_selector::{
     SessionSelectorOptions, all_sessions_loader, project_sessions_loader,
@@ -252,7 +254,8 @@ impl InteractiveMode {
                     result = &mut task => break result,
                     Some((prompt, reply)) = requests.recv() => {
                         let labels = prompt.options.iter().map(|option| option.label.clone()).collect();
-                        let chosen = mode.ask_choice(&prompt.message, labels).await.ok().flatten();
+                        let blocked = dialog_blocked_status(BlockedKind::Permission, &prompt.message);
+                        let chosen = mode.ask_choice_with(&prompt.message, labels, blocked).await.ok().flatten();
                         let option = chosen.and_then(|label| prompt.options.into_iter().find(|o| o.label == label));
                         let _ = reply.send(option);
                     }

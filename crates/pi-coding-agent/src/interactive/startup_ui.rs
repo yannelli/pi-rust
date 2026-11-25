@@ -7,14 +7,17 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use pi_tui::program_status::{BlockedKind, ProgramState, ProgramStatus};
 use pi_tui::{ProcessTerminal, TerminalRef, Tui, TuiOptions, component, ui_loop};
 use tokio::sync::{mpsc, oneshot};
 
+use super::status::dialog_blocked_status;
 use crate::config::home_dir;
 use crate::extension_ui::{DialogOptions, ExtensionUi, NotifyType, WidgetPlacement};
 use crate::interactive_components::{
     ExtensionInput, ExtensionInputOptions, ExtensionSelector, ExtensionSelectorOptions,
 };
+use crate::resources::brand::APP_NAME;
 use crate::resources::trust::{
     DefaultProjectTrust, ExtensionTrustDecision, ProjectTrustRequest, ProjectTrustResolution, ProjectTrustStore,
     apply_project_trust_choice, resolve_project_trust,
@@ -22,15 +25,18 @@ use crate::resources::trust::{
 use crate::settings::{SettingsManager, SettingsOptions};
 use crate::theme::{get_terminal_theme, init_theme, resolve_theme_setting};
 
-/// A selector on the main screen of `terminal`; `None` when dismissed. Runs inside a `LocalSet`.
+/// A selector on the main screen of `terminal`; `None` when dismissed. It reports pi as blocked
+/// with `kind` on the first line of `title`. Runs inside a `LocalSet`.
 pub async fn show_startup_selector(
     terminal: TerminalRef,
     settings: &SettingsManager,
     title: &str,
     options: Vec<String>,
+    kind: BlockedKind,
 ) -> Option<String> {
+    let blocked = dialog_blocked_status(kind, title);
     let title = title.to_string();
-    show_startup_dialog(terminal, settings, move |tui, answer| {
+    show_startup_dialog(terminal, settings, blocked, move |tui, answer| {
         let (selected, cancelled) = (answer.clone(), answer);
         component(ExtensionSelector::new(
             &title,
@@ -51,9 +57,11 @@ pub async fn show_startup_input(
     title: &str,
     prefill: Option<String>,
     secret: bool,
+    kind: BlockedKind,
 ) -> Option<String> {
+    let blocked = dialog_blocked_status(kind, title);
     let title = title.to_string();
-    show_startup_dialog(terminal, settings, move |tui, answer| {
+    show_startup_dialog(terminal, settings, blocked, move |tui, answer| {
         let (submitted, cancelled) = (answer.clone(), answer);
         component(ExtensionInput::new(
             &title,
@@ -73,16 +81,29 @@ pub async fn show_startup_input(
 
 type Answer = Rc<RefCell<Option<Option<String>>>>;
 
+/// Report pi as blocked on a startup dialog (OSC 7501). Interactive mode is not running yet, so
+/// its status reporter cannot do this; stopping the startup TUI clears the report.
+pub(crate) fn report_startup_blocked(terminal: &TerminalRef, (kind, message): (BlockedKind, String)) {
+    let status = ProgramStatus {
+        state: ProgramState::Blocked,
+        app: Some(APP_NAME.to_string()),
+        kind: Some(kind),
+        message: Some(message),
+    };
+    terminal.borrow_mut().set_program_status(&status);
+}
+
 async fn show_startup_dialog<C: pi_tui::Component + 'static>(
     terminal: TerminalRef,
     settings: &SettingsManager,
+    blocked: (BlockedKind, String),
     create: impl FnOnce(Tui, Answer) -> Rc<RefCell<C>>,
 ) -> Option<String> {
     pi_tui::list_overflow::set_list_overflow(settings.list_overflow());
     let setting = settings.theme_setting();
     init_theme(resolve_theme_setting(setting.as_deref(), get_terminal_theme()).as_deref(), false);
     let tui = Tui::new_main_screen(
-        terminal,
+        terminal.clone(),
         TuiOptions { show_hardware_cursor: Some(settings.show_hardware_cursor()), log_directory: None, env: None },
     );
     tui.set_clear_on_shrink(settings.clear_on_shrink());
@@ -90,6 +111,7 @@ async fn show_startup_dialog<C: pi_tui::Component + 'static>(
     let dialog: pi_tui::ComponentRef = create(tui.clone(), answer.clone());
     tui.add_child(dialog.clone());
     tui.set_focus(Some(dialog));
+    report_startup_blocked(&terminal, blocked);
     tui.start();
     tui.request_render(false);
     while answer.borrow().is_none() {
@@ -149,15 +171,26 @@ pub async fn prompt_project_trust_with(
         _ => return None,
     };
     let labels: Vec<String> = prompt.options.iter().map(|option| option.label.clone()).collect();
-    let chosen = show_startup_selector(terminal, global, &prompt.message, labels).await;
+    let chosen = show_startup_selector(terminal, global, &prompt.message, labels, BlockedKind::Permission).await;
     let option = chosen.and_then(|label| prompt.options.iter().find(|option| option.label == label));
     Some(apply_project_trust_choice(&store, option).unwrap_or(false))
 }
 
 /// A dialog a `project_trust` handler asked for before the session exists.
 enum StartupRequest {
-    Select { title: String, options: Vec<String>, reply: oneshot::Sender<Option<String>> },
-    Input { title: String, prefill: Option<String>, secret: bool, reply: oneshot::Sender<Option<String>> },
+    Select {
+        title: String,
+        options: Vec<String>,
+        kind: BlockedKind,
+        reply: oneshot::Sender<Option<String>>,
+    },
+    Input {
+        title: String,
+        prefill: Option<String>,
+        secret: bool,
+        kind: BlockedKind,
+        reply: oneshot::Sender<Option<String>>,
+    },
 }
 
 /// `ctx.ui` of `project_trust` handlers at startup (upstream `createProjectTrustContext`):
@@ -176,19 +209,22 @@ impl StartupExtensionUi {
 
 #[async_trait]
 impl ExtensionUi for StartupExtensionUi {
-    async fn select(&self, title: &str, options: &[String], _opts: DialogOptions) -> Option<String> {
+    async fn select(&self, title: &str, options: &[String], opts: DialogOptions) -> Option<String> {
         let (title, options) = (title.to_string(), options.to_vec());
-        self.ask(|reply| StartupRequest::Select { title, options, reply }).await
+        let kind = opts.blocked_kind.unwrap_or(BlockedKind::Question);
+        self.ask(|reply| StartupRequest::Select { title, options, kind, reply }).await
     }
 
-    async fn confirm(&self, title: &str, message: &str, _opts: DialogOptions) -> bool {
+    async fn confirm(&self, title: &str, message: &str, opts: DialogOptions) -> bool {
         let (title, options) = (format!("{title}\n{message}"), vec!["Yes".to_string(), "No".to_string()]);
-        self.ask(|reply| StartupRequest::Select { title, options, reply }).await.as_deref() == Some("Yes")
+        let kind = opts.blocked_kind.unwrap_or(BlockedKind::Permission);
+        self.ask(|reply| StartupRequest::Select { title, options, kind, reply }).await.as_deref() == Some("Yes")
     }
 
     async fn input(&self, title: &str, _placeholder: Option<&str>, opts: DialogOptions) -> Option<String> {
         let (title, prefill, secret) = (title.to_string(), opts.prefill, opts.secret);
-        self.ask(|reply| StartupRequest::Input { title, prefill, secret, reply }).await
+        let kind = opts.blocked_kind.unwrap_or(BlockedKind::Question);
+        self.ask(|reply| StartupRequest::Input { title, prefill, secret, kind, reply }).await
     }
 
     async fn editor(&self, _title: &str, _prefill: Option<&str>, _opts: DialogOptions) -> Option<String> {
@@ -220,11 +256,11 @@ pub async fn run_with_startup_ui<T, Fut: Future<Output = T>>(
         tokio::select! {
             result = &mut work => return result,
             Some(request) = receiver.recv() => match request {
-                StartupRequest::Select { title, options, reply } => {
-                    let _ = reply.send(show_startup_selector(terminal.clone(), settings, &title, options).await);
+                StartupRequest::Select { title, options, kind, reply } => {
+                    let _ = reply.send(show_startup_selector(terminal.clone(), settings, &title, options, kind).await);
                 }
-                StartupRequest::Input { title, prefill, secret, reply } => {
-                    let answer = show_startup_input(terminal.clone(), settings, &title, prefill, secret).await;
+                StartupRequest::Input { title, prefill, secret, kind, reply } => {
+                    let answer = show_startup_input(terminal.clone(), settings, &title, prefill, secret, kind).await;
                     let _ = reply.send(answer);
                 }
             },
@@ -290,5 +326,106 @@ mod tests {
                 assert!(!writes.contains("hunter"), "{writes}");
             })
             .await;
+    }
+
+    /// Run `show` with `keys` typed once the dialog is drawn, and the program status reports.
+    async fn reports_of<T>(
+        keys: &'static [&'static str],
+        show: impl AsyncFnOnce(TerminalRef, &SettingsManager) -> T,
+    ) -> (T, Vec<ProgramStatus>) {
+        let _theme = global_state();
+        let local = tokio::task::LocalSet::new();
+        local
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let settings =
+                    SettingsManager::create(dir.path(), dir.path(), SettingsOptions { project_trusted: false });
+                let terminal = VirtualTerminal::shared(80, 24);
+                let input = terminal.clone();
+                tokio::task::spawn_local(async move {
+                    for key in keys {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        input.borrow().send_input(key);
+                    }
+                });
+                let result = show(terminal.clone(), &settings).await;
+                let reports = terminal.borrow().program_statuses().to_vec();
+                (result, reports)
+            })
+            .await
+    }
+
+    fn blocked(kind: BlockedKind, message: &str) -> Vec<ProgramStatus> {
+        vec![ProgramStatus {
+            state: ProgramState::Blocked,
+            app: Some(APP_NAME.to_string()),
+            kind: Some(kind),
+            message: Some(message.to_string()),
+        }]
+    }
+
+    // Upstream #12439: startup dialogs run before interactive mode and its status reporter exist.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_startup_selector_reports_blocked_on_the_first_line_of_its_title() {
+        let (answer, reports) = reports_of(&["\r"], async |terminal, settings| {
+            let title = "Trust project folder?\n/work/project\n\nDetails";
+            show_startup_selector(terminal, settings, title, vec!["Trust".into()], BlockedKind::Question).await
+        })
+        .await;
+        assert_eq!(answer.as_deref(), Some("Trust"));
+        assert_eq!(reports, blocked(BlockedKind::Question, "Trust project folder?"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_trust_confirm_reports_a_permission_request() {
+        let (answer, reports) = reports_of(&["\r"], async |terminal, settings| {
+            run_with_startup_ui(terminal, settings, |ui| async move {
+                ui.confirm("Load project extensions?", "They run with your permissions.", DialogOptions::default())
+                    .await
+            })
+            .await
+        })
+        .await;
+        assert!(answer);
+        assert_eq!(reports, blocked(BlockedKind::Permission, "Load project extensions?"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_project_trust_select_reports_the_kind_it_passes() {
+        let (answer, reports) = reports_of(&["\r"], async |terminal, settings| {
+            run_with_startup_ui(terminal, settings, |ui| async move {
+                let options = ["Run".to_string(), "Skip".to_string()];
+                let opts = DialogOptions { blocked_kind: Some(BlockedKind::Permission), ..DialogOptions::default() };
+                ui.select("Run project hooks?", &options, opts).await
+            })
+            .await
+        })
+        .await;
+        assert_eq!(answer.as_deref(), Some("Run"));
+        assert_eq!(reports, blocked(BlockedKind::Permission, "Run project hooks?"));
+    }
+
+    // Trusting a folder lets pi run its extensions, so the prompt asks for a permission.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_project_trust_prompt_reports_a_permission_request() {
+        let (trusted, reports) = reports_of(&["\r"], async |terminal, _settings| {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(root.path().join(".pi")).unwrap();
+            std::fs::write(root.path().join(".pi/settings.json"), "{}").unwrap();
+            prompt_project_trust_on(terminal, root.path(), root.path(), None).await
+        })
+        .await;
+        assert_eq!(trusted, Some(true));
+        assert_eq!(reports, blocked(BlockedKind::Permission, "Trust project folder?"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_startup_input_reports_blocked_on_its_title() {
+        let (answer, reports) = reports_of(&["demo", "\r"], async |terminal, settings| {
+            show_startup_input(terminal, settings, "Project name", None, false, BlockedKind::Question).await
+        })
+        .await;
+        assert_eq!(answer.as_deref(), Some("demo"));
+        assert_eq!(reports, blocked(BlockedKind::Question, "Project name"));
     }
 }

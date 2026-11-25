@@ -335,9 +335,9 @@ A tool with `renderCall: true` or `renderResult: true` draws its own call or res
 | Method | Params | Result |
 | --- | --- | --- |
 | `ui.notify` | `{ message, type?: "info" \| "warning" \| "error" }` | `null` |
-| `ui.select` | `{ title, options: string[], timeout? }` | string or `null` |
-| `ui.confirm` | `{ title, message, timeout? }` | boolean |
-| `ui.input` | `{ title, placeholder?, prefill?, secret?, timeout? }` | string or `null` |
+| `ui.select` | `{ title, options: string[], timeout?, blockedKind? }` | string or `null` |
+| `ui.confirm` | `{ title, message, timeout?, blockedKind? }` | boolean |
+| `ui.input` | `{ title, placeholder?, prefill?, secret?, timeout?, blockedKind? }` | string or `null` |
 | `ui.editor` | `{ title, prefill? }` | string or `null` |
 | `ui.setStatus` | `{ key, text \| null }` | `null` |
 | `ui.setWidget` | `{ key, lines: string[] \| null, placement?: "aboveEditor" \| "belowEditor" }` | `null` |

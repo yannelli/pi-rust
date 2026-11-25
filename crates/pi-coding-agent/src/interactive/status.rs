@@ -23,6 +23,13 @@ fn first_line(text: Option<&str>) -> String {
     if line.is_empty() { "Error".to_string() } else { line.to_string() }
 }
 
+/// Blocked status for a dialog. Its message is the first line of the title; later lines hold
+/// details such as paths (upstream `dialogBlockedStatus`).
+pub(crate) fn dialog_blocked_status(kind: BlockedKind, title: &str) -> (BlockedKind, String) {
+    let line = title.split('\n').next().unwrap_or_default();
+    (kind, line.strip_suffix('\r').unwrap_or(line).to_string())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Report {
     state: ProgramState,

@@ -121,6 +121,7 @@ function dialogOptions(opts) {
 	const options = { timeout: opts.timeout, signal: signalId(opts.signal) };
 	if (typeof opts.prefill === "string") options.prefill = opts.prefill;
 	if (opts.secret) options.secret = true;
+	if (opts.blockedKind) options.blockedKind = opts.blockedKind;
 	return options;
 }
 

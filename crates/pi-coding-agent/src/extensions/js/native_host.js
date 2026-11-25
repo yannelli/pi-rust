@@ -236,7 +236,7 @@ export function hostMethods(state) {
 		if (!current.hasUI) throw rpcError(-32001, "pi has no UI in this mode");
 		return current.ui;
 	};
-	const dialog = (params, signal) => ({ timeout: params.timeout, signal });
+	const dialog = (params, signal) => ({ timeout: params.timeout, signal, blockedKind: params.blockedKind });
 	const done = () => null;
 	return {
 		"ui.notify": (p) => (ctx().ui.notify(String(p.message ?? ""), p.type, { [NOTIFY_SOURCE]: state.path }), done()),
