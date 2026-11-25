@@ -336,7 +336,8 @@ Object.assign(TLSSocket.prototype, {
     return undefined;
   },
   getPeerX509Certificate() {
-    return undefined;
+    const chain = (this._tls && this._tls.peerChain) || [];
+    return chain.length ? require("internal/crypto_x509").peerCertificate(chain.map((entry) => entry.raw)) : undefined;
   },
   setServername(name) {
     validate.string(name, "name");

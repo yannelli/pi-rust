@@ -1,0 +1,848 @@
+{
+  "ca": {
+    "subject": "C=US\nST=California\nO=Pi Test CA\nCN=Pi Test Root CA",
+    "issuer": "C=US\nST=California\nO=Pi Test CA\nCN=Pi Test Root CA",
+    "subjectAltName": "<undefined>",
+    "infoAccess": "<undefined>",
+    "validFrom": "Jan  1 00:00:00 2025 GMT",
+    "validTo": "Jan  1 00:00:00 2035 GMT",
+    "validFromDate": "2025-01-01T00:00:00.000Z",
+    "validToDate": "2035-01-01T00:00:00.000Z",
+    "fingerprint": "6E:68:67:FF:30:F8:C7:40:8A:33:84:2E:F3:ED:E7:76:45:E7:3F:C4",
+    "fingerprint256": "3B:C3:4A:FD:F4:F1:BE:5B:B7:0E:61:4A:3A:6B:4C:7A:F7:85:13:1A:4F:DE:03:CF:97:76:75:C8:A6:0B:E7:65",
+    "fingerprint512": "E7:62:67:A6:25:FA:48:5B:97:48:75:2C:7C:CF:66:E9:47:B8:BA:15:24:05:A8:67:CF:AC:85:2C:3C:29:4E:19:68:8A:76:E9:6E:58:A9:64:3B:5F:7C:D9:34:86:24:25:DD:32:F6:62:DF:05:60:04:A2:CC:B1:EE:D6:61:84:AD",
+    "keyUsage": "<undefined>",
+    "serialNumber": "01",
+    "ca": true,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "rsa",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA49ssv1E20SA+PE4fHepXWgX1rHcgbptCwrMWAvI9ILYAlOqGLxehy83srFpQqa37QnRvfoh9+qf8kns1RAxc41zOqHmrt/2s4YEWY7qe1r1Kg+mif4JxVND9hrp6zJZLB33NEDVfUOmzP9Jz1McKRB4kksI+Ubc+DlJRwYN2TFBLobsU625sdZP1BNomx7XjpwJrnqtlqwqM3/2v4pL5BFDIoJQkm7DYdBNS2x9yEa49jvNy2F/93cLb0/z0qk51mtc5C39sN3MlcpdB2feetm5eJDwGGkSgcp+xiDRYJq9m1O/Mr4UA+XKj8ffh2uiovdY62SPUZC0GASoRh5lraQIDAQAB"
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "ca",
+      "modulus",
+      "bits",
+      "exponent",
+      "pubkey",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "C": "US",
+        "ST": "California",
+        "O": "Pi Test CA",
+        "CN": "Pi Test Root CA"
+      },
+      "issuer": {
+        "proto": null,
+        "C": "US",
+        "ST": "California",
+        "O": "Pi Test CA",
+        "CN": "Pi Test Root CA"
+      },
+      "ca": true,
+      "modulus": "E3DB2CBF5136D1203E3C4E1F1DEA575A05F5AC77206E9B42C2B31602F23D20B60094EA862F17A1CBCDECAC5A50A9ADFB42746F7E887DFAA7FC927B35440C5CE35CCEA879ABB7FDACE1811663BA9ED6BD4A83E9A27F827154D0FD86BA7ACC964B077DCD10355F50E9B33FD273D4C70A441E2492C23E51B73E0E5251C183764C504BA1BB14EB6E6C7593F504DA26C7B5E3A7026B9EAB65AB0A8CDFFDAFE292F90450C8A094249BB0D8741352DB1F7211AE3D8EF372D85FFDDDC2DBD3FCF4AA4E759AD7390B7F6C377325729741D9F79EB66E5E243C061A44A0729FB188345826AF66D4EFCCAF8500F972A3F1F7E1DAE8A8BDD63AD923D4642D06012A1187996B69",
+      "bits": 2048,
+      "exponent": "0x10001",
+      "pubkey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA49ssv1E20SA+PE4fHepXWgX1rHcgbptCwrMWAvI9ILYAlOqGLxehy83srFpQqa37QnRvfoh9+qf8kns1RAxc41zOqHmrt/2s4YEWY7qe1r1Kg+mif4JxVND9hrp6zJZLB33NEDVfUOmzP9Jz1McKRB4kksI+Ubc+DlJRwYN2TFBLobsU625sdZP1BNomx7XjpwJrnqtlqwqM3/2v4pL5BFDIoJQkm7DYdBNS2x9yEa49jvNy2F/93cLb0/z0qk51mtc5C39sN3MlcpdB2feetm5eJDwGGkSgcp+xiDRYJq9m1O/Mr4UA+XKj8ffh2uiovdY62SPUZC0GASoRh5lraQIDAQAB",
+      "valid_from": "Jan  1 00:00:00 2025 GMT",
+      "valid_to": "Jan  1 00:00:00 2035 GMT",
+      "fingerprint": "6E:68:67:FF:30:F8:C7:40:8A:33:84:2E:F3:ED:E7:76:45:E7:3F:C4",
+      "fingerprint256": "3B:C3:4A:FD:F4:F1:BE:5B:B7:0E:61:4A:3A:6B:4C:7A:F7:85:13:1A:4F:DE:03:CF:97:76:75:C8:A6:0B:E7:65",
+      "fingerprint512": "E7:62:67:A6:25:FA:48:5B:97:48:75:2C:7C:CF:66:E9:47:B8:BA:15:24:05:A8:67:CF:AC:85:2C:3C:29:4E:19:68:8A:76:E9:6E:58:A9:64:3B:5F:7C:D9:34:86:24:25:DD:32:F6:62:DF:05:60:04:A2:CC:B1:EE:D6:61:84:AD",
+      "serialNumber": "01",
+      "raw": "MIIDXzCCAkegAwIBAgIBATANBgkqhkiG9w0BAQsFADBRMQswCQYDVQQGEwJVUzETMBEGA1UECAwKQ2FsaWZvcm5pYTETMBEGA1UECgwKUGkgVGVzdCBDQTEYMBYGA1UEAwwPUGkgVGVzdCBSb290IENBMB4XDTI1MDEwMTAwMDAwMFoXDTM1MDEwMTAwMDAwMFowUTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExEzARBgNVBAoMClBpIFRlc3QgQ0ExGDAWBgNVBAMMD1BpIFRlc3QgUm9vdCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAOPbLL9RNtEgPjxOHx3qV1oF9ax3IG6bQsKzFgLyPSC2AJTqhi8XocvN7KxaUKmt+0J0b36Iffqn/JJ7NUQMXONczqh5q7f9rOGBFmO6nta9SoPpon+CcVTQ/Ya6esyWSwd9zRA1X1Dpsz/Sc9THCkQeJJLCPlG3Pg5SUcGDdkxQS6G7FOtubHWT9QTaJse146cCa56rZasKjN/9r+KS+QRQyKCUJJuw2HQTUtsfchGuPY7zcthf/d3C29P89KpOdZrXOQt/bDdzJXKXQdn3nrZuXiQ8BhpEoHKfsYg0WCavZtTvzK+FAPlyo/H34droqL3WOtkj1GQtBgEqEYeZa2kCAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFAalFTcmYvCbX6CQpDpgvdtimc5tMA0GCSqGSIb3DQEBCwUAA4IBAQAaTrvs3e2e+IikVddNHgq7akj1yiB5iNBrAt76hv9ixy88biRWzaBawT7UAnQvOBQqTTknLo1OL11n+In62JdITKhM3bT6UqNKqjIpzYa/j8jIfcbBAMzo+4XJMJDA2hIbhNbN+j1Yj2jNAJflxuUSJEDeu+cWPTjWmwMcexi8gf5aAtzEgwMOA7RkWC9Hq/5CiWkvDa+5Z2ZuPZF6sqKv+IMFZPeSHeK7JcWmdY/LyGXg/zVG/fxb2jaeOa3cxd9Yb60IXujIXJFCCdHHbmkcoU5J0kqcurbXPVAa/zbikFGESCVRvUHzmsOHYZ/1oMviuY2MUzGoD7BzMynb0EWm"
+    },
+    "sameObject": true
+  },
+  "leaf": {
+    "subject": "C=US\nO=Pi Test\nCN=leaf.example.com",
+    "issuer": "C=US\nST=California\nO=Pi Test CA\nCN=Pi Test Root CA",
+    "subjectAltName": "DNS:example.com, DNS:*.example.org, IP Address:127.0.0.1, IP Address:2001:DB8:0:0:0:0:0:1, email:admin@example.com, URI:https://example.com/a?b=c",
+    "infoAccess": "OCSP - URI:http://ocsp.example.com\nCA Issuers - URI:http://ca.example.com/ca.crt",
+    "validFrom": "Jan  2 03:04:05 2025 GMT",
+    "validTo": "Jun  7 08:09:10 2030 GMT",
+    "validFromDate": "2025-01-02T03:04:05.000Z",
+    "validToDate": "2030-06-07T08:09:10.000Z",
+    "fingerprint": "88:AB:F6:A1:8C:C3:D6:6C:A5:B6:97:26:C6:A8:AF:CF:59:F6:58:26",
+    "fingerprint256": "75:A3:E8:AE:B8:40:BD:C6:EB:AF:3C:60:34:F5:21:66:32:D1:50:4F:43:1D:6F:FF:7F:23:24:10:62:A6:67:A1",
+    "fingerprint512": "CE:C4:77:5D:A0:18:6B:3C:22:57:89:3D:13:E0:C5:A9:DD:73:C6:31:5B:40:C5:55:97:53:F2:C2:F5:9A:F5:1A:11:E5:4F:50:AB:53:90:5D:58:27:B4:00:A0:68:A8:B0:86:37:89:CD:95:A8:8B:53:72:A6:50:1E:C7:39:67:FA",
+    "keyUsage": [
+      "1.3.6.1.5.5.7.3.1",
+      "1.3.6.1.5.5.7.3.2",
+      "1.3.6.1.4.1.99999.1"
+    ],
+    "serialNumber": "A1B2C3D4E5F60718",
+    "ca": false,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "rsa",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/2osLfAtkdNBzgCY5gEgOjvZYH8G988MyQ3Xmg6je32ibU1v6adK5JnNtKnhkoaKXhEarckUk1gCQPS2kegrzpTeV5ad7LscOS647IzaQcAg/kp2t4m0YdK5Lmdw5xe70kSWYbOz1A0Um3YZqGqFFpnZHAkMBBajpY+8EqLnCVH/ubjAYrykk73ifXK9X0N0X9btc5ZbONdHRFQhzB8jpRbiD64XOGVQE/zDpx7Lte+Kunu+x/rtoV///aIMT0jEXSTpvOQHQ7vTw8E6SpQT64Dh56jwzjF01ON2PDkWzeWRjVufAdWBZAXn/v0ewCnLi/QBsw1O0os8hiksfzjKQIDAQAB"
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "subjectaltname",
+      "infoAccess",
+      "ca",
+      "modulus",
+      "bits",
+      "exponent",
+      "pubkey",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "ext_key_usage",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "C": "US",
+        "O": "Pi Test",
+        "CN": "leaf.example.com"
+      },
+      "issuer": {
+        "proto": null,
+        "C": "US",
+        "ST": "California",
+        "O": "Pi Test CA",
+        "CN": "Pi Test Root CA"
+      },
+      "subjectaltname": "DNS:example.com, DNS:*.example.org, IP Address:127.0.0.1, IP Address:2001:DB8:0:0:0:0:0:1, email:admin@example.com, URI:https://example.com/a?b=c",
+      "infoAccess": {
+        "proto": null,
+        "OCSP - URI": [
+          "http://ocsp.example.com"
+        ],
+        "CA Issuers - URI": [
+          "http://ca.example.com/ca.crt"
+        ]
+      },
+      "ca": false,
+      "modulus": "ABFDA8B0B7C0B6474D07380263980480E8EF6581FC1BDF3C3324375E683A8DEDF689B535BFA69D2B926736D2A7864A1A2978446AB724524D600903D2DA47A0AF3A53795E5A77B2EC70E4BAE3B23369070083F929DADE26D1874AE4B99DC39C5EEF49125986CECF5034526DD866A1AA145A6764702430105A8E963EF04A8B9C2547FEE6E3018AF2924EF789F5CAF57D0DD17F5BB5CE596CE35D1D115087307C8E945B883EB85CE195404FF30E9C7B2ED7BE2AE9EEFB1FEBB6857FFFF688313D23117493A6F3901D0EEF4F0F04E92A504FAE03879EA3C338C5D3538DD8F0E45B379646356E7C07560590179FFBF47B00A72E2FD006CC353B4A2CF218A4B1FCE329",
+      "bits": 2048,
+      "exponent": "0x10001",
+      "pubkey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/2osLfAtkdNBzgCY5gEgOjvZYH8G988MyQ3Xmg6je32ibU1v6adK5JnNtKnhkoaKXhEarckUk1gCQPS2kegrzpTeV5ad7LscOS647IzaQcAg/kp2t4m0YdK5Lmdw5xe70kSWYbOz1A0Um3YZqGqFFpnZHAkMBBajpY+8EqLnCVH/ubjAYrykk73ifXK9X0N0X9btc5ZbONdHRFQhzB8jpRbiD64XOGVQE/zDpx7Lte+Kunu+x/rtoV///aIMT0jEXSTpvOQHQ7vTw8E6SpQT64Dh56jwzjF01ON2PDkWzeWRjVufAdWBZAXn/v0ewCnLi/QBsw1O0os8hiksfzjKQIDAQAB",
+      "valid_from": "Jan  2 03:04:05 2025 GMT",
+      "valid_to": "Jun  7 08:09:10 2030 GMT",
+      "fingerprint": "88:AB:F6:A1:8C:C3:D6:6C:A5:B6:97:26:C6:A8:AF:CF:59:F6:58:26",
+      "fingerprint256": "75:A3:E8:AE:B8:40:BD:C6:EB:AF:3C:60:34:F5:21:66:32:D1:50:4F:43:1D:6F:FF:7F:23:24:10:62:A6:67:A1",
+      "fingerprint512": "CE:C4:77:5D:A0:18:6B:3C:22:57:89:3D:13:E0:C5:A9:DD:73:C6:31:5B:40:C5:55:97:53:F2:C2:F5:9A:F5:1A:11:E5:4F:50:AB:53:90:5D:58:27:B4:00:A0:68:A8:B0:86:37:89:CD:95:A8:8B:53:72:A6:50:1E:C7:39:67:FA",
+      "ext_key_usage": [
+        "1.3.6.1.5.5.7.3.1",
+        "1.3.6.1.5.5.7.3.2",
+        "1.3.6.1.4.1.99999.1"
+      ],
+      "serialNumber": "A1B2C3D4E5F60718",
+      "raw": "MIIEZTCCA02gAwIBAgIJAKGyw9Tl9gcYMA0GCSqGSIb3DQEBCwUAMFExCzAJBgNVBAYTAlVTMRMwEQYDVQQIDApDYWxpZm9ybmlhMRMwEQYDVQQKDApQaSBUZXN0IENBMRgwFgYDVQQDDA9QaSBUZXN0IFJvb3QgQ0EwHhcNMjUwMTAyMDMwNDA1WhcNMzAwNjA3MDgwOTEwWjA6MQswCQYDVQQGEwJVUzEQMA4GA1UECgwHUGkgVGVzdDEZMBcGA1UEAwwQbGVhZi5leGFtcGxlLmNvbTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKv9qLC3wLZHTQc4AmOYBIDo72WB/BvfPDMkN15oOo3t9om1Nb+mnSuSZzbSp4ZKGil4RGq3JFJNYAkD0tpHoK86U3leWney7HDkuuOyM2kHAIP5KdreJtGHSuS5ncOcXu9JElmGzs9QNFJt2GahqhRaZ2RwJDAQWo6WPvBKi5wlR/7m4wGK8pJO94n1yvV9DdF/W7XOWWzjXR0RUIcwfI6UW4g+uFzhlUBP8w6cey7Xvirp7vsf67aFf//2iDE9IxF0k6bzkB0O708PBOkqUE+uA4eeo8M4xdNTjdjw5Fs3lkY1bnwHVgWQF5/79HsApy4v0AbMNTtKLPIYpLH84ykCAwEAAaOCAVUwggFRMAkGA1UdEwQCMAAwDgYDVR0PAQH/BAQDAgWgMCgGA1UdJQQhMB8GCCsGAQUFBwMBBggrBgEFBQcDAgYJKwYBBAGGjR8BMGsGA1UdEQRkMGKCC2V4YW1wbGUuY29tgg0qLmV4YW1wbGUub3JnhwR/AAABhxAgAQ24AAAAAAAAAAAAAAABgRFhZG1pbkBleGFtcGxlLmNvbYYZaHR0cHM6Ly9leGFtcGxlLmNvbS9hP2I9YzBdBggrBgEFBQcBAQRRME8wIwYIKwYBBQUHMAGGF2h0dHA6Ly9vY3NwLmV4YW1wbGUuY29tMCgGCCsGAQUFBzAChhxodHRwOi8vY2EuZXhhbXBsZS5jb20vY2EuY3J0MB0GA1UdDgQWBBSZ3iAPe4Kdq4wf72cSV3vCEZff4zAfBgNVHSMEGDAWgBQGpRU3JmLwm1+gkKQ6YL3bYpnObTANBgkqhkiG9w0BAQsFAAOCAQEAVQ0HMeotjgbGKBEuvOHbB9C9DuLmAbmO2QcBLKowudTE/JzMXNF+0DQijhK8+TUxk/KXvxPovuCjeEUba5GZIq+/3W9vfNvnc3uJN8c0BNLINQRd5EDtiEEK58hxT4Apx7fejp8/xWIEy0QMvf1JaUSi9cQ2bY1xQelo1e1FJ0Gv5wFpJBG/akZq01NfY9ltC+KCJykTKqCXBJhmYTNfmMHdSUDEWw2wB2i4C/SWA4N4cTb8INQMQUuwDRlFDw+Z+h9W/EZJF3Cr8tTHDL01RF6rSEh56tD3nK9FHDZfR+X8bc7pbnR2cU5AhnjNBgcsS7CzTyDrAbgCNwMj0qaoUA=="
+    },
+    "sameObject": true
+  },
+  "pss": {
+    "subject": "C=US\nO=Pi Test\nCN=leaf.example.com",
+    "issuer": "C=US\nST=California\nO=Pi Test CA\nCN=Pi Test Root CA",
+    "subjectAltName": "DNS:pss.example.com",
+    "infoAccess": "<undefined>",
+    "validFrom": "Jan  2 03:04:05 2025 GMT",
+    "validTo": "Jun  7 08:09:10 2030 GMT",
+    "validFromDate": "2025-01-02T03:04:05.000Z",
+    "validToDate": "2030-06-07T08:09:10.000Z",
+    "fingerprint": "34:DF:8F:69:6E:F6:BF:09:C3:1B:D6:88:A5:D1:65:61:65:F1:34:24",
+    "fingerprint256": "F9:0E:C8:CE:46:4F:9B:9B:C0:89:C8:C7:18:E8:56:D8:DA:59:23:5B:1E:5F:1B:B2:DD:8F:ED:3C:35:6D:10:53",
+    "fingerprint512": "A0:0C:55:40:E7:BF:CB:18:7C:F8:5D:36:9B:40:C8:FA:C7:ED:AE:4A:B9:6C:49:01:C4:81:DA:0B:9E:AE:21:DB:4D:7B:88:A3:D5:57:0B:25:0C:01:4C:B1:6B:4A:3C:C2:2F:50:B9:E8:51:48:C1:59:D0:FE:2D:38:1E:22:31:E1",
+    "keyUsage": "<undefined>",
+    "serialNumber": "07",
+    "ca": false,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "rsa",
+      "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/2osLfAtkdNBzgCY5gEgOjvZYH8G988MyQ3Xmg6je32ibU1v6adK5JnNtKnhkoaKXhEarckUk1gCQPS2kegrzpTeV5ad7LscOS647IzaQcAg/kp2t4m0YdK5Lmdw5xe70kSWYbOz1A0Um3YZqGqFFpnZHAkMBBajpY+8EqLnCVH/ubjAYrykk73ifXK9X0N0X9btc5ZbONdHRFQhzB8jpRbiD64XOGVQE/zDpx7Lte+Kunu+x/rtoV///aIMT0jEXSTpvOQHQ7vTw8E6SpQT64Dh56jwzjF01ON2PDkWzeWRjVufAdWBZAXn/v0ewCnLi/QBsw1O0os8hiksfzjKQIDAQAB"
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "subjectaltname",
+      "ca",
+      "modulus",
+      "bits",
+      "exponent",
+      "pubkey",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "C": "US",
+        "O": "Pi Test",
+        "CN": "leaf.example.com"
+      },
+      "issuer": {
+        "proto": null,
+        "C": "US",
+        "ST": "California",
+        "O": "Pi Test CA",
+        "CN": "Pi Test Root CA"
+      },
+      "subjectaltname": "DNS:pss.example.com",
+      "ca": false,
+      "modulus": "ABFDA8B0B7C0B6474D07380263980480E8EF6581FC1BDF3C3324375E683A8DEDF689B535BFA69D2B926736D2A7864A1A2978446AB724524D600903D2DA47A0AF3A53795E5A77B2EC70E4BAE3B23369070083F929DADE26D1874AE4B99DC39C5EEF49125986CECF5034526DD866A1AA145A6764702430105A8E963EF04A8B9C2547FEE6E3018AF2924EF789F5CAF57D0DD17F5BB5CE596CE35D1D115087307C8E945B883EB85CE195404FF30E9C7B2ED7BE2AE9EEFB1FEBB6857FFFF688313D23117493A6F3901D0EEF4F0F04E92A504FAE03879EA3C338C5D3538DD8F0E45B379646356E7C07560590179FFBF47B00A72E2FD006CC353B4A2CF218A4B1FCE329",
+      "bits": 2048,
+      "exponent": "0x10001",
+      "pubkey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/2osLfAtkdNBzgCY5gEgOjvZYH8G988MyQ3Xmg6je32ibU1v6adK5JnNtKnhkoaKXhEarckUk1gCQPS2kegrzpTeV5ad7LscOS647IzaQcAg/kp2t4m0YdK5Lmdw5xe70kSWYbOz1A0Um3YZqGqFFpnZHAkMBBajpY+8EqLnCVH/ubjAYrykk73ifXK9X0N0X9btc5ZbONdHRFQhzB8jpRbiD64XOGVQE/zDpx7Lte+Kunu+x/rtoV///aIMT0jEXSTpvOQHQ7vTw8E6SpQT64Dh56jwzjF01ON2PDkWzeWRjVufAdWBZAXn/v0ewCnLi/QBsw1O0os8hiksfzjKQIDAQAB",
+      "valid_from": "Jan  2 03:04:05 2025 GMT",
+      "valid_to": "Jun  7 08:09:10 2030 GMT",
+      "fingerprint": "34:DF:8F:69:6E:F6:BF:09:C3:1B:D6:88:A5:D1:65:61:65:F1:34:24",
+      "fingerprint256": "F9:0E:C8:CE:46:4F:9B:9B:C0:89:C8:C7:18:E8:56:D8:DA:59:23:5B:1E:5F:1B:B2:DD:8F:ED:3C:35:6D:10:53",
+      "fingerprint512": "A0:0C:55:40:E7:BF:CB:18:7C:F8:5D:36:9B:40:C8:FA:C7:ED:AE:4A:B9:6C:49:01:C4:81:DA:0B:9E:AE:21:DB:4D:7B:88:A3:D5:57:0B:25:0C:01:4C:B1:6B:4A:3C:C2:2F:50:B9:E8:51:48:C1:59:D0:FE:2D:38:1E:22:31:E1",
+      "serialNumber": "07",
+      "raw": "MIID1zCCAougAwIBAgIBBzBBBgkqhkiG9w0BAQowNKAPMA0GCWCGSAFlAwQCAQUAoRwwGgYJKoZIhvcNAQEIMA0GCWCGSAFlAwQCAQUAogMCASAwUTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExEzARBgNVBAoMClBpIFRlc3QgQ0ExGDAWBgNVBAMMD1BpIFRlc3QgUm9vdCBDQTAeFw0yNTAxMDIwMzA0MDVaFw0zMDA2MDcwODA5MTBaMDoxCzAJBgNVBAYTAlVTMRAwDgYDVQQKDAdQaSBUZXN0MRkwFwYDVQQDDBBsZWFmLmV4YW1wbGUuY29tMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq/2osLfAtkdNBzgCY5gEgOjvZYH8G988MyQ3Xmg6je32ibU1v6adK5JnNtKnhkoaKXhEarckUk1gCQPS2kegrzpTeV5ad7LscOS647IzaQcAg/kp2t4m0YdK5Lmdw5xe70kSWYbOz1A0Um3YZqGqFFpnZHAkMBBajpY+8EqLnCVH/ubjAYrykk73ifXK9X0N0X9btc5ZbONdHRFQhzB8jpRbiD64XOGVQE/zDpx7Lte+Kunu+x/rtoV///aIMT0jEXSTpvOQHQ7vTw8E6SpQT64Dh56jwzjF01ON2PDkWzeWRjVufAdWBZAXn/v0ewCnLi/QBsw1O0os8hiksfzjKQIDAQABo2kwZzAJBgNVHRMEAjAAMBoGA1UdEQQTMBGCD3Bzcy5leGFtcGxlLmNvbTAfBgNVHSMEGDAWgBQGpRU3JmLwm1+gkKQ6YL3bYpnObTAdBgNVHQ4EFgQUmd4gD3uCnauMH+9nEld7whGX3+MwQQYJKoZIhvcNAQEKMDSgDzANBglghkgBZQMEAgEFAKEcMBoGCSqGSIb3DQEBCDANBglghkgBZQMEAgEFAKIDAgEgA4IBAQBBXJswp46igdy0akko6pIlKxUad9eeenHk4KokxTmtN9ooUGbv4aYRxIER6s2i2q9oLUhuT4OpBflaz0TThXuRFJ2CNOgvcQJWSOx6Ah5Q0ivkNnDzkdiZkPT7/GnEsOZr/hnq7VMARelS6gz/QnhZwYlzJHJ1zyzfm9TlnjHY3WyOJqgGIZ+iwu5BOys2/lJ4MGNT4fT9ZHefjgAfmWr5XquQfOdeMzCWUwYqW/6PxTZN0RgNyMkMsrDCaQtiYzLOfnId2lqkcSqo+1008b02MpiBJI2gRdbu13BN1HX4Ux4IYxovZZrrTePKlXgGYFOeGs3DsylcbbtP8RIQFwGT"
+    },
+    "sameObject": true
+  },
+  "ec": {
+    "subject": "C=US\nO=Pi\\, Inc. \\\"Test\\\"\nOU=R&D + OU=Ops \\<x\\>\\;y\nCN=\\ lead#space\\ \nCN=\\#hash\\\\back\nCN=Zoë 日本\nemailAddress=a@b.c\nDC=example\nDC=com\n1.2.3.4.5=custom\nserialNumber=42 + UID=u1",
+    "issuer": "C=US\nO=Pi\\, Inc. \\\"Test\\\"\nOU=R&D + OU=Ops \\<x\\>\\;y\nCN=\\ lead#space\\ \nCN=\\#hash\\\\back\nCN=Zoë 日本\nemailAddress=a@b.c\nDC=example\nDC=com\n1.2.3.4.5=custom\nserialNumber=42 + UID=u1",
+    "subjectAltName": "DNS:ec.example.net, DNS:\"weird\\u002cname.example\", URI:\"https://example.com/x\\u002cy\", email:quoted@example.com, othername:UPN:upn@example.com, Registered ID:1.2.3.4, DirName:\"CN=DÃ¯r Name\\u002cO=Dir\\\\\\u002c Org\\u002cC=DE\", IP Address:10.0.0.1",
+    "infoAccess": "<undefined>",
+    "validFrom": "Dec 31 23:59:59 1999 GMT",
+    "validTo": "Jan  1 00:00:00 2051 GMT",
+    "validFromDate": "1999-12-31T23:59:59.000Z",
+    "validToDate": "2051-01-01T00:00:00.000Z",
+    "fingerprint": "7B:13:4A:DA:D2:BF:3B:7D:DE:4E:DC:F8:27:6B:A7:92:35:15:CB:96",
+    "fingerprint256": "2D:75:B5:B6:AA:E0:BA:8E:49:62:9F:49:5A:06:C9:A4:BF:85:7E:1A:B1:4B:F9:3D:A7:48:D2:7A:8B:B9:A7:56",
+    "fingerprint512": "17:77:CE:24:61:38:85:70:6A:45:12:26:97:E6:FC:89:6B:3D:E0:4D:80:BF:D9:CB:8F:D0:06:58:1C:41:F8:0A:6C:71:2C:2D:39:02:68:F4:B9:31:49:88:2A:1D:E9:D1:08:91:6F:68:D3:B7:8E:9E:B6:12:36:07:BB:82:23:7E",
+    "keyUsage": [
+      "1.3.6.1.5.5.7.3.3"
+    ],
+    "serialNumber": "0",
+    "ca": false,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "ec",
+      "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKC2jVDGeJI8Tj2qNcfythn4NW/pqBwv/eWcljqKmz0UszjhkS9iCyiwY6dzkzTXaTYjkqneNTO4wGmvrIXuphQ=="
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "subjectaltname",
+      "ca",
+      "bits",
+      "pubkey",
+      "asn1Curve",
+      "nistCurve",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "ext_key_usage",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "C": "US",
+        "O": "Pi, Inc. \"Test\"",
+        "OU": [
+          "R&D",
+          "Ops <x>;y"
+        ],
+        "CN": [
+          " lead#space ",
+          "#hash\\back",
+          "Zoë 日本"
+        ],
+        "emailAddress": "a@b.c",
+        "DC": [
+          "example",
+          "com"
+        ],
+        "1.2.3.4.5": "custom",
+        "serialNumber": "42",
+        "UID": "u1"
+      },
+      "issuer": {
+        "proto": null,
+        "C": "US",
+        "O": "Pi, Inc. \"Test\"",
+        "OU": [
+          "R&D",
+          "Ops <x>;y"
+        ],
+        "CN": [
+          " lead#space ",
+          "#hash\\back",
+          "Zoë 日本"
+        ],
+        "emailAddress": "a@b.c",
+        "DC": [
+          "example",
+          "com"
+        ],
+        "1.2.3.4.5": "custom",
+        "serialNumber": "42",
+        "UID": "u1"
+      },
+      "subjectaltname": "DNS:ec.example.net, DNS:\"weird\\u002cname.example\", URI:\"https://example.com/x\\u002cy\", email:quoted@example.com, othername:UPN:upn@example.com, Registered ID:1.2.3.4, DirName:\"CN=DÃ¯r Name\\u002cO=Dir\\\\\\u002c Org\\u002cC=DE\", IP Address:10.0.0.1",
+      "ca": false,
+      "bits": 256,
+      "pubkey": "BCgto1QxniSPE49qjXH8rYZ+DVv6agcL/3lnJY6ips9FLM44ZEvYgsosGOnc5M012k2I5Kp3jUzuMBpr6yF7qYU=",
+      "asn1Curve": "prime256v1",
+      "nistCurve": "P-256",
+      "valid_from": "Dec 31 23:59:59 1999 GMT",
+      "valid_to": "Jan  1 00:00:00 2051 GMT",
+      "fingerprint": "7B:13:4A:DA:D2:BF:3B:7D:DE:4E:DC:F8:27:6B:A7:92:35:15:CB:96",
+      "fingerprint256": "2D:75:B5:B6:AA:E0:BA:8E:49:62:9F:49:5A:06:C9:A4:BF:85:7E:1A:B1:4B:F9:3D:A7:48:D2:7A:8B:B9:A7:56",
+      "fingerprint512": "17:77:CE:24:61:38:85:70:6A:45:12:26:97:E6:FC:89:6B:3D:E0:4D:80:BF:D9:CB:8F:D0:06:58:1C:41:F8:0A:6C:71:2C:2D:39:02:68:F4:B9:31:49:88:2A:1D:E9:D1:08:91:6F:68:D3:B7:8E:9E:B6:12:36:07:BB:82:23:7E",
+      "ext_key_usage": [
+        "1.3.6.1.5.5.7.3.3"
+      ],
+      "serialNumber": "0",
+      "raw": "MIID7TCCA5KgAwIBAgIBADAKBggqhkjOPQQDAzCB/jELMAkGA1UEBhMCVVMxGDAWBgNVBAoMD1BpLCBJbmMuICJUZXN0IjEeMAoGA1UECwwDUiZEMBAGA1UECwwJT3BzIDx4Pjt5MRUwEwYDVQQDDAwgbGVhZCNzcGFjZSAxEzARBgNVBAMMCiNoYXNoXGJhY2sxFDASBgNVBAMMC1pvw6sg5pel5pysMRQwEgYJKoZIhvcNAQkBFgVhQGIuYzEXMBUGCgmSJomT8ixkARkWB2V4YW1wbGUxEzARBgoJkiaJk/IsZAEZFgNjb20xEDAOBgQqAwQFDAZjdXN0b20xHTAJBgNVBAUTAjQyMBAGCgmSJomT8ixkAQEMAnUxMCAXDTk5MTIzMTIzNTk1OVoYDzIwNTEwMTAxMDAwMDAwWjCB/jELMAkGA1UEBhMCVVMxGDAWBgNVBAoMD1BpLCBJbmMuICJUZXN0IjEeMAoGA1UECwwDUiZEMBAGA1UECwwJT3BzIDx4Pjt5MRUwEwYDVQQDDAwgbGVhZCNzcGFjZSAxEzARBgNVBAMMCiNoYXNoXGJhY2sxFDASBgNVBAMMC1pvw6sg5pel5pysMRQwEgYJKoZIhvcNAQkBFgVhQGIuYzEXMBUGCgmSJomT8ixkARkWB2V4YW1wbGUxEzARBgoJkiaJk/IsZAEZFgNjb20xEDAOBgQqAwQFDAZjdXN0b20xHTAJBgNVBAUTAjQyMBAGCgmSJomT8ixkAQEMAnUxMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEKC2jVDGeJI8Tj2qNcfythn4NW/pqBwv/eWcljqKmz0UszjhkS9iCyiwY6dzkzTXaTYjkqneNTO4wGmvrIXuphaOB/DCB+TCBwgYDVR0RBIG6MIG3gg5lYy5leGFtcGxlLm5ldIISd2VpcmQsbmFtZS5leGFtcGxlhhdodHRwczovL2V4YW1wbGUuY29tL3gseYEScXVvdGVkQGV4YW1wbGUuY29toB8GCisGAQQBgjcUAgOgEQwPdXBuQGV4YW1wbGUuY29tiAMqAwSkODA2MQswCQYDVQQGEwJERTERMA8GA1UECgwIRGlyLCBPcmcxFDASBgNVBAMMC0TDg8KvciBOYW1lhwQKAAABMBMGA1UdJQQMMAoGCCsGAQUFBwMDMB0GA1UdDgQWBBTWne7LupHwRoWq0NwMGqsZaY7D3jAKBggqhkjOPQQDAwNJADBGAiEAjsNbQ3Jd8D9cbbKNsrm49OsXr8uvtO7wwl0c7dFv2z0CIQCvQ+3rWfaBYF+LktUnJMVjKw1Nt/RiQkYzWX9pS5Uugg=="
+    },
+    "sameObject": true
+  },
+  "ed": {
+    "subject": "CN=ed25519.example",
+    "issuer": "CN=ed25519.example",
+    "subjectAltName": "<undefined>",
+    "infoAccess": "<undefined>",
+    "validFrom": "Mar  1 00:00:00 2025 GMT",
+    "validTo": "Mar  1 00:00:00 2026 GMT",
+    "validFromDate": "2025-03-01T00:00:00.000Z",
+    "validToDate": "2026-03-01T00:00:00.000Z",
+    "fingerprint": "00:4B:E2:D9:56:DA:21:FD:BD:09:6F:CA:DC:13:87:C4:F4:DE:37:C0",
+    "fingerprint256": "87:24:DF:CB:D7:E7:C1:82:7D:A0:41:EF:3E:65:A8:03:1F:18:3B:0E:DB:42:84:AC:20:C5:B2:43:99:88:0D:CA",
+    "fingerprint512": "01:C1:B3:C4:13:E9:00:80:0E:DF:88:CD:70:83:0D:6D:57:DC:52:11:2C:8C:7B:B6:30:A9:AB:6B:B3:74:EF:22:36:02:42:C3:4B:5F:9D:0B:71:5D:C7:68:E6:24:AE:A7:C1:EA:F2:79:F8:E0:B3:4E:3F:77:0C:6B:BE:1C:5C:89",
+    "keyUsage": "<undefined>",
+    "serialNumber": "0F",
+    "ca": true,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "ed25519",
+      "MCowBQYDK2VwAyEAQ7LwplFsMzMo8v5NaslN4AuKXTnjfzIjn08Yuc5Cvik="
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "ca",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "CN": "ed25519.example"
+      },
+      "issuer": {
+        "proto": null,
+        "CN": "ed25519.example"
+      },
+      "ca": true,
+      "valid_from": "Mar  1 00:00:00 2025 GMT",
+      "valid_to": "Mar  1 00:00:00 2026 GMT",
+      "fingerprint": "00:4B:E2:D9:56:DA:21:FD:BD:09:6F:CA:DC:13:87:C4:F4:DE:37:C0",
+      "fingerprint256": "87:24:DF:CB:D7:E7:C1:82:7D:A0:41:EF:3E:65:A8:03:1F:18:3B:0E:DB:42:84:AC:20:C5:B2:43:99:88:0D:CA",
+      "fingerprint512": "01:C1:B3:C4:13:E9:00:80:0E:DF:88:CD:70:83:0D:6D:57:DC:52:11:2C:8C:7B:B6:30:A9:AB:6B:B3:74:EF:22:36:02:42:C3:4B:5F:9D:0B:71:5D:C7:68:E6:24:AE:A7:C1:EA:F2:79:F8:E0:B3:4E:3F:77:0C:6B:BE:1C:5C:89",
+      "serialNumber": "0F",
+      "raw": "MIIBNTCB6KADAgECAgEPMAUGAytlcDAaMRgwFgYDVQQDDA9lZDI1NTE5LmV4YW1wbGUwHhcNMjUwMzAxMDAwMDAwWhcNMjYwMzAxMDAwMDAwWjAaMRgwFgYDVQQDDA9lZDI1NTE5LmV4YW1wbGUwKjAFBgMrZXADIQBDsvCmUWwzMyjy/k1qyU3gC4pdOeN/MiOfTxi5zkK+KaNTMFEwHQYDVR0OBBYEFKxMOqRh5N7sk0xjKxcYQ9itRS2pMB8GA1UdIwQYMBaAFKxMOqRh5N7sk0xjKxcYQ9itRS2pMA8GA1UdEwEB/wQFMAMBAf8wBQYDK2VwA0EA3yf2RGm2+5w+Gd58puggXRv3vIOOtt3Hf+DTiDYQAmpWzbYmuUhMqMgOI+e8+Mip0WHXua/T7RyZVc1rRnx3Ag=="
+    },
+    "sameObject": true
+  },
+  "wild": {
+    "subject": "CN=Zoë\nO=日本\nOU=a\\01b\nCN=*.cn.example",
+    "issuer": "CN=Zoë\nO=日本\nOU=a\\01b\nCN=*.cn.example",
+    "subjectAltName": "DNS:f*.example.com, DNS:*.xn--bcher-kva.example, DNS:*.a.example.com, DNS:www.sub.example.net, IP Address:0:0:0:0:0:FFFF:A01:203, email:Mixed@Example.COM",
+    "infoAccess": "<undefined>",
+    "validFrom": "Mar  1 00:00:00 2025 GMT",
+    "validTo": "Mar  1 00:00:00 2026 GMT",
+    "validFromDate": "2025-03-01T00:00:00.000Z",
+    "validToDate": "2026-03-01T00:00:00.000Z",
+    "fingerprint": "26:07:7B:B8:B3:8E:DA:5F:F2:CC:4B:9B:D1:7F:96:E3:59:23:BA:8B",
+    "fingerprint256": "C8:54:60:A5:58:77:3C:E2:84:CF:F7:28:D4:AB:8B:8A:05:40:73:B9:9E:0D:EE:50:91:CE:6A:C3:40:B3:C6:78",
+    "fingerprint512": "8B:E1:1E:CB:C0:DB:44:C8:50:EB:B5:2B:66:B4:5B:0D:E3:ED:1C:E5:D6:BA:89:B0:D8:EC:3C:DB:94:D8:73:49:C2:5E:A1:23:6E:F7:18:F1:E6:DC:CE:7A:18:FD:04:A3:9D:F8:E1:AC:F3:48:E1:5D:8B:A3:36:6C:B9:0A:0B:1C",
+    "keyUsage": "<undefined>",
+    "serialNumber": "-1234",
+    "ca": false,
+    "issuerCertificate": "<undefined>",
+    "raw": [
+      true,
+      true
+    ],
+    "pem": true,
+    "publicKey": [
+      "public",
+      "ed25519",
+      "MCowBQYDK2VwAyEAQ7LwplFsMzMo8v5NaslN4AuKXTnjfzIjn08Yuc5Cvik="
+    ],
+    "legacyKeys": [
+      "subject",
+      "issuer",
+      "subjectaltname",
+      "ca",
+      "valid_from",
+      "valid_to",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "serialNumber",
+      "raw"
+    ],
+    "legacy": {
+      "subject": {
+        "proto": null,
+        "CN": [
+          "Zoë",
+          "*.cn.example"
+        ],
+        "O": "日本",
+        "OU": "a\u0001b"
+      },
+      "issuer": {
+        "proto": null,
+        "CN": [
+          "Zoë",
+          "*.cn.example"
+        ],
+        "O": "日本",
+        "OU": "a\u0001b"
+      },
+      "subjectaltname": "DNS:f*.example.com, DNS:*.xn--bcher-kva.example, DNS:*.a.example.com, DNS:www.sub.example.net, IP Address:0:0:0:0:0:FFFF:A01:203, email:Mixed@Example.COM",
+      "ca": false,
+      "valid_from": "Mar  1 00:00:00 2025 GMT",
+      "valid_to": "Mar  1 00:00:00 2026 GMT",
+      "fingerprint": "26:07:7B:B8:B3:8E:DA:5F:F2:CC:4B:9B:D1:7F:96:E3:59:23:BA:8B",
+      "fingerprint256": "C8:54:60:A5:58:77:3C:E2:84:CF:F7:28:D4:AB:8B:8A:05:40:73:B9:9E:0D:EE:50:91:CE:6A:C3:40:B3:C6:78",
+      "fingerprint512": "8B:E1:1E:CB:C0:DB:44:C8:50:EB:B5:2B:66:B4:5B:0D:E3:ED:1C:E5:D6:BA:89:B0:D8:EC:3C:DB:94:D8:73:49:C2:5E:A1:23:6E:F7:18:F1:E6:DC:CE:7A:18:FD:04:A3:9D:F8:E1:AC:F3:48:E1:5D:8B:A3:36:6C:B9:0A:0B:1C",
+      "serialNumber": "-1234",
+      "raw": "MIIB8TCCAaOgAwIBAgIC7cwwBQYDK2VwMEIxDDAKBgNVBAMUA1pv6zENMAsGA1UECh4EZeVnLDEMMAoGA1UECxQDYQFiMRUwEwYDVQQDFAwqLmNuLmV4YW1wbGUwHhcNMjUwMzAxMDAwMDAwWhcNMjYwMzAxMDAwMDAwWjBCMQwwCgYDVQQDFANab+sxDTALBgNVBAoeBGXlZywxDDAKBgNVBAsUA2EBYjEVMBMGA1UEAxQMKi5jbi5leGFtcGxlMCowBQYDK2VwAyEAQ7LwplFsMzMo8v5NaslN4AuKXTnjfzIjn08Yuc5CvimjgbwwgbkwfQYDVR0RBHYwdIIOZiouZXhhbXBsZS5jb22CFyoueG4tLWJjaGVyLWt2YS5leGFtcGxlgg8qLmEuZXhhbXBsZS5jb22CE3d3dy5zdWIuZXhhbXBsZS5uZXSHEAAAAAAAAAAAAAD//woBAgOBEU1peGVkQEV4YW1wbGUuQ09NMAwGA1UdEwEB/wQCMAAwCwYDVR0PBAQDAgeAMB0GA1UdDgQWBBSsTDqkYeTe7JNMYysXGEPYrUUtqTAFBgMrZXADQQDAyfLa/oslJcdRYwOqLL2NdT0ov2C+ZTMVyLMi97wUNBjpns2/FJoCNiswi+KAMtWAR8amHWZ5fiTA/NycyMMO"
+    },
+    "sameObject": true
+  },
+  "verify": {
+    "leafByCa": true,
+    "pssByCa": true,
+    "caBySelf": true,
+    "ecBySelf": true,
+    "edBySelf": true,
+    "wildBySelf": true,
+    "leafByLeaf": false,
+    "leafByEc": false,
+    "edByEc": false,
+    "privateKey": [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE"
+    ],
+    "notKey": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"pkey\" argument must be an instance of KeyObject. Received an instance of X509Certificate"
+    ],
+    "secret": [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE"
+    ]
+  },
+  "checkIssued": {
+    "leafByCa": true,
+    "pssByCa": true,
+    "caBySelf": true,
+    "caByLeaf": false,
+    "leafByLeaf": false,
+    "ecBySelf": true,
+    "edBySelf": true,
+    "edByCa": false,
+    "wildBySelf": false,
+    "wildByEd": false,
+    "notCert": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"otherCert\" argument must be an instance of X509Certificate. Received an instance of Object"
+    ]
+  },
+  "checkPrivateKey": {
+    "leaf": true,
+    "pss": true,
+    "ec": true,
+    "mismatch": false,
+    "otherType": false,
+    "publicKey": [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE"
+    ],
+    "notKey": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"pkey\" argument must be an instance of KeyObject. Received type string ('x')"
+    ]
+  },
+  "checkHost": [
+    "example.com",
+    "example.com",
+    "*.example.org",
+    null,
+    "*.example.org",
+    null,
+    null,
+    null,
+    "leaf.example.com",
+    null,
+    "*.example.org",
+    null,
+    "ed25519.example",
+    null,
+    null,
+    "Pi Test Root CA",
+    "ec.example.net",
+    "weird,name.example",
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid name"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "The property 'options.subject' is invalid. Received 'sometimes'"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"options.wildcards\" property must be of type boolean. Received type string ('no')"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"options\" argument must be of type object. Received null"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"name\" argument must be of type string. Received type number (1)"
+    ],
+    "f*.example.com",
+    null,
+    "f*.example.com",
+    "*.xn--bcher-kva.example",
+    "*.a.example.com",
+    null,
+    "*.a.example.com",
+    "www.sub.example.net",
+    "www.sub.example.net",
+    null,
+    "www.sub.example.net",
+    null,
+    "*.cn.example",
+    null,
+    null
+  ],
+  "checkEmail": [
+    "admin@example.com",
+    "admin@EXAMPLE.COM",
+    null,
+    null,
+    "quoted@example.com",
+    null,
+    "a@b.c",
+    null,
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid name"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"email\" argument must be of type string. Received type number (5)"
+    ],
+    "Mixed@example.com",
+    null
+  ],
+  "checkIP": [
+    "127.0.0.1",
+    "2001:db8::1",
+    "2001:DB8:0:0:0:0:0:1",
+    null,
+    null,
+    "10.0.0.1",
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    null,
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "The property 'options.subject' is invalid. Received 'x'"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"ip\" argument must be of type string. Received null"
+    ],
+    "::ffff:10.1.2.3",
+    "0:0:0:0:0:FFFF:a01:203",
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ],
+    null,
+    null,
+    [
+      "TypeError",
+      "ERR_INVALID_ARG_VALUE",
+      "Invalid IP"
+    ]
+  ],
+  "inputs": {
+    "der": true,
+    "uint8": "A1B2C3D4E5F60718",
+    "dataView": "A1B2C3D4E5F60718",
+    "pemBuffer": "0",
+    "keyFirst": "0F",
+    "firstOfTwo": "0F",
+    "crlf": "0F",
+    "derTrailing": "A1B2C3D4E5F60718",
+    "x509Label": "0F",
+    "trustedLabel": "0F",
+    "textBefore": "0F",
+    "spaceAfterBegin": "0F"
+  },
+  "errors": {
+    "undefined": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"buffer\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received undefined"
+    ],
+    "number": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"buffer\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received type number (1)"
+    ],
+    "object": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"buffer\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received an instance of Object"
+    ],
+    "arrayBuffer": [
+      "TypeError",
+      "ERR_INVALID_ARG_TYPE",
+      "The \"buffer\" argument must be of type string or an instance of Buffer, TypedArray, or DataView. Received an instance of ArrayBuffer"
+    ],
+    "empty": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "garbage": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "garbageBytes": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "truncatedDer": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "badBase64": [
+      "Error",
+      "ERR_OSSL_PEM_BAD_BASE64_DECODE",
+      "error:04800064:PEM routines::bad base64 decode"
+    ],
+    "onlyKey": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "emptyPem": [
+      "Error",
+      "ERR_OSSL_ASN1_WRONG_TAG",
+      "error:068000A8:asn1 encoding routines::wrong tag"
+    ],
+    "junkPem": [
+      "Error",
+      "ERR_OSSL_ASN1_WRONG_TAG",
+      "error:068000A8:asn1 encoding routines::wrong tag"
+    ],
+    "noEnd": [
+      "Error",
+      "ERR_OSSL_PEM_BAD_END_LINE",
+      "error:04800066:PEM routines::bad end line"
+    ],
+    "otherEnd": [
+      "Error",
+      "ERR_OSSL_PEM_BAD_END_LINE",
+      "error:04800066:PEM routines::bad end line"
+    ],
+    "lowercaseLabel": [
+      "Error",
+      "ERR_OSSL_PEM_NO_START_LINE",
+      "error:0480006C:PEM routines::no start line"
+    ],
+    "commentHeader": [
+      "Error",
+      "ERR_OSSL_PEM_NOT_PROC_TYPE",
+      "error:0480006B:PEM routines::not proc type"
+    ],
+    "notEncrypted": [
+      "Error",
+      "ERR_OSSL_PEM_NOT_ENCRYPTED",
+      "error:0480006A:PEM routines::not encrypted"
+    ],
+    "noDekInfo": [
+      "Error",
+      "ERR_OSSL_PEM_NOT_DEK_INFO",
+      "error:04800069:PEM routines::not dek info"
+    ],
+    "encrypted": [
+      "Error",
+      "ERR_OSSL_WRONG_FINAL_BLOCK_LENGTH",
+      "error:1C80006B:Provider routines::wrong final block length"
+    ],
+    "pemTrailing": [
+      "Error",
+      "ERR_OSSL_ASN1_TOO_LONG",
+      "error:0680009B:asn1 encoding routines::too long"
+    ],
+    "pemTruncated": [
+      "Error",
+      "ERR_OSSL_ASN1_TOO_LONG",
+      "error:0680009B:asn1 encoding routines::too long"
+    ],
+    "pemOneByte": [
+      "Error",
+      "ERR_OSSL_ASN1_HEADER_TOO_LONG",
+      "error:0680007B:asn1 encoding routines::header too long"
+    ],
+    "pemPublicKey": [
+      "Error",
+      "ERR_OSSL_ASN1_WRONG_TAG",
+      "error:068000A8:asn1 encoding routines::wrong tag"
+    ]
+  },
+  "callWithoutNew": [
+    "TypeError",
+    null
+  ],
+  "shape": {
+    "name": "X509Certificate",
+    "length": 1,
+    "instance": true,
+    "tag": "[object Object]",
+    "own": [],
+    "methods": [
+      "ca",
+      "checkEmail",
+      "checkHost",
+      "checkIP",
+      "checkIssued",
+      "checkPrivateKey",
+      "constructor",
+      "fingerprint",
+      "fingerprint256",
+      "fingerprint512",
+      "infoAccess",
+      "issuer",
+      "issuerCertificate",
+      "keyUsage",
+      "publicKey",
+      "raw",
+      "serialNumber",
+      "subject",
+      "subjectAltName",
+      "toJSON",
+      "toLegacyObject",
+      "toString",
+      "validFrom",
+      "validFromDate",
+      "validTo",
+      "validToDate",
+      "verify"
+    ],
+    "esm": true
+  },
+  "inspect": "X509Certificate {\n  subject: 'CN=ed25519.example',\n  subjectAltName: undefined,\n  issuer: 'CN=ed25519.example',\n  infoAccess: undefined,\n  validFrom: 'Mar  1 00:00:00 2025 GMT',\n  validTo: 'Mar  1 00:00:00 2026 GMT',\n  validFromDate: 2025-03-01T00:00:00.000Z,\n  validToDate: 2026-03-01T00:00:00.000Z,\n  fingerprint: '00:4B:E2:D9:56:DA:21:FD:BD:09:6F:CA:DC:13:87:C4:F4:DE:37:C0',\n  fingerprint256: '87:24:DF:CB:D7:E7:C1:82:7D:A0:41:EF:3E:65:A8:03:1F:18:3B:0E:DB:42:84:AC:20:C5:B2:43:99:88:0D:CA',\n  fingerprint512: '01:C1:B3:C4:13:E9:00:80:0E:DF:88:CD:70:83:0D:6D:57:DC:52:11:2C:8C:7B:B6:30:A9:AB:6B:B3:74:EF:22:36:02:42:C3:4B:5F:9D:0B:71:5D:C7:68:E6:24:AE:A7:C1:EA:F2:79:F8:E0:B3:4E:3F:77:0C:6B:BE:1C:5C:89',\n  keyUsage: undefined,\n  serialNumber: '0F'\n}"
+}

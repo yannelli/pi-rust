@@ -89,8 +89,11 @@ pub const DIFFERENCES: &[&str] = &[
      empty. The resolver refreshes system \
      settings and hosts in the background. Windows uses adapter metrics alone when the route table is \
      unavailable and accepts only SystemRoot and windir variables in the registry hosts path",
+    "crypto: X509Certificate reports 'wrong tag' for most malformed DER in a PEM block, where OpenSSL can \
+     name a more specific ASN.1 error; verify returns false for SHA-224 and SHA-3 signatures and for RSA-PSS \
+     with an MGF1 digest other than the signature digest; postMessage does not clone X509Certificate objects",
     "tls: servers emit secureConnection but no connection event before the handshake; getCertificate \
-     returns null and getX509Certificate and getPeerX509Certificate return undefined; ciphers, ecdhCurve, \
+     returns null and getX509Certificate returns undefined; ciphers, ecdhCurve, \
      and other OpenSSL tuning options are ignored; a session Buffer is an opaque handle that works only in \
      this process, as rustls cannot serialize sessions; SNICallback gets the server as `this` and also \
      runs for handshakes that resume a session",
