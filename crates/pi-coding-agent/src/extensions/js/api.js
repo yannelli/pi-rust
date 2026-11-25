@@ -4,6 +4,7 @@
 import { constants as bufferConstants } from "node:buffer";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { constants as osConstants } from "node:os";
 import { StringDecoder } from "node:string_decoder";
 import { call, callAsync, signalId } from "./bridge.js";
 import { waitForChildProcess } from "./child_wait.js";
@@ -105,7 +106,9 @@ export function execCommand(command, args, cwd, options) {
 			}
 			// A command that could not start reports why, unlike one that exits 1 without output.
 			if (error && !stderr) stderr = error.message;
-			const exitCode = code ?? 0;
+			// A signal-killed command has no exit code; report 128 + the signal number as a shell does
+			// (upstream #12088), so a timeout, an abort, or a crash does not read as success.
+			const exitCode = code ?? (proc.signalCode ? 128 + (osConstants.signals[proc.signalCode] ?? 0) : 1);
 			resolve({ stdout, stderr, code: truncated && exitCode === 0 ? 1 : exitCode, killed, truncated });
 		};
 		// Do not hang on inherited stdio handles held open by detached descendants.
