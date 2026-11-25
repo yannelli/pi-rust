@@ -1,10 +1,64 @@
-# Compatibility of 25 published Pi extensions
+# Compatibility of published Pi extensions
+
+## The 70 most downloaded npm extension packages
+
+On November 25, 2026, npm listed 14,315 packages with the `pi-package` keyword. The search API, weighted by popularity, returned 1,540 of them. Of the 220 with the most monthly downloads, 151 declared `pi.extensions` in their published manifest. This audit covers the first 70 of those, at their npm `latest` versions. Monthly downloads ranged from 3,950,086 (billion-context) to 13,288. [npm search API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#get-v1search)
+
+`scripts/compare-npm-extensions.mjs` loads each package in RPC mode, offline, with a temporary home, together with an observer extension. It runs pi-rust on the default QuickJS backend and upstream pi 1.6.0 from npm on Node 24.21.0. It compares the tools of `pi.getAllTools()`, the commands of `pi.getCommands()`, extension errors, notifications, and stderr. The differences that a run without a package also shows are left out, such as the upstream `powershell` tool.
+
+Before this audit, 50 of the 70 packages behaved as in upstream pi. These changes closed the gaps the packages found:
+
+| Package (monthly downloads) | Before the fix | Change |
+| --- | --- | --- |
+| pi-mcp-adapter (2,428,109), pi-claude-bridge (138,787), pi-codex-conversion | `node:crypto` had no `X509Certificate`, so MCP setup failed or the package did not load. | Add `X509Certificate`. QuickJS-ng then hung pi-mcp-adapter on a dynamic import; patch the vendored QuickJS. |
+| ponytail (174,294), pi-claude-bridge | A file that starts with `#!` failed to parse. | Turn the hashbang into a comment before QuickJS reads the file. |
+| @onkernel/browser-loop (185,225) | A raw NUL character in a template literal failed to load. | Write raw NUL characters as `\x00`. |
+| billion-context, plannotator, pi-cursor-sdk, and packages that use jose or hono | `crypto.subtle` had only `digest`. | Implement Web Crypto. |
+| pi-coralbricks-provider, pi-cursor-sdk, pi-fabric, gentle-pi, browser-loop, pi-codex-conversion, pi-provider-litellm | `pi.registerProvider(provider)` with an upstream `Provider` object registered nothing. | Register `Provider` objects natively. |
+| pi-background-tasks | `ctx.modelRegistry.getRegisteredNativeProvider` was missing. | Add it with the `Provider` support. |
+| gentle-pi, pi-mcp-adapter, pi-subagents, @tintinweb/pi-subagents, pi-dynamic-workflows, pi-btw, pi-goal-x | `createCodemodeExtension`, `createMcpExtension`, `createToolSearchExtension`, SDK `customTools`, and `DefaultPackageManager` threw `ERR_PI_UNSUPPORTED`. | Implement them. |
+| pi-deferred-context-engine | Its `prepareLoadout` hook could not read the tools: errors at startup and a deadlock on the JavaScript thread. | Run the hooks before each request, outside the session locks. |
+| pi-provider-litellm | `VERSION` was the pi-rust version, so its upstream version check failed. | Report the upstream parity version; add `PI_RUST_VERSION`. |
+
+Now 59 of 70 behave as in upstream pi. The other 11:
+
+| Package | Difference |
+| --- | --- |
+| pi-deltabox, @ff-labs/pi-fff, @onkernel/browser-loop | They load native addons (`process.dlopen`, `ffi-rs`, `sharp`). Use `--extension-runtime auto` or `node`. |
+| pi-context-view | It imports the cache warming exports of `@earendil-works/pi-ai`, ported on the `parity/lane-ai` branch. |
+| @explyt/ai-agent | It fails on upstream pi too: it imports `@earendil-works/pi-ai` subpaths that the package does not export. On pi-rust it also needs `module.stripTypeScriptTypes`. |
+| billion-context, pi-harness-runtime | pi-js prints the `node:sqlite` and `punycode` warnings of Node 22. Upstream ran on Node 24, which does not print them. |
+| pi-mcp-adapter, pi-mcp-extension, gentle-pi | They replace the built-in `/mcp` or `codemode`. The warning has different words, and `pi.getCommands()` lists the built-in `/mcp` only in upstream. |
+| @plannotator/pi-extension | It warns about the Node version, which is `v22.12.0` in pi-js. |
+
+### Repeat the comparison
+
+The packages run their extension code when they load. The commands install them without lifecycle scripts.
+
+```sh
+cargo build --locked -p pi-coding-agent --bin pi
+node scripts/compare-npm-extensions.mjs --top 70 > specs.txt
+prefixes="$(mktemp -d)"
+while read -r spec; do
+  name="${spec%@*}"
+  npm install --prefix "$prefixes/$(printf %s "$name" | tr '/@' '__')" --ignore-scripts --legacy-peer-deps \
+    --no-audit --no-fund "$spec" || exit 1
+done < specs.txt
+upstream="$(mktemp -d)"
+npm install --prefix "$upstream" --no-audit --no-fund @earendil-works/pi-coding-agent@1.6.0
+node scripts/compare-npm-extensions.mjs target/debug/pi \
+  "$upstream/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" "$prefixes" < specs.txt
+```
+
+The script prints each package that differs and exits with status 1 if any does.
+
+## 25 packages of narumiruna/pi-extensions
 
 This audit covers the 25 most downloaded extensions in `narumiruna/pi-extensions`, a maintained collection of independently published packages for the upstream Pi coding agent. The source snapshot is `a2d1b5d4456acdcc327b0a5cf920a029eabc0877`. Each eligible package had to declare `pi.extensions` in both its repository manifest and its published npm manifest. There were 38 eligible packages. [Extension repository at the audited commit](https://github.com/narumiruna/pi-extensions/tree/a2d1b5d4456acdcc327b0a5cf920a029eabc0877)
 
 The ranking uses npm downloads per package, across all versions, from October 23 through November 21, 2026, inclusive. The tested versions were the npm `latest` versions on November 22. Each package had its own installation prefix. The audit checked the installed version and tarball integrity against npm metadata. [npm download-count API](https://github.com/npm/registry/blob/main/docs/download-counts.md) · [Download count for the first-ranked package](https://api.npmjs.org/downloads/point/2026-10-23:2026-11-21/@narumitw/pi-plan-mode)
 
-## Package checks
+### Package checks
 
 All 25 packages passed their local checks on macOS arm64. Each check loaded the published package directory with `pi -e`. The CLI used the default QuickJS runtime for ranks 1 through 23. Chat and AgentFS used `--extension-runtime auto` with Node 22.23.5. All package names below use the `@narumitw/` scope.
 
@@ -38,7 +92,7 @@ All 25 packages passed their local checks on macOS arm64. Each check loaded the 
 
 The checks used temporary homes and agent directories. The five terminal checks opened the package UI through a pseudoterminal. Accounts selected and cleared both a synthetic OpenRouter API key and a synthetic Codex OAuth credential. AgentFS used a loopback model fixture to request its tools. Live account login, hosted services, browser control, peer connections, background jobs, language-server sessions, desktop notifications and activity inhibitors were outside these checks.
 
-## Host gaps found
+### Host gaps found
 
 | Before the fix | Change |
 | --- | --- |
@@ -50,7 +104,7 @@ The checks used temporary homes and agent directories. The five terminal checks 
 
 The CLI also loaded `-e npm:@narumitw/pi-goal@0.55.3` into a fresh temporary package directory. A second run with `--offline` reused that installation. Both runs registered the published entry point and returned the expected response to `/goal status`.
 
-## Windows checks
+### Windows checks
 
 All 25 packages, the five terminal menus and the AgentFS check also passed on Windows 11 x64 build 26300 with Node 26.13.0. The CLI was a debug `x86_64-pc-windows-gnu` build; releases use MSVC. Package prefixes and temporary directories had spaces in their paths, and the terminal checks ran in a Windows pseudoconsole. The Windows run found two more host gaps:
 
@@ -63,11 +117,11 @@ The CLI also loaded a local package given as an absolute path with backslashes o
 
 Each check starts its package with a new agent directory. There the Node backend wrote one transpile cache file for each of its about 800 built-in modules, so in the debug build Chat drew its first frame after about 20 seconds. On Windows CI, the Node backend tests took about twice as long as on macOS and Linux. [#276](https://github.com/yannelli/pi-rust/pull/276) keeps those modules in memory, and the Chat menu check then took about 6 seconds. The check scripts allow 60 to 90 seconds for each package.
 
-## Final macOS build
+### Final macOS build
 
 The final debug CLI had SHA-256 `26124f22dbd015c9a2f85aa562abbe8b7aa226d37e5d537ab73f908c1fead222`. All 1,935 tests in `pi-coding-agent` passed. Five regression tests for sessions, accounts and file operations passed again with Node selected explicitly. Rust formatting and workspace Clippy passed. The macOS linker emitted the same compact-unwind size warning on the baseline and final debug builds.
 
-## Repeat the checks
+### Repeat the checks
 
 From the repository root, build the local CLI and install the pinned npm packages in a temporary directory. Pi supplies the extension SDK. The install command omits peer dependencies and package lifecycle scripts. npm resolves each package's dependency ranges at install time. Use Node 22 or later and Python 3.9 or later with SQLite. The terminal check uses a POSIX pseudoterminal, or a pseudoconsole on Windows. On Windows, run the commands in Git Bash and use `py -3` for `python3`. The scripts add `.exe` to `target/debug/pi`.
 
