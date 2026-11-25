@@ -23,6 +23,7 @@ mod node_core;
 mod node_crypto;
 mod node_crypto_keys;
 mod node_crypto_modes;
+mod node_crypto_x509;
 mod node_dgram_dns;
 mod node_dns_owned;
 mod node_fs;

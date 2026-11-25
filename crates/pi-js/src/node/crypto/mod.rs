@@ -15,6 +15,7 @@ mod natives_keys;
 mod okp;
 mod ops;
 mod rsa;
+mod x509;
 
 use md5::Digest as _;
 use ring::rand::{SecureRandom, SystemRandom};
@@ -209,6 +210,7 @@ pub(crate) fn natives<'js>(ctx: &Ctx<'js>) -> rquickjs::Result<Object<'js>> {
         },
     )?;
     natives_keys::register(&object)?;
+    x509::register(&object)?;
     Ok(object)
 }
 

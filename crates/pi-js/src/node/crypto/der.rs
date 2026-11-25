@@ -116,6 +116,13 @@ impl<'a> Der<'a> {
         Ok((tag, &rest[..len]))
     }
 
+    /// The next element whole: tag, length, and content.
+    pub(super) fn raw(&mut self) -> Result<&'a [u8], JsError> {
+        let data = self.data;
+        self.read()?;
+        Ok(&data[..data.len() - self.data.len()])
+    }
+
     pub(super) fn expect(&mut self, tag: u8) -> Result<&'a [u8], JsError> {
         match self.read()? {
             (found, content) if found == tag => Ok(content),

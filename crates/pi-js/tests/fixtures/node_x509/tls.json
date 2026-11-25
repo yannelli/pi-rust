@@ -1,0 +1,11 @@
+{
+  "instance": true,
+  "subject": "C=US\nO=Pi Test\nCN=leaf.example.com",
+  "fingerprint": true,
+  "issuer": "C=US\nST=California\nO=Pi Test CA\nCN=Pi Test Root CA",
+  "issuerOfIssuer": true,
+  "signedByIssuer": true,
+  "fresh": true,
+  "clientOwn": true,
+  "serverPeer": true
+}

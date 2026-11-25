@@ -4,6 +4,7 @@ const { Buffer } = require("buffer");
 const { Transform } = require("stream");
 const keys = require("internal/crypto_keys");
 const extra = require("internal/crypto_extra");
+const { X509Certificate } = require("internal/crypto_x509");
 const nativeCrypto = native.crypto;
 const HASHES = ["md5", "sha1", "sha256", "sha384", "sha512", "sha512-256"];
 const released = new FinalizationRegistry((id) => nativeCrypto.drop(id));
@@ -201,6 +202,7 @@ module.exports = {
   generateKeySync: keys.generateKeySync,
   Sign: keys.Sign,
   Verify: keys.Verify,
+  X509Certificate,
   createSign: (algorithm, options) => new keys.Sign(algorithm, options),
   createVerify: (algorithm, options) => new keys.Verify(algorithm, options),
   sign: keys.sign,

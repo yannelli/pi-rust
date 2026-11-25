@@ -49,6 +49,7 @@ const SOURCES: &[(&str, &str)] = &[
     ("os", include_str!("../js/os.js")),
     ("internal/crypto_keys", include_str!("../js/crypto_keys.js")),
     ("internal/crypto_extra", include_str!("../js/crypto_extra.js")),
+    ("internal/crypto_x509", include_str!("../js/crypto_x509.js")),
     ("crypto", include_str!("../js/crypto.js")),
     ("internal/webcrypto_idl", include_str!("../js/webcrypto_idl.js")),
     ("internal/webcrypto_secret", include_str!("../js/webcrypto_secret.js")),
