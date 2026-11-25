@@ -2,6 +2,31 @@
 
 All notable changes to pi-rust are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, breaking changes bump the minor version.
 
+## [0.12.40] - 2026-11-25
+
+### Added
+
+- **coding-agent:** report the upstream pi version as VERSION and add PI_RUST_VERSION ([6aabaac](https://github.com/yannelli/pi-rust/commit/6aabaacb8b241ee751ee8ccf3ae67655d9b49411))
+- **schema,agent:** coerce and explain tool arguments like pi-schema ([feeaaf8](https://github.com/yannelli/pi-rust/commit/feeaaf811caa5cf9906b16b27857b90c8aefedc5))
+- **coding-agent:** let ctx.ui.custom() overlays report blocked program status (upstream 7f47a2ed0) ([2772e83](https://github.com/yannelli/pi-rust/commit/2772e835ea27e97b46650b0874c9d57215b91afb))
+- **sdk:** run customTools, built-in extension factories, and DefaultPackageManager ([216e89a](https://github.com/yannelli/pi-rust/commit/216e89aa3b9597dec7fb2859a458f5b322640e5d))
+- **extensions:** register upstream Provider objects with auth, streaming, and model refresh ([4eca56b](https://github.com/yannelli/pi-rust/commit/4eca56be92e4d58eeb5b958652ae351c08e578e2))
+- **js:** add crypto.X509Certificate and tls getPeerX509Certificate ([b1aacda](https://github.com/yannelli/pi-rust/commit/b1aacda42925621cdf5a1d4f7e75e457e2b92c1b))
+- **js:** implement Web Crypto SubtleCrypto on QuickJS ([e32b156](https://github.com/yannelli/pi-rust/commit/e32b1563375066df6dff95902206486b25ea9434))
+
+### Fixed
+
+- **extensions:** run prepareLoadout hooks before each request, outside the session locks ([f2dff4a](https://github.com/yannelli/pi-rust/commit/f2dff4a4740fd200f42856a52218b5523a5168d7))
+- **coding-agent:** keep tool preview text readable across terminal themes (upstream 562da75f9) ([81b34e1](https://github.com/yannelli/pi-rust/commit/81b34e1abbded4a17af8bbaa0f8b917c72ac69ad))
+- **coding-agent:** keep restored MCP tools when an extension hides only its own tool (upstream 3345c2925) ([4a4fa0e](https://github.com/yannelli/pi-rust/commit/4a4fa0ede600687dc4bfc20b011e609235a04b0e))
+- **coding-agent:** report pi.events handler errors like other extension errors (upstream 18e99051b) ([62865ec](https://github.com/yannelli/pi-rust/commit/62865ecb9be6a1d0dc8fb6bf560adae135a97e3c))
+- **coding-agent:** report signal-terminated pi.exec commands as failed (upstream a83b75a07) ([6ca05e0](https://github.com/yannelli/pi-rust/commit/6ca05e061d584fe610f4e5f15a28cfffa65eafa6))
+- **coding-agent,tui:** stop temp file write failures from crashing pi (upstream 943a99e3c) ([21cfec1](https://github.com/yannelli/pi-rust/commit/21cfec153795baf3d6e1b031d2705988b20338d0))
+- **coding-agent:** report blocked status for startup dialogs and add blockedKind (upstream 27a40ea2a, upstream 642a705e1) ([ae825b1](https://github.com/yannelli/pi-rust/commit/ae825b1d0d4c6bb8ddc8c302fc3d76fc80700ccf))
+- **coding-agent:** remove all extension overlays on /reload and session switch (upstream 80d4d3c86) ([10b944d](https://github.com/yannelli/pi-rust/commit/10b944dfd1d6bb059a98ec007b88562e33cd35eb))
+- **js:** load files that start with a hashbang or contain raw NUL characters ([d61974b](https://github.com/yannelli/pi-rust/commit/d61974b5e70ec0de487a9b959e6eebbdffecfec0))
+- **js:** settle dynamic imports of a module that waited for top-level await ([fbaffbf](https://github.com/yannelli/pi-rust/commit/fbaffbfb6e1d42cdbd038bdf84f3bc9b69c1d442))
+
 ## [0.12.39] - 2026-11-24
 
 ### Fixed
