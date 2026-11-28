@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "defaultRevision": "sha256-15bb337022ce9456a7b299a00c40d08f2bb4beea2426abd504524ea82796e7c3",
+  "catalogs": [
+    {
+      "minimumPiVersion": "0.7.0",
+      "revision": "sha256-15bb337022ce9456a7b299a00c40d08f2bb4beea2426abd504524ea82796e7c3",
+      "publishedAt": "2026-11-28T12:30:29.281Z",
+      "upstreamCommit": "531340f100c6b682a602657b699a0ac27d522c30"
+    }
+  ]
+}
